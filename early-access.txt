@@ -4,7 +4,7 @@
 
 You found the secret door. 
 
-Thank you for requesting early access to Agora. We are currently putting the finishing touches on our high-performance native Android app and iron-clad Supabase authentication pipelines. 
+Thank you for requesting early access to Agora. We are currently putting the finishing touches on our Android app. 
 
 Because you arrived before the public launch, your device is officially flagged for priority onboarding when our v1.0 release drops.
 
@@ -13,3 +13,7 @@ Stay tuned. The public square is about to change.
 - The Agora Team
 https://www.auth-agora.info
 ==================================================
+
+If you would like to support the progress of this project. You may contact: mail@auth-agora.info
+
+Your help is truly appreciated.
