@@ -1,68 +1,86 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="scroll-smooth bg-black antialiased">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agora | Connect Securely</title>
+    <title>Agora | Pure Communication</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Premium Geometric Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="script.js" defer></script>
 </head>
-<body class="bg-gray-50 text-gray-900 font-sans antialiased">
+<body class="text-gray-300 font-sans selection:bg-white selection:text-black relative">
     
-    <!-- Hero Section -->
-    <header class="bg-white shadow-sm">
-        <div class="max-w-6xl mx-auto px-4 py-6 flex justify-between items-center">
-            <h1 class="text-2xl font-bold text-blue-600">Agora</h1>
-            <nav>
-                <a href="#features" class="text-gray-600 hover:text-blue-600 font-medium">Features</a>
-            </nav>
+    <!-- Dot Grid Background -->
+    <div class="dot-background absolute inset-0 z-0"></div>
+    <div class="absolute inset-0 z-0 bg-gradient-to-b from-transparent to-black"></div>
+
+    <!-- Navigation -->
+    <nav class="fixed w-full top-0 z-50 border-b border-white/5 bg-black/50 backdrop-blur-md">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
+            <span class="text-xl font-bold text-white tracking-tight">AGORA</span>
+            <a href="#features" class="text-sm font-medium text-gray-400 hover:text-white transition-colors">Features</a>
         </div>
-    </header>
+    </nav>
 
-    <main>
-        <!-- Hero Banner -->
-        <section class="max-w-6xl mx-auto px-4 py-20 text-center">
-            <h2 class="text-5xl font-extrabold tracking-tight text-gray-900 mb-6">
-                The global feed, <span class="text-blue-600">secured.</span>
-            </h2>
-            <p class="text-xl text-gray-500 mb-10 max-w-2xl mx-auto">
-                Experience seamless, secure communication. Agora combines rock-solid OTP authentication with a fluid, modern interface.
+    <!-- Hero Section -->
+    <main class="relative z-10 flex flex-col items-center justify-center min-h-screen px-6 pt-24 text-center">
+        <div class="reveal opacity-0 translate-y-8">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-white/5 text-xs font-medium text-gray-400 mb-8">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                v1.0 Early Access
+            </div>
+            <h1 class="text-5xl md:text-7xl font-extrabold tracking-tighter text-white mb-6 leading-[1.1]">
+                Zero algorithm.<br>
+                <span class="text-gray-500">Total clarity.</span>
+            </h1>
+            <p class="text-lg md:text-xl text-gray-400 max-w-xl mx-auto mb-10 font-light">
+                A chronologically pure communication network. Built with native performance and strict OTP security.
             </p>
-            <div class="space-x-4">
-                <a href="#" class="bg-blue-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-blue-700 transition">Download for Android</a>
-                <a href="#features" class="bg-gray-200 text-gray-800 px-8 py-3 rounded-full font-semibold hover:bg-gray-300 transition">Learn More</a>
-            </div>
-        </section>
-
-        <!-- Features Grid -->
-        <section id="features" class="bg-white py-20 border-t border-gray-100">
-            <div class="max-w-6xl mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-12">
-                <div class="text-center">
-                    <div class="bg-blue-100 w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-4">
-                        <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                    </div>
-                    <h3 class="text-xl font-bold mb-2">Supabase Security</h3>
-                    <p class="text-gray-500">Robust OTP and email authentication keeping your data locked down.</p>
-                </div>
-                <div class="text-center">
-                    <div class="bg-blue-100 w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-4">
-                        <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-                    </div>
-                    <h3 class="text-xl font-bold mb-2">Global Feed</h3>
-                    <p class="text-gray-500">A dynamic, responsive timeline built natively with Jetpack Compose.</p>
-                </div>
-                <div class="text-center">
-                    <div class="bg-blue-100 w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-4">
-                        <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                    </div>
-                    <h3 class="text-xl font-bold mb-2">Lightning Fast</h3>
-                    <p class="text-gray-500">Cloud-synced posts and comments with pull-to-refresh architecture.</p>
-                </div>
-            </div>
-        </section>
+            <button class="glow-button relative inline-flex items-center justify-center px-8 py-3 text-sm font-medium text-black bg-white rounded-lg transition-transform hover:scale-105">
+                Join the Waitlist
+            </button>
+        </div>
     </main>
 
-    <footer class="bg-gray-900 text-gray-400 py-8 text-center">
-        <p>&copy; 2026 Agora. All rights reserved.</p>
+    <!-- Interactive Bento Grid -->
+    <section id="features" class="relative z-10 max-w-6xl mx-auto px-6 py-24">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="bento-grid">
+            
+            <div class="bento-card col-span-1 md:col-span-2 reveal opacity-0 translate-y-8">
+                <div class="card-content">
+                    <h3 class="text-2xl font-semibold text-white mb-2">Native Fluidity</h3>
+                    <p class="text-gray-400">Built from the ground up with Jetpack Compose. Meaning flawless 120hz scrolling, physics-based gestures, and zero web-view lag.</p>
+                </div>
+            </div>
+
+            <div class="bento-card col-span-1 reveal opacity-0 translate-y-8 delay-100">
+                <div class="card-content">
+                    <h3 class="text-2xl font-semibold text-white mb-2">Supabase Auth</h3>
+                    <p class="text-gray-400">Ironclad security utilizing one-time passwords and rate-limited infrastructure.</p>
+                </div>
+            </div>
+
+            <div class="bento-card col-span-1 reveal opacity-0 translate-y-8 delay-200">
+                <div class="card-content">
+                    <h3 class="text-2xl font-semibold text-white mb-2">Time-Locked</h3>
+                    <p class="text-gray-400">Absolute chronological sorting. You never miss what matters, and never see what doesn't.</p>
+                </div>
+            </div>
+
+            <div class="bento-card col-span-1 md:col-span-2 reveal opacity-0 translate-y-8 delay-300">
+                <div class="card-content">
+                    <h3 class="text-2xl font-semibold text-white mb-2">The Global Feed</h3>
+                    <p class="text-gray-400">A dynamic, responsive timeline that synchronizes instantly across the network. Pull to refresh, read, and connect.</p>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <footer class="relative z-10 border-t border-white/5 py-8 text-center">
+        <p class="text-sm text-gray-600">&copy; 2026 Agora App. All rights reserved.</p>
     </footer>
 </body>
 </html>
