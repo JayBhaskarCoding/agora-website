@@ -100,22 +100,28 @@ document.addEventListener("DOMContentLoaded", () => {
 // 4. Anti-Noise Experiential Scroll Trigger
     const noiseOverlay = document.getElementById('noise-overlay');
     if (noiseOverlay) {
-        window.addEventListener('scroll', () => {
-            if (window.scrollY > 30) {
-                // Trigger the wipe effect
-                noiseOverlay.classList.add('shatter');
-                
-                // Allow the user to scroll normally by re-enabling smooth scrolling on the body
-                document.body.style.overflow = 'auto';
+        // Lock the background from scrolling while the noise wall is up
+        document.body.style.overflow = 'hidden';
 
-                // Remove the element completely after animation finishes
-                setTimeout(() => {
-                    if (noiseOverlay.parentNode) {
-                        noiseOverlay.parentNode.removeChild(noiseOverlay);
-                    }
-                }, 1500);
-            }
-        }, { once: true }); // Ensure it only fires exactly once
+        const triggerShatter = () => {
+            // Fire the wipe effect
+            noiseOverlay.classList.add('shatter');
+            
+            // Unlock the background so the user can scroll the actual website
+            document.body.style.overflow = '';
+
+            // Remove the overlay from the DOM after the animation completes
+            setTimeout(() => {
+                if (noiseOverlay.parentNode) {
+                    noiseOverlay.parentNode.removeChild(noiseOverlay);
+                }
+            }, 1500);
+        };
+
+        // Trigger the shatter on ANY user interaction (mouse scroll, mobile swipe, or click)
+        window.addEventListener('wheel', triggerShatter, { once: true });
+        window.addEventListener('touchstart', triggerShatter, { once: true });
+        window.addEventListener('click', triggerShatter, { once: true });
     }
 
 });
