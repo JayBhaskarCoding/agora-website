@@ -134,39 +134,50 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // 4. Interactive Anti-Noise Scroll Scrubbing
+    // 4. Bulletproof Interactive Anti-Noise Scroll Scrubbing
     const noiseOverlay = document.getElementById('noise-overlay');
     if (noiseOverlay) {
-        document.body.style.overflow = '';
         noiseOverlay.style.transition = 'none';
+        
+        let virtualScroll = 0;
+        const shatterDistance = 400; // Pixels of scroll effort required
 
-        window.addEventListener('scroll', () => {
-            const scrollY = window.scrollY;
-            const shatterDistance = 400; 
+        const updateOverlay = (scrollAmount) => {
+            // Cap the progress between 0 and 1
+            const progress = Math.max(0, Math.min(scrollAmount / shatterDistance, 1));
             
-            if (scrollY <= shatterDistance) {
-                const progress = scrollY / shatterDistance;
-                const scale = 1 + (progress * 0.4);      
-                const opacity = 1 - (progress * 1.2);    
-                const blur = progress * 30;              
-                const yOffset = -(progress * 15);        
-                
-                noiseOverlay.style.transform = `scale(${scale}) translateY(${yOffset}%)`;
-                noiseOverlay.style.opacity = opacity > 0 ? opacity : 0;
-                noiseOverlay.style.filter = `blur(${blur}px)`;
-                
-                if (opacity > 0) {
-                    noiseOverlay.style.pointerEvents = 'auto';
-                    noiseOverlay.style.visibility = 'visible';
-                } else {
-                    noiseOverlay.style.pointerEvents = 'none';
-                    noiseOverlay.style.visibility = 'hidden';
-                }
-            } else {
-                noiseOverlay.style.opacity = 0;
+            const scale = 1 + (progress * 0.4);      
+            const opacity = 1 - (progress * 1.2);    
+            const blur = progress * 30;              
+            const yOffset = -(progress * 15);        
+            
+            noiseOverlay.style.transform = `scale(${scale}) translateY(${yOffset}%)`;
+            noiseOverlay.style.opacity = opacity > 0 ? opacity : 0;
+            noiseOverlay.style.filter = `blur(${blur}px)`;
+            
+            if (opacity <= 0) {
                 noiseOverlay.style.pointerEvents = 'none';
                 noiseOverlay.style.visibility = 'hidden';
+            } else {
+                noiseOverlay.style.pointerEvents = 'auto';
+                noiseOverlay.style.visibility = 'visible';
             }
+        };
+
+        // Method A: Native Window Scroll (If the page has a scrollbar)
+        window.addEventListener('scroll', () => {
+            virtualScroll = window.scrollY;
+            updateOverlay(virtualScroll);
         });
+
+        // Method B: Laptop Trackpad / Mouse Wheel (Forces scroll even with NO scrollbar)
+        window.addEventListener('wheel', (e) => {
+            // Only hijack the wheel if the actual page is at the very top
+            if (window.scrollY === 0) {
+                virtualScroll += e.deltaY;
+                if (virtualScroll < 0) virtualScroll = 0; // Prevent scrolling upwards past 0
+                updateOverlay(virtualScroll);
+            }
+        }, { passive: true });
     }
 });
