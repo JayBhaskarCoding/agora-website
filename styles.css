@@ -5,12 +5,6 @@ body {
     overflow-x: hidden;
 }
 
-/* Subtle Tech Dot Grid */
-.dot-background {
-    background-image: radial-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px);
-    background-size: 32px 32px;
-}
-
 /* Glassmorphism Navigation & Cards */
 .glass-nav {
     background: rgba(3, 7, 18, 0.75);
