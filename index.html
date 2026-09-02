@@ -1,89 +1,27 @@
 <!DOCTYPE html>
-<html lang="en" class="scroll-smooth">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agora | The True Digital Public Square</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
-    <!-- Three.js WebGL Engine -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
-    <link rel="stylesheet" href="styles.css">
-    <script src="script.js" defer></script>
-    <script src="script.js" defer></script>
-</head>
-<body class="page-transition">
-
-    <!-- The "Anti-Noise" Experiential Overlay -->
-    <div id="noise-overlay" class="fixed inset-0 z-[100] bg-gray-100 text-black flex items-center justify-center overflow-hidden transition-all">
-        
-        <!-- Aggressive UI Elements -->
-        <div class="absolute top-8 left-6 md:left-12 flex items-center gap-2">
-            <div class="w-5 h-5 bg-red-600 rounded-full animate-ping absolute"></div>
-            <div class="w-5 h-5 bg-red-600 rounded-full relative z-10"></div>
-            <span class="font-extrabold text-red-600 tracking-tighter text-lg">99+ UNREAD</span>
-        </div>
-        
-        <!-- Chaotic Background Text -->
-        <div class="absolute top-32 right-10 md:right-32 text-7xl font-black opacity-20 transform rotate-12 chaos-text">FOMO</div>
-        <div class="absolute bottom-20 left-10 text-5xl font-extrabold opacity-40 chaos-text" style="animation-delay: 0.1s">SPONSORED</div>
-        <div class="absolute top-1/4 left-1/4 text-8xl md:text-[10rem] font-black text-red-500 opacity-10 transform -rotate-6 chaos-text" style="animation-delay: 0.2s">ENGAGE</div>
-        <div class="absolute bottom-1/4 right-1/4 text-6xl font-black opacity-30 transform rotate-6 chaos-text" style="animation-delay: 0.15s">TRENDING NOW</div>
-        <div class="absolute top-1/2 right-10 text-3xl font-bold text-red-600 animate-bounce">🚨 YOU MISSED THIS</div>
-
-        <!-- The Call to Action -->
-        <div class="relative z-10 flex flex-col items-center text-center px-6">
-            <h2 class="text-4xl md:text-6xl font-black tracking-tighter mb-4 max-w-2xl leading-tight">
-                THE ALGORITHM DEMANDS YOUR ATTENTION
-            </h2>
-            <p class="text-xl font-bold text-red-600 mb-10">Scroll to escape the noise.</p>
-            
-            <!-- Scrolling indicator -->
-            <div class="w-1 h-32 bg-gradient-to-b from-red-600 to-transparent animate-pulse rounded-full"></div>
-        </div>
-    </div>
-    
-    <canvas id="agora-network" class="fixed inset-0 z-0 pointer-events-none opacity-60"></canvas>
-
-    <!-- Navigation -->
-    <nav class="fixed w-full top-0 z-50 glass-nav border-b border-white/5 transition-all">
-        <div class="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
-            <a href="index.html" class="text-xl font-extrabold tracking-tight text-white">AGORA</a>
-            <div class="flex items-center gap-6">
-                <a href="index.html" class="text-sm font-medium text-white transition-colors">Home</a>
-                <a href="features.html" class="text-sm font-medium text-gray-400 hover:text-white transition-colors">The Vision</a>
-                <a href="download.html" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-full font-medium text-sm transition-all glow-button">Get Agora</a>
-            </div>
-        </div>
-    </nav>
-
-    <!-- Hero Section -->
-    <header class="relative z-10 flex flex-col items-center justify-center min-h-[90vh] px-6 text-center pt-20">
-        <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-blue-500/20 bg-blue-500/10 text-xs font-semibold text-blue-400 mb-8 text-reveal">
-        <span class="w-2 h-2 rounded-full bg-blue-400 animate-ping"></span>
-        Reclaiming human connection online
-        </div>
-        <h1 class="text-5xl md:text-8xl font-extrabold tracking-tight text-white mb-8 max-w-4xl leading-[1.05] text-reveal delay-100">
-        Where conversations <br>
-        <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-300 to-emerald-400">belong to humans.</span>
-        </h1>
-        <p class="text-lg md:text-xl text-gray-400 max-w-2xl mx-auto mb-12 font-light leading-relaxed text-reveal delay-200">
-        Modern feeds are engineered for outrage, ads, and addiction. Agora is built for pure, chronological resonance—bringing back deep discussions with the people who actually matter.
-        </p>
-        <div class="flex flex-col sm:flex-row gap-4 w-full justify-center">
-            <a href="download.html" class="bg-white text-black hover:bg-gray-200 px-8 py-3.5 rounded-xl font-semibold text-sm transition-transform hover:scale-105 text-center">
-                Download for Android
-            </a>
-            <a href="features.html" class="bg-gray-900/80 hover:bg-gray-800 text-white border border-white/10 px-8 py-3.5 rounded-xl font-semibold text-sm transition-all text-center">
-                Explore The Philosophy
-            </a>
-        </div>
-    </header>
-
-    <!-- Footer -->
-    <footer class="relative z-10 border-t border-white/5 py-10 text-center text-gray-500 text-sm">
-        <p>&copy; 2026 Agora. Designed for intentional communities.</p>
-    </footer>
-</body>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <title>Agora — The internet, with room to think.</title>
+    <meta name="description" content="Agora is a human-first digital public square. Absolute Chronology. Zero Ads." />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:title" content="Agora — The internet, with room to think." />
+    <meta property="og:description" content="A human-first digital public square built on Absolute Chronology and Zero Ads." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Agora — The internet, with room to think." />
+    <meta name="twitter:description" content="A human-first digital public square built on Absolute Chronology and Zero Ads." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
