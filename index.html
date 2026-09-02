@@ -10,6 +10,35 @@
     <script src="script.js" defer></script>
 </head>
 <body class="page-transition">
+
+    <!-- The "Anti-Noise" Experiential Overlay -->
+    <div id="noise-overlay" class="fixed inset-0 z-[100] bg-gray-100 text-black flex items-center justify-center overflow-hidden transition-all">
+        
+        <!-- Aggressive UI Elements -->
+        <div class="absolute top-8 left-6 md:left-12 flex items-center gap-2">
+            <div class="w-5 h-5 bg-red-600 rounded-full animate-ping absolute"></div>
+            <div class="w-5 h-5 bg-red-600 rounded-full relative z-10"></div>
+            <span class="font-extrabold text-red-600 tracking-tighter text-lg">99+ UNREAD</span>
+        </div>
+        
+        <!-- Chaotic Background Text -->
+        <div class="absolute top-32 right-10 md:right-32 text-7xl font-black opacity-20 transform rotate-12 chaos-text">FOMO</div>
+        <div class="absolute bottom-20 left-10 text-5xl font-extrabold opacity-40 chaos-text" style="animation-delay: 0.1s">SPONSORED</div>
+        <div class="absolute top-1/4 left-1/4 text-8xl md:text-[10rem] font-black text-red-500 opacity-10 transform -rotate-6 chaos-text" style="animation-delay: 0.2s">ENGAGE</div>
+        <div class="absolute bottom-1/4 right-1/4 text-6xl font-black opacity-30 transform rotate-6 chaos-text" style="animation-delay: 0.15s">TRENDING NOW</div>
+        <div class="absolute top-1/2 right-10 text-3xl font-bold text-red-600 animate-bounce">🚨 YOU MISSED THIS</div>
+
+        <!-- The Call to Action -->
+        <div class="relative z-10 flex flex-col items-center text-center px-6">
+            <h2 class="text-4xl md:text-6xl font-black tracking-tighter mb-4 max-w-2xl leading-tight">
+                THE ALGORITHM DEMANDS YOUR ATTENTION
+            </h2>
+            <p class="text-xl font-bold text-red-600 mb-10">Scroll to escape the noise.</p>
+            
+            <!-- Scrolling indicator -->
+            <div class="w-1 h-32 bg-gradient-to-b from-red-600 to-transparent animate-pulse rounded-full"></div>
+        </div>
+    </div>
     
     <canvas id="agora-network" class="fixed inset-0 z-0 pointer-events-none opacity-60"></canvas>
 

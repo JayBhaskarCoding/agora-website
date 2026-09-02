@@ -96,4 +96,26 @@ document.addEventListener("DOMContentLoaded", () => {
     window.addEventListener('resize', init);
     init();
     animate();
+
+// 4. Anti-Noise Experiential Scroll Trigger
+    const noiseOverlay = document.getElementById('noise-overlay');
+    if (noiseOverlay) {
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 30) {
+                // Trigger the wipe effect
+                noiseOverlay.classList.add('shatter');
+                
+                // Allow the user to scroll normally by re-enabling smooth scrolling on the body
+                document.body.style.overflow = 'auto';
+
+                // Remove the element completely after animation finishes
+                setTimeout(() => {
+                    if (noiseOverlay.parentNode) {
+                        noiseOverlay.parentNode.removeChild(noiseOverlay);
+                    }
+                }, 1500);
+            }
+        }, { once: true }); // Ensure it only fires exactly once
+    }
+
 });
