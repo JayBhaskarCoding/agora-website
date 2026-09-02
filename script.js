@@ -193,31 +193,51 @@ document.addEventListener("DOMContentLoaded", () => {
     init();
     animate();
 
-// 4. Anti-Noise Experiential Scroll Trigger
+// 4. Interactive Anti-Noise Scroll Scrubbing
     const noiseOverlay = document.getElementById('noise-overlay');
     if (noiseOverlay) {
-        // Lock the background from scrolling while the noise wall is up
-        document.body.style.overflow = 'hidden';
+        // Ensure the body is scrollable so the user can interact
+        document.body.style.overflow = '';
+        
+        // Remove the CSS transition so JS can update values instantly without lag
+        noiseOverlay.style.transition = 'none';
 
-        const triggerShatter = () => {
-            // Fire the wipe effect
-            noiseOverlay.classList.add('shatter');
+        window.addEventListener('scroll', () => {
+            const scrollY = window.scrollY;
             
-            // Unlock the background so the user can scroll the actual website
-            document.body.style.overflow = '';
-
-            // Remove the overlay from the DOM after the animation completes
-            setTimeout(() => {
-                if (noiseOverlay.parentNode) {
-                    noiseOverlay.parentNode.removeChild(noiseOverlay);
+            // The distance in pixels it takes to fully shatter the wall
+            const shatterDistance = 400; 
+            
+            if (scrollY <= shatterDistance) {
+                // Calculate progress from 0.0 to 1.0
+                const progress = scrollY / shatterDistance;
+                
+                // Map scroll progress to physical effects
+                const scale = 1 + (progress * 0.4);      // Zoom in up to 1.4x
+                const opacity = 1 - (progress * 1.2);    // Fade out slightly faster than the scroll
+                const blur = progress * 30;              // Increase blur up to 30px
+                const yOffset = -(progress * 15);        // Drift upward slightly
+                
+                // Apply the calculations in real-time
+                noiseOverlay.style.transform = `scale(${scale}) translateY(${yOffset}%)`;
+                noiseOverlay.style.opacity = opacity > 0 ? opacity : 0;
+                noiseOverlay.style.filter = `blur(${blur}px)`;
+                
+                // Allow interaction with the site once the noise is mostly gone
+                if (opacity > 0) {
+                    noiseOverlay.style.pointerEvents = 'auto';
+                    noiseOverlay.style.visibility = 'visible';
+                } else {
+                    noiseOverlay.style.pointerEvents = 'none';
+                    noiseOverlay.style.visibility = 'hidden';
                 }
-            }, 1500);
-        };
-
-        // Trigger the shatter on ANY user interaction (mouse scroll, mobile swipe, or click)
-        window.addEventListener('wheel', triggerShatter, { once: true });
-        window.addEventListener('touchstart', triggerShatter, { once: true });
-        window.addEventListener('click', triggerShatter, { once: true });
+            } else {
+                // Keep it hidden if the user has scrolled past the threshold
+                noiseOverlay.style.opacity = 0;
+                noiseOverlay.style.pointerEvents = 'none';
+                noiseOverlay.style.visibility = 'hidden';
+            }
+        });
     }
 
 });
