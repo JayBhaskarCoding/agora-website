@@ -542,7 +542,7 @@ function DownloadPage() {
             </p>
             <div className="mt-8">
               {/* NOTE: Update the href below to your actual APK file link or Play Store URL */}
-              <a href="/agora-v1.0.apk" download className="block">
+              <a href="/agora-beta.apk" download className="block">
                 <GlowButton testId="button-download-app" className="w-full px-4">
                   Download for Android <ArrowRight size={16} className="ml-2 inline" />
                 </GlowButton>
