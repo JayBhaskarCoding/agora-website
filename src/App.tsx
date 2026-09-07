@@ -522,21 +522,113 @@ function DetailCard({ title, copy, icon }: { title: string; copy: string; icon: 
 }
 
 function DownloadPage() {
-  const [email, setEmail] = useState('');
-  const [joined, setJoined] = useState(false);
   const copyRef = useReveal<HTMLElement>();
-  return <><section ref={copyRef} className="agora-reveal relative min-h-[78svh] overflow-hidden border-b border-white/[.07] px-5 pb-20 pt-40 sm:px-8 lg:px-12"><div className="absolute right-[12%] top-[28%] h-64 w-64 rounded-full border border-cyan-200/10 sm:h-[32rem] sm:w-[32rem]" /><div className="absolute right-[18%] top-[34%] h-48 w-48 rounded-full border border-emerald-200/10 sm:h-[24rem] sm:w-[24rem]" /><div className="relative mx-auto grid max-w-[1400px] gap-16 lg:grid-cols-[1fr_.7fr] lg:items-end"><div><SectionLabel number="early access">the first circle</SectionLabel><h1 className="max-w-5xl text-balance text-[clamp(3.7rem,10vw,9.5rem)] font-semibold leading-[.86] tracking-[-.09em] text-slate-100">The door is<br /><span className="text-emerald-300">almost</span><br />open.</h1></div><div className="max-w-sm"><p className="text-base leading-8 text-slate-400">We are inviting a small, curious group to help shape Agora before the lights come on. Leave a signal. We will send the coordinates.</p>{joined ? <div className="agora-glass mt-8 rounded-xl p-5 text-sm leading-7 text-emerald-200"><Check size={16} className="mr-2 inline" />You are on the list. Watch your inbox for a quiet signal.</div> : <form onSubmit={(event) => { event.preventDefault(); if (email.trim()) setJoined(true); }} className="mt-8 space-y-3"><label htmlFor="access-email" className="font-mono-agora text-[10px] uppercase tracking-[.2em] text-slate-500">your coordinates</label><div className="flex gap-2"><input id="access-email" data-testid="input-access-email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@somewhere.com" className="min-w-0 flex-1 rounded-full border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-cyan-200/70" /><GlowButton type="submit" testId="button-request-access" className="shrink-0 px-4"><ArrowRight size={16} /></GlowButton></div><p className="font-mono-agora text-[9px] uppercase tracking-[.15em] text-slate-600">no password / no noise / just a first look</p></form>}</div></div></section>
-    <section className="mx-auto max-w-[1400px] px-5 py-24 sm:px-8 sm:py-32 lg:px-12"><div className="grid gap-12 lg:grid-cols-[.7fr_1.3fr]"><div><SectionLabel number="the handoff">before you enter</SectionLabel><p className="max-w-xs text-sm leading-7 text-slate-500">A few things worth knowing about the place we are making.</p></div><div className="grid gap-0 border-t border-white/[.1]">{['Agora is intentionally small at the beginning.', 'Your feed will be chronological. That is the feature.', 'There will be nothing to buy and nothing to optimize.'].map((item, index) => <div key={item} className="flex gap-6 border-b border-white/[.1] py-6"><span className="font-mono-agora text-[10px] text-cyan-200/70">0{index + 1}</span><span className="text-lg tracking-[-.02em] text-slate-300">{item}</span></div>)}</div></div></section><Footer /></>;
+  
+  return (
+    <>
+      <section ref={copyRef} className="agora-reveal relative min-h-[78svh] overflow-hidden border-b border-white/[.07] px-5 pb-20 pt-40 sm:px-8 lg:px-12">
+        <div className="absolute right-[12%] top-[28%] h-64 w-64 rounded-full border border-cyan-200/10 sm:h-[32rem] sm:w-[32rem]" />
+        <div className="absolute right-[18%] top-[34%] h-48 w-48 rounded-full border border-emerald-200/10 sm:h-[24rem] sm:w-[24rem]" />
+        <div className="relative mx-auto grid max-w-[1400px] gap-16 lg:grid-cols-[1fr_.7fr] lg:items-end">
+          <div>
+            <SectionLabel number="public release">the door is open</SectionLabel>
+            <h1 className="max-w-5xl text-balance text-[clamp(3.7rem,10vw,9.5rem)] font-semibold leading-[.86] tracking-[-.09em] text-slate-100">
+              Enter the<br /><span className="text-emerald-300">square.</span>
+            </h1>
+          </div>
+          <div className="max-w-sm">
+            <p className="text-base leading-8 text-slate-400">
+              Agora is now officially live. No more waitlists, no more early access signals. Download the Android app below to join the community.
+            </p>
+            <div className="mt-8">
+              {/* NOTE: Update the href below to your actual APK file link or Play Store URL */}
+              <a href="/agora-beta.apk" download className="block">
+                <GlowButton testId="button-download-app" className="w-full px-4">
+                  Download for Android <ArrowRight size={16} className="ml-2 inline" />
+                </GlowButton>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section className="mx-auto max-w-[1400px] px-5 py-24 sm:px-8 sm:py-32 lg:px-12">
+        <div className="grid gap-12 lg:grid-cols-[.7fr_1.3fr]">
+          <div>
+            <SectionLabel number="the handoff">before you enter</SectionLabel>
+            <p className="max-w-xs text-sm leading-7 text-slate-500">A few things worth knowing about the place we are making.</p>
+          </div>
+          <div className="grid gap-0 border-t border-white/[.1]">
+            {['Agora is intentionally small at the beginning.', 'Your feed will be chronological. That is the feature.', 'There will be nothing to buy and nothing to optimize.'].map((item, index) => (
+              <div key={item} className="flex gap-6 border-b border-white/[.1] py-6">
+                <span className="font-mono-agora text-[10px] text-cyan-200/70">0{index + 1}</span>
+                <span className="text-lg tracking-[-.02em] text-slate-300">{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+      <Footer />
+    </>
+  );
 }
 
 function Footer() {
   return <footer className="border-t border-white/[.07] px-5 py-8 sm:px-8 lg:px-12"><div className="mx-auto flex max-w-[1400px] flex-col justify-between gap-5 font-mono-agora text-[9px] uppercase tracking-[.2em] text-slate-600 sm:flex-row"><span>Agora / a public square for people</span><span className="flex items-center gap-3"><Radio size={12} className="text-emerald-300" />signal stable</span><span>© 2026</span></div></footer>;
 }
 
-function Router() {
-  return <SiteShell><ErrorBoundary><Switch><Route path="/" component={Home} /><Route path="/features" component={FeaturesPage} /><Route path="/download" component={DownloadPage} /><Route component={NotFound} /></Switch></ErrorBoundary></SiteShell>;
+function PostFallbackPage() {
+  const copyRef = useReveal<HTMLElement>();
+
+  return (
+    <>
+      <section ref={copyRef} className="agora-reveal relative min-h-[78svh] overflow-hidden border-b border-white/[.07] px-5 pb-20 pt-40 sm:px-8 lg:px-12">
+        <div className="absolute right-[12%] top-[28%] h-64 w-64 rounded-full border border-cyan-200/10 sm:h-[32rem] sm:w-[32rem]" />
+        <div className="absolute right-[18%] top-[34%] h-48 w-48 rounded-full border border-emerald-200/10 sm:h-[24rem] sm:w-[24rem]" />
+        <div className="relative mx-auto grid max-w-[1400px] gap-16 lg:grid-cols-[1fr_.7fr] lg:items-end">
+          <div>
+            <SectionLabel number="shared signal">incoming post</SectionLabel>
+            <h1 className="max-w-5xl text-balance text-[clamp(3.7rem,10vw,9.5rem)] font-semibold leading-[.86] tracking-[-.09em] text-slate-100">
+              Not yet <br /><span className="text-emerald-300">onboard.</span>
+            </h1>
+          </div>
+          <div className="max-w-sm">
+            <p className="text-base leading-8 text-slate-400">
+              Someone shared a moment from the Agora square with you, but it seems you don't have the app installed yet. Welcome to the community.
+            </p>
+            <div className="mt-8 flex gap-2">
+              <TransitionLink href="/download" className="w-full">
+                <GlowButton testId="button-fallback-download" className="w-full px-4">
+                  Download Agora <ArrowRight size={16} />
+                </GlowButton>
+              </TransitionLink>
+            </div>
+            <p className="mt-4 font-mono-agora text-[9px] uppercase tracking-[.15em] text-slate-600">
+              install the app to view this thread
+            </p>
+          </div>
+        </div>
+      </section>
+      <Footer />
+    </>
+  );
 }
 
+function Router() {
+  return (
+    <SiteShell>
+      <ErrorBoundary>
+        <Switch>
+          <Route path="/" component={Home} />
+          <Route path="/features" component={FeaturesPage} />
+          <Route path="/download" component={DownloadPage} />
+          {/* Add the dynamic route for shared posts */}
+          <Route path="/post/:id" component={PostFallbackPage} />
+          <Route component={NotFound} />
+        </Switch>
+      </ErrorBoundary>
+    </SiteShell>
+  );
+}
 function App() {
   return <QueryClientProvider client={queryClient}><TooltipProvider><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><Router /></WouterRouter><Toaster /></TooltipProvider></QueryClientProvider>;
 }
