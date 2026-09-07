@@ -630,9 +630,16 @@ function Router() {
   );
 }
 function App() {
-  return <QueryClientProvider client={queryClient}><TooltipProvider><WouterRouter>
-  <Router />
-</WouterRouter><Toaster /></TooltipProvider></QueryClientProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <WouterRouter>
+          <Router />
+        </WouterRouter>
+        <Toaster />
+      </TooltipProvider>
+    </QueryClientProvider>
+  );
 }
 
 export default App;
