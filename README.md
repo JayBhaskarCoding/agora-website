@@ -24,10 +24,11 @@ Shared assets:
 | `app.js`           | Routing, mobile menu, smooth scroll, reveals, feedback form, shared-post preview |
 | `agora-beta.apk`   | The current Android build served by the download buttons |
 | `favicon.svg`      | Logo / tab icon                                    |
+| `assets/`          | App screenshots shown in the phone frames — see `assets/README.md` for the exact filenames to replace |
 
 ## Run locally
 
-No build needed. Either open `index.html` directly, or serve the folder:
+No build needed. Serve the folder from its root:
 
 ```bash
 npm run dev          # python3 http.server on http://localhost:5173
@@ -56,6 +57,22 @@ custom domain, share e.g. `https://your-domain/shared-post.html?post=<id>`.
   `GET /api/v1/posts/:id` (payload shape documented in the comment).
 - `initContactForm()` — the About-page form is a demo; replace the
   `setTimeout` with a `POST` to your feedback endpoint.
+
+## Asset paths
+
+All CSS/JS/image/page links are **root-absolute** (`/style.css`, `/app.js`,
+`/assets/…`, `/download.html`). This is deliberate: shared links arrive with
+query strings and sometimes nested paths (`/post/abc123`), and relative
+paths would resolve against that path, break, and get swallowed by the
+`_redirects` catch-all. Because of this, serve the site from the **domain
+root** (not a sub-folder) — `python3 -m http.server` from this folder does
+exactly that. Opening `index.html` via `file://` will no longer resolve the
+assets; use the local server instead.
+
+## Responsive breakpoints (`style.css`)
+
+Mobile-first base styles, then: `≤480px` phone, `≤768px` tablet (hamburger
+nav), `≥769px` desktop nav, `≥1024px` wide layouts.
 
 ## Notes
 

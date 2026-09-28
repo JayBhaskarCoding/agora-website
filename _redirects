@@ -1,1 +1,6 @@
-/*   /index.html   200
+# Netlify / Cloudflare-Pages style redirects.
+# Pretty share links → the shared-post landing page (query string preserved).
+/post/:id          /shared-post.html?post=:id   200
+/p/:id             /shared-post.html?post=:id   200
+# SPA-style fallback for anything else (real files always win over this rule).
+/*                 /index.html                  200
