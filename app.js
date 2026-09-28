@@ -20,6 +20,7 @@
   'use strict';
 
   var doc = document;
+  doc.documentElement.classList.add('js');
   var reduceMotion = function () {
     return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   };
