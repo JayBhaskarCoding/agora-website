@@ -53,7 +53,9 @@
       var target = doc.querySelector(window.location.hash);
       if (target) {
         window.setTimeout(function () {
-          target.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+          var HEADER_OFFSET = 84;
+          var top = target.getBoundingClientRect().top + window.scrollY - HEADER_OFFSET;
+          window.scrollTo({ top: Math.max(top, 0), behavior: reduceMotion() ? 'auto' : 'smooth' });
         }, 80);
       }
     }
