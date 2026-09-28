@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Someone shared an Agora post with you</title>
+  <meta name="description" content="It looks like someone shared an Agora post with you, but you don't have the app installed yet. Download Agora for Android — free, no ads, no tracking." />
+  <meta name="robots" content="index, follow" />
+  <meta name="theme-color" content="#05080f" />
+
+  <!-- Open Graph / Twitter (used when the link lands in chat apps) -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Someone shared an Agora post with you" />
+  <meta property="og:description" content="Agora is the new town square for free speech. Get the Android app to read the post." />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Someone shared an Agora post with you" />
+  <meta name="twitter:description" content="Agora is the new town square for free speech. Get the Android app to read the post." />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="shared">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- ============ SLIM HEADER ============ -->
+  <header class="site-header">
+    <div class="container nav">
+      <a class="nav__logo" href="index.html" aria-label="Agora — home">
+        <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <rect width="32" height="32" rx="8" fill="#3f39cb" />
+          <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
+        </svg>
+        <span>Agora</span>
+      </a>
+
+      <div class="nav__actions">
+        <a class="btn btn--ghost btn--sm nav__cta" href="index.html">About Agora</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="shared__main">
+    <div class="shared__inner">
+
+      <!-- ============ FRIENDLY MESSAGE + CTA ============ -->
+      <section class="shared-card" data-reveal>
+        <span class="shared-card__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+          </svg>
+        </span>
+
+        <h1>
+          It looks like someone shared an Agora post with you,
+          but you don&rsquo;t have the app installed yet!
+        </h1>
+        <p>
+          Welcome to the square. Agora is a human-first public square for free
+          speech — no ads, no algorithmic suppression, just people talking.
+        </p>
+
+        <div class="btn-row">
+          <a class="btn btn--primary btn--lg btn--block" href="agora-beta.apk" download>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
+            </svg>
+            Download Agora (APK)
+          </a>
+          <a class="btn btn--ghost" href="download.html">Learn more</a>
+          <a class="btn btn--ghost" href="index.html">About Agora</a>
+        </div>
+      </section>
+
+      <!-- ============ SHARED POST PREVIEW ============
+           Filled in by app.js (initSharedPost): it parses the post id
+           from the URL (?post=… / ?post_id=… / ?id=…) and renders a
+           preview. The backend fetch is stubbed until the API exists. -->
+      <section class="post-preview" id="post-preview" data-reveal data-reveal-delay="120" aria-live="polite">
+        <div class="post-preview__bar">
+          <span class="post-preview__label">Shared post</span>
+          <span class="chip chip--idle" data-post-id>reading link…</span>
+        </div>
+
+        <div class="post-preview__body">
+          <!-- Empty state: link carried no post id -->
+          <p class="post-preview__empty" id="preview-empty" hidden>
+            This link doesn&rsquo;t include a post id. If you received it from a
+            friend, ask them to share it again from the app — links look like
+            <code>…/shared-post.html?post=xxxxxxxx</code>.
+          </p>
+
+          <!-- Loading state: id found, (simulated) fetch in flight -->
+          <div id="preview-loading" hidden>
+            <div class="post-preview__head">
+              <span class="post-preview__avatar">?</span>
+              <div>
+                <p class="post-preview__author">fetching author…</p>
+                <p class="post-preview__time"><span data-preview-status>fetching preview…</span></p>
+              </div>
+            </div>
+            <div class="skeleton skeleton--w1"></div>
+            <div class="skeleton skeleton--w2"></div>
+            <div class="skeleton skeleton--w3"></div>
+          </div>
+
+          <!-- Result state: simulated payload rendered -->
+          <div id="preview-result" hidden>
+            <div class="post-preview__head">
+              <span class="post-preview__avatar">•</span>
+              <div>
+                <p class="post-preview__author" data-author>—</p>
+                <p class="post-preview__time"><span data-created>—</span></p>
+              </div>
+            </div>
+            <p class="post-preview__foot">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              <span data-preview-note>This is a placeholder preview. The full post — author, body, and thread — lives inside the app. Install Agora to read it.</span>
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 3-STEP INSTALL GUIDE ============ -->
+      <section data-reveal data-reveal-delay="200">
+        <div class="section-head section-head--center" style="margin-bottom:1.75rem;">
+          <p class="eyebrow eyebrow--center" style="justify-content:center;">Installing the APK</p>
+          <h2 class="h2" style="font-size:clamp(1.4rem,4vw,1.9rem);">Three steps. About a minute.</h2>
+        </div>
+
+        <div class="steps">
+          <article class="step">
+            <div class="step__top">
+              <span class="step__num">Step 01</span>
+              <span class="step__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
+                </svg>
+              </span>
+            </div>
+            <h3>Download</h3>
+            <p>
+              Tap <code>Download Agora (APK)</code> above. The file (≈24&nbsp;MB)
+              saves to your <strong>Downloads</strong> folder — no app store,
+              no account needed.
+            </p>
+          </article>
+
+          <article class="step">
+            <div class="step__top">
+              <span class="step__num">Step 02</span>
+              <span class="step__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M4 6h16" /><circle cx="9" cy="6" r="2.2" />
+                  <path d="M4 12h16" /><circle cx="15" cy="12" r="2.2" />
+                  <path d="M4 18h16" /><circle cx="7" cy="18" r="2.2" />
+                </svg>
+              </span>
+            </div>
+            <h3>Allow the source</h3>
+            <p>
+              Android blocks unknown apps by default. Open
+              <strong>Settings → Security → Install unknown apps</strong>, pick
+              your browser, and turn on <code>Allow from this source</code>.
+            </p>
+          </article>
+
+          <article class="step">
+            <div class="step__top">
+              <span class="step__num">Step 03</span>
+              <span class="step__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" /><path d="m8.5 12.5 2.5 2.5 5-5.5" />
+                </svg>
+              </span>
+            </div>
+            <h3>Install &amp; open</h3>
+            <p>
+              Reopen the downloaded file, tap <strong>Install</strong>, then
+              <strong>Open</strong>. Sign in, and you&rsquo;re in the square —
+              the shared post is waiting for you.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ============ SECURITY NOTE ============ -->
+      <p class="secure-note" data-reveal data-reveal-delay="260">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+        <span>
+          <strong>Only install from the official Agora website.</strong>
+          Agora is free, and it stays that way — we don&rsquo;t need your data,
+          and we never share it with ad networks.
+        </span>
+      </p>
+
+    </div>
+  </main>
+
+  <!-- ============ SLIM FOOTER ============ -->
+  <footer class="slim-footer">
+    <div class="container">
+      <span>© <span id="year">2026</span> Agora — a public square for people</span>
+      <a href="index.html">agora / home</a>
+      <a href="download.html">all downloads</a>
+    </div>
+  </footer>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
