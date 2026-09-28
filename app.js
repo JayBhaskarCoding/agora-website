@@ -32,12 +32,15 @@
      and this maps it — keeps the HTML self-documenting and the
      URLs trivial to change if pages ever move into subfolders.
      ------------------------------------------------------------ */
+  // Root-absolute so links (and the CSS/JS they lead to) resolve
+  // correctly no matter what path or query string the visitor
+  // arrived on — e.g. a shared link like /shared-post.html?post=…
   var PAGE_MAP = {
-    home: 'index.html',
-    why: 'index.html#why',
-    download: 'download.html',
-    about: 'about.html',
-    shared: 'shared-post.html'
+    home: '/index.html',
+    why: '/index.html#why',
+    download: '/download.html',
+    about: '/about.html',
+    shared: '/shared-post.html'
   };
 
   function initRouting() {
@@ -72,6 +75,8 @@
       toggle.setAttribute('aria-expanded', String(open));
       toggle.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
       menu.classList.toggle('is-open', open);
+      // Freeze the page behind the open menu (prevents scroll-through on phones).
+      doc.documentElement.classList.toggle('menu-open', open);
     }
 
     toggle.addEventListener('click', function () {
@@ -94,7 +99,8 @@
     });
 
     // Drop the menu state when resizing up to the desktop layout.
-    var desktop = window.matchMedia('(min-width: 768px)');
+    // Keep in sync with the desktop nav breakpoint in style.css.
+    var desktop = window.matchMedia('(min-width: 769px)');
     if (desktop.addEventListener) {
       desktop.addEventListener('change', function (e) {
         if (e.matches) setMenu(false);
@@ -173,8 +179,9 @@
       window.addEventListener('scroll', onScroll, { passive: true });
     }
 
+    // "/" and "/index.html" are both home; other pages map by filename.
     var path = (window.location.pathname.split('/').pop() || 'index.html').toLowerCase();
-    var pageKey = path === 'index.html' ? 'home' : path.replace(/\.html$/, '');
+    var pageKey = (path === 'index.html' || path === '') ? 'home' : path.replace(/\.html$/, '');
     Array.prototype.forEach.call(doc.querySelectorAll('[data-nav-key]'), function (link) {
       if (link.getAttribute('data-nav-key') === pageKey) link.classList.add('is-active');
     });

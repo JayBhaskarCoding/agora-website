@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Download Agora for Android</title>
   <meta name="description" content="Download the Agora Android APK. Free, no ads, no tracking. System requirements, version details, and a 3-step install guide." />
   <meta name="robots" content="index, follow" />
@@ -16,12 +16,12 @@
   <meta name="twitter:title" content="Download Agora for Android" />
   <meta name="twitter:description" content="The new town square for free speech. Free, no ads, no tracking — one APK, one tap." />
 
-  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -29,7 +29,7 @@
   <!-- ============ HEADER (keep in sync across pages) ============ -->
   <header class="site-header">
     <div class="container nav">
-      <a class="nav__logo" href="index.html" aria-label="Agora — home">
+      <a class="nav__logo" href="/index.html" aria-label="Agora — home">
         <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
           <rect width="32" height="32" rx="8" fill="#3f39cb" />
           <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
@@ -39,7 +39,7 @@
 
       <nav class="nav__links" aria-label="Primary">
         <a class="nav__link" data-page="home" data-nav-key="home">The Square</a>
-        <a class="nav__link" href="index.html#why">Why Agora</a>
+        <a class="nav__link" href="/index.html#why">Why Agora</a>
         <a class="nav__link" data-page="download" data-nav-key="download">Download</a>
         <a class="nav__link" data-page="about" data-nav-key="about">About</a>
       </nav>
@@ -54,11 +54,11 @@
     </div>
 
     <nav id="mobile-menu" class="mobile-menu" aria-label="Mobile">
-      <a href="index.html">The Square</a>
-      <a href="index.html#why">Why Agora</a>
-      <a href="download.html">Download</a>
-      <a href="about.html">About</a>
-      <a class="btn btn--primary" href="download.html">Get the app</a>
+      <a href="/index.html">The Square</a>
+      <a href="/index.html#why">Why Agora</a>
+      <a href="/download.html">Download</a>
+      <a href="/about.html">About</a>
+      <a class="btn btn--primary" href="/download.html">Get the app</a>
     </nav>
   </header>
 
@@ -107,15 +107,24 @@
           </div>
 
           <div class="dl-card__actions">
-            <a class="btn btn--primary btn--lg btn--block" href="agora-beta.apk" download>
+            <a class="btn btn--primary btn--lg btn--block" href="/agora-beta.apk" download>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
               </svg>
               Download the APK
             </a>
-            <a class="btn btn--ghost" href="shared-post.html">How shared links work</a>
+            <a class="btn btn--ghost" href="/shared-post.html">How shared links work</a>
             <p class="dl-card__note">Direct download · no Play Store account needed</p>
           </div>
+
+          <!-- TODO (screenshots): replace /assets/home-feed.png with your real
+               9:16 portrait Android screenshot. -->
+          <figure class="phone phone--sm dl-card__visual" aria-hidden="true">
+            <div class="phone__screen">
+              <img src="/assets/home-feed.png" width="1080" height="1920" loading="lazy" decoding="async" alt="" />
+            </div>
+            <span class="phone__notch"></span>
+          </figure>
         </div>
       </div>
     </section>
@@ -249,7 +258,7 @@
     <div class="container">
       <div class="site-footer__grid">
         <div class="site-footer__brand">
-          <a class="nav__logo" href="index.html" aria-label="Agora — home">
+          <a class="nav__logo" href="/index.html" aria-label="Agora — home">
             <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
               <rect width="32" height="32" rx="8" fill="#3f39cb" />
               <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
@@ -262,10 +271,10 @@
 
         <nav aria-label="Footer">
           <h4>Pages</h4>
-          <a href="index.html">The Square</a>
-          <a href="index.html#why">Why Agora</a>
-          <a href="download.html">Download</a>
-          <a href="shared-post.html">Shared post</a>
+          <a href="/index.html">The Square</a>
+          <a href="/index.html#why">Why Agora</a>
+          <a href="/download.html">Download</a>
+          <a href="/shared-post.html">Shared post</a>
         </nav>
 
         <div class="site-footer__contact">
@@ -286,6 +295,6 @@
     </div>
   </footer>
 
-  <script src="app.js" defer></script>
+  <script src="/app.js" defer></script>
 </body>
 </html>

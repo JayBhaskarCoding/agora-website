@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Agora — The internet, with room to think.</title>
   <meta name="description" content="Agora is the new town square for free speech: a human-first public square with zero ads, absolute chronology, and strict moderation of harm. Download the Android app." />
   <meta name="robots" content="index, follow" />
@@ -16,12 +16,12 @@
   <meta name="twitter:title" content="Agora — The internet, with room to think." />
   <meta name="twitter:description" content="A human-first digital public square for free speech. Zero ads. Absolute chronology. Strict moderation." />
 
-  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -29,7 +29,7 @@
   <!-- ============ HEADER (keep in sync across pages) ============ -->
   <header class="site-header">
     <div class="container nav">
-      <a class="nav__logo" href="index.html" aria-label="Agora — home">
+      <a class="nav__logo" href="/index.html" aria-label="Agora — home">
         <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
           <rect width="32" height="32" rx="8" fill="#3f39cb" />
           <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
@@ -39,7 +39,7 @@
 
       <nav class="nav__links" aria-label="Primary">
         <a class="nav__link" data-page="home" data-nav-key="home">The Square</a>
-        <a class="nav__link" href="index.html#why">Why Agora</a>
+        <a class="nav__link" href="/index.html#why">Why Agora</a>
         <a class="nav__link" data-page="download" data-nav-key="download">Download</a>
         <a class="nav__link" data-page="about" data-nav-key="about">About</a>
       </nav>
@@ -54,11 +54,11 @@
     </div>
 
     <nav id="mobile-menu" class="mobile-menu" aria-label="Mobile">
-      <a href="index.html">The Square</a>
-      <a href="index.html#why">Why Agora</a>
-      <a href="download.html">Download</a>
-      <a href="about.html">About</a>
-      <a class="btn btn--primary" href="download.html">Get the app</a>
+      <a href="/index.html">The Square</a>
+      <a href="/index.html#why">Why Agora</a>
+      <a href="/download.html">Download</a>
+      <a href="/about.html">About</a>
+      <a class="btn btn--primary" href="/download.html">Get the app</a>
     </nav>
   </header>
 
@@ -105,47 +105,26 @@
           </p>
         </div>
 
-        <!-- CSS-only phone mockup of the app -->
-        <div class="device-wrap" aria-hidden="true">
-          <div class="device">
-            <div class="device__notch"></div>
-            <div class="device__screen">
-              <div class="device__appbar">
-                <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3f39cb" /><circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" /></svg>
-                <strong>Agora</strong>
-                <span>● live</span>
-              </div>
-              <div class="device__feed">
-                <article class="device__post">
-                  <span class="device__avatar">AK</span>
-                  <div>
-                    <p class="device__post-head"><span class="device__post-name">Amara K.</span><span class="device__post-time">2m</span></p>
-                    <p class="device__post-text">Posted my full breakdown of the city&rsquo;s transit budget. Nobody gets to decide whether it &ldquo;should&rdquo; be seen. That&rsquo;s the point.</p>
-                  </div>
-                </article>
-                <article class="device__post">
-                  <span class="device__avatar device__avatar--alt">RO</span>
-                  <div>
-                    <p class="device__post-head"><span class="device__post-name">R. Osei</span><span class="device__post-time">18m</span></p>
-                    <p class="device__post-text">Criticizing your own government isn&rsquo;t disloyalty. It&rsquo;s the whole point of a public square.</p>
-                  </div>
-                </article>
-                <article class="device__post">
-                  <span class="device__avatar">MS</span>
-                  <div>
-                    <p class="device__post-head"><span class="device__post-name">Mira S.</span><span class="device__post-time">1h</span></p>
-                    <p class="device__post-text">Day three on a chronological feed. No rage-bait, no doomscroll — just people.</p>
-                  </div>
-                </article>
-              </div>
-              <div class="device__dock">
-                <svg class="is-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1Z" /></svg>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></svg>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></svg>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6" /></svg>
-              </div>
+        <!-- ============ HERO SCREENSHOT ============
+             Real app screenshot inside a phone bezel.
+             TODO (screenshots): replace /assets/home-feed.png with your real
+             9:16 portrait Android screenshot (e.g. 1080×1920 or 1080×2400 PNG).
+             The frame is aspect-ratio locked, so any 9:16-ish capture fits. -->
+        <div class="hero__visual" data-reveal>
+          <figure class="phone phone--hero">
+            <div class="phone__screen">
+              <img
+                src="/assets/home-feed.png"
+                width="1080"
+                height="1920"
+                alt="Agora home feed on Android — a strictly chronological timeline of posts, no ads"
+                decoding="async"
+                fetchpriority="high"
+              />
             </div>
-          </div>
+            <span class="phone__notch" aria-hidden="true"></span>
+          </figure>
+          <p class="hero__visual-caption mono" aria-hidden="true">Home feed · v0.9 beta</p>
         </div>
       </div>
     </section>
@@ -239,11 +218,75 @@
       </div>
     </section>
 
+    <!-- ============ SCREENSHOTS ============
+         TODO (screenshots): drop your real 9:16 portrait Android captures
+         into /assets/ using these exact filenames:
+           /assets/home-feed.png            — the chronological home timeline
+           /assets/profile-screen.png       — a member profile
+           /assets/shared-post-preview.png  — a single post as seen from a shared link
+         Keep them PNG (or swap to .webp and update the src). -->
+    <section class="section" id="screens">
+      <div class="container">
+        <div class="section-head section-head--center" data-reveal>
+          <p class="eyebrow eyebrow--center">02 — Inside the app</p>
+          <h2 class="h2">The square, as it actually looks.</h2>
+          <p>
+            No concept renders. These are screenshots from the current Android
+            build — the same feed, profile, and post views you install.
+          </p>
+        </div>
+
+        <div class="screens">
+          <figure class="screen" data-reveal>
+            <div class="phone">
+              <div class="phone__screen">
+                <img src="/assets/home-feed.png" width="1080" height="1920" loading="lazy" decoding="async"
+                     alt="Agora home feed: newest posts first, no ranking, no ads" />
+              </div>
+              <span class="phone__notch" aria-hidden="true"></span>
+            </div>
+            <figcaption>
+              <strong>Home feed</strong>
+              <span>Absolute chronology. The newest post is simply on top.</span>
+            </figcaption>
+          </figure>
+
+          <figure class="screen" data-reveal data-reveal-delay="90">
+            <div class="phone">
+              <div class="phone__screen">
+                <img src="/assets/profile-screen.png" width="1080" height="1920" loading="lazy" decoding="async"
+                     alt="Agora profile screen: a member's posts and details" />
+              </div>
+              <span class="phone__notch" aria-hidden="true"></span>
+            </div>
+            <figcaption>
+              <strong>Profile</strong>
+              <span>A person, not a metric. No follower leaderboards, no engagement score.</span>
+            </figcaption>
+          </figure>
+
+          <figure class="screen" data-reveal data-reveal-delay="180">
+            <div class="phone">
+              <div class="phone__screen">
+                <img src="/assets/shared-post-preview.png" width="1080" height="1920" loading="lazy" decoding="async"
+                     alt="A single Agora post opened from a shared link" />
+              </div>
+              <span class="phone__notch" aria-hidden="true"></span>
+            </div>
+            <figcaption>
+              <strong>Shared post</strong>
+              <span>Any post can be shared as a link. It opens in the app — or on this site if you don&rsquo;t have it yet.</span>
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ QUOTE ============ -->
     <section class="section quote">
       <div class="orb orb--one" aria-hidden="true"></div>
       <div class="container" data-reveal>
-        <p class="eyebrow eyebrow--center" style="justify-content:center;">02 — A quiet thesis</p>
+        <p class="eyebrow eyebrow--center" style="justify-content:center;">03 — A quiet thesis</p>
         <blockquote>
           &ldquo;If a room is worth being in, it should not need to beg you to stay.&rdquo;
         </blockquote>
@@ -267,7 +310,7 @@
                 <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
               </svg>
             </a>
-            <a class="btn btn--ghost btn--lg" href="download.html#install">How installation works</a>
+            <a class="btn btn--ghost btn--lg" href="/download.html#install">How installation works</a>
           </div>
           <p class="hero__meta">
             <span>Android 8+</span>
@@ -284,7 +327,7 @@
     <div class="container">
       <div class="site-footer__grid">
         <div class="site-footer__brand">
-          <a class="nav__logo" href="index.html" aria-label="Agora — home">
+          <a class="nav__logo" href="/index.html" aria-label="Agora — home">
             <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
               <rect width="32" height="32" rx="8" fill="#3f39cb" />
               <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
@@ -297,10 +340,10 @@
 
         <nav aria-label="Footer">
           <h4>Pages</h4>
-          <a href="index.html">The Square</a>
-          <a href="index.html#why">Why Agora</a>
-          <a href="download.html">Download</a>
-          <a href="shared-post.html">Shared post</a>
+          <a href="/index.html">The Square</a>
+          <a href="/index.html#why">Why Agora</a>
+          <a href="/download.html">Download</a>
+          <a href="/shared-post.html">Shared post</a>
         </nav>
 
         <div class="site-footer__contact">
@@ -321,6 +364,6 @@
     </div>
   </footer>
 
-  <script src="app.js" defer></script>
+  <script src="/app.js" defer></script>
 </body>
 </html>

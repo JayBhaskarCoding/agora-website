@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Someone shared an Agora post with you</title>
   <meta name="description" content="It looks like someone shared an Agora post with you, but you don't have the app installed yet. Download Agora for Android — free, no ads, no tracking." />
   <meta name="robots" content="index, follow" />
@@ -16,12 +16,12 @@
   <meta name="twitter:title" content="Someone shared an Agora post with you" />
   <meta name="twitter:description" content="Agora is the new town square for free speech. Get the Android app to read the post." />
 
-  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body class="shared">
   <a class="skip-link" href="#main">Skip to content</a>
@@ -29,7 +29,7 @@
   <!-- ============ SLIM HEADER ============ -->
   <header class="site-header">
     <div class="container nav">
-      <a class="nav__logo" href="index.html" aria-label="Agora — home">
+      <a class="nav__logo" href="/index.html" aria-label="Agora — home">
         <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
           <rect width="32" height="32" rx="8" fill="#3f39cb" />
           <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
@@ -38,7 +38,7 @@
       </a>
 
       <div class="nav__actions">
-        <a class="btn btn--ghost btn--sm nav__cta" href="index.html">About Agora</a>
+        <a class="btn btn--ghost btn--sm nav__cta" href="/index.html">About Agora</a>
       </div>
     </div>
   </header>
@@ -64,14 +64,14 @@
         </p>
 
         <div class="btn-row">
-          <a class="btn btn--primary btn--lg btn--block" href="agora-beta.apk" download>
+          <a class="btn btn--primary btn--lg btn--block" href="/agora-beta.apk" download>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
             </svg>
             Download Agora (APK)
           </a>
-          <a class="btn btn--ghost" href="download.html">Learn more</a>
-          <a class="btn btn--ghost" href="index.html">About Agora</a>
+          <a class="btn btn--ghost" href="/download.html">Learn more</a>
+          <a class="btn btn--ghost" href="/index.html">About Agora</a>
         </div>
       </section>
 
@@ -126,8 +126,30 @@
         </div>
       </section>
 
+      <!-- ============ IN-APP PEEK ============
+           TODO (screenshots): replace /assets/shared-post-preview.png with a real
+           9:16 portrait Android screenshot of a single post opened in the app. -->
+      <section class="peek" data-reveal data-reveal-delay="160" aria-labelledby="peek-title">
+        <figure class="phone phone--sm">
+          <div class="phone__screen">
+            <img src="/assets/shared-post-preview.png" width="1080" height="1920" loading="lazy" decoding="async"
+                 alt="How a shared post looks once opened inside the Agora Android app" />
+          </div>
+          <span class="phone__notch" aria-hidden="true"></span>
+        </figure>
+        <div class="peek__text">
+          <p class="eyebrow">Inside the app</p>
+          <h2 id="peek-title">This is where the post lives.</h2>
+          <p>
+            Once Agora is installed, tapping the same link opens the full post —
+            author, body, and thread — directly in the app. Chronological,
+            ad-free, and never quietly demoted.
+          </p>
+        </div>
+      </section>
+
       <!-- ============ 3-STEP INSTALL GUIDE ============ -->
-      <section data-reveal data-reveal-delay="200">
+      <section data-reveal data-reveal-delay="220">
         <div class="section-head section-head--center" style="margin-bottom:1.75rem;">
           <p class="eyebrow eyebrow--center" style="justify-content:center;">Installing the APK</p>
           <h2 class="h2" style="font-size:clamp(1.4rem,4vw,1.9rem);">Three steps. About a minute.</h2>
@@ -208,11 +230,11 @@
   <footer class="slim-footer">
     <div class="container">
       <span>© <span id="year">2026</span> Agora — a public square for people</span>
-      <a href="index.html">agora / home</a>
-      <a href="download.html">all downloads</a>
+      <a href="/index.html">agora / home</a>
+      <a href="/download.html">all downloads</a>
     </div>
   </footer>
 
-  <script src="app.js" defer></script>
+  <script src="/app.js" defer></script>
 </body>
 </html>
