@@ -1,27 +1,326 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
-    <title>Agora — The internet, with room to think.</title>
-    <meta name="description" content="Agora is a human-first digital public square. Absolute Chronology. Zero Ads." />
-    <meta name="robots" content="index, follow" />
-    <meta property="og:title" content="Agora — The internet, with room to think." />
-    <meta property="og:description" content="A human-first digital public square built on Absolute Chronology and Zero Ads." />
-    <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Agora — The internet, with room to think." />
-    <meta name="twitter:description" content="A human-first digital public square built on Absolute Chronology and Zero Ads." />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agora — The internet, with room to think.</title>
+  <meta name="description" content="Agora is the new town square for free speech: a human-first public square with zero ads, absolute chronology, and strict moderation of harm. Download the Android app." />
+  <meta name="robots" content="index, follow" />
+  <meta name="theme-color" content="#05080f" />
+
+  <!-- Open Graph / Twitter -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Agora — The internet, with room to think." />
+  <meta property="og:description" content="A human-first digital public square for free speech. Zero ads. Absolute chronology. Strict moderation." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Agora — The internet, with room to think." />
+  <meta name="twitter:description" content="A human-first digital public square for free speech. Zero ads. Absolute chronology. Strict moderation." />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- ============ HEADER (keep in sync across pages) ============ -->
+  <header class="site-header">
+    <div class="container nav">
+      <a class="nav__logo" href="index.html" aria-label="Agora — home">
+        <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <rect width="32" height="32" rx="8" fill="#3f39cb" />
+          <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
+        </svg>
+        <span>Agora</span>
+      </a>
+
+      <nav class="nav__links" aria-label="Primary">
+        <a class="nav__link" data-page="home" data-nav-key="home">The Square</a>
+        <a class="nav__link" href="index.html#why">Why Agora</a>
+        <a class="nav__link" data-page="download" data-nav-key="download">Download</a>
+        <a class="nav__link" data-page="about" data-nav-key="about">About</a>
+      </nav>
+
+      <div class="nav__actions">
+        <a class="btn btn--primary btn--sm nav__cta" data-page="download">Get the app</a>
+        <button class="nav__toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open navigation menu">
+          <span class="nav__toggle-bar"></span>
+          <span class="nav__toggle-bar"></span>
+        </button>
+      </div>
+    </div>
+
+    <nav id="mobile-menu" class="mobile-menu" aria-label="Mobile">
+      <a href="index.html">The Square</a>
+      <a href="index.html#why">Why Agora</a>
+      <a href="download.html">Download</a>
+      <a href="about.html">About</a>
+      <a class="btn btn--primary" href="download.html">Get the app</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <!-- ============ HERO ============ -->
+    <section class="hero">
+      <div class="orb orb--one" aria-hidden="true"></div>
+      <div class="orb orb--two" aria-hidden="true"></div>
+
+      <div class="container hero__grid">
+        <div>
+          <p class="eyebrow">
+            <span class="eyebrow__dot" aria-hidden="true"></span>
+            A new town square for free speech
+          </p>
+
+          <h1 class="display">
+            The internet,<br />
+            <span class="accent">with room</span><br />
+            to think.
+          </h1>
+
+          <p class="hero__lead">
+            Agora is a human-first digital public square. A place where opinions
+            aren&rsquo;t suppressed, attention isn&rsquo;t sold, and the only thing
+            ranking the conversation is the clock.
+          </p>
+
+          <div class="hero__actions">
+            <a class="btn btn--primary btn--lg" data-page="download">
+              Download for Android
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+              </svg>
+            </a>
+            <a class="btn btn--ghost btn--lg" href="#why">Read the philosophy</a>
+          </div>
+
+          <p class="hero__meta">
+            <span>Android · v0.9 beta</span>
+            <span>Zero ads</span>
+            <span>Absolute chronology</span>
+            <span>Moderated with care</span>
+          </p>
+        </div>
+
+        <!-- CSS-only phone mockup of the app -->
+        <div class="device-wrap" aria-hidden="true">
+          <div class="device">
+            <div class="device__notch"></div>
+            <div class="device__screen">
+              <div class="device__appbar">
+                <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3f39cb" /><circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" /></svg>
+                <strong>Agora</strong>
+                <span>● live</span>
+              </div>
+              <div class="device__feed">
+                <article class="device__post">
+                  <span class="device__avatar">AK</span>
+                  <div>
+                    <p class="device__post-head"><span class="device__post-name">Amara K.</span><span class="device__post-time">2m</span></p>
+                    <p class="device__post-text">Posted my full breakdown of the city&rsquo;s transit budget. Nobody gets to decide whether it &ldquo;should&rdquo; be seen. That&rsquo;s the point.</p>
+                  </div>
+                </article>
+                <article class="device__post">
+                  <span class="device__avatar device__avatar--alt">RO</span>
+                  <div>
+                    <p class="device__post-head"><span class="device__post-name">R. Osei</span><span class="device__post-time">18m</span></p>
+                    <p class="device__post-text">Criticizing your own government isn&rsquo;t disloyalty. It&rsquo;s the whole point of a public square.</p>
+                  </div>
+                </article>
+                <article class="device__post">
+                  <span class="device__avatar">MS</span>
+                  <div>
+                    <p class="device__post-head"><span class="device__post-name">Mira S.</span><span class="device__post-time">1h</span></p>
+                    <p class="device__post-text">Day three on a chronological feed. No rage-bait, no doomscroll — just people.</p>
+                  </div>
+                </article>
+              </div>
+              <div class="device__dock">
+                <svg class="is-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1Z" /></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6" /></svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ MOTIVE / SCOPE ============ -->
+    <section class="section section--alt" id="why">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <p class="eyebrow">01 — The motive</p>
+          <h2 class="h2">Why we&rsquo;re building a new town square.</h2>
+          <p>
+            Mainstream social media turned citizens into products: attention harvested,
+            ads injected, and speech quietly shaped by an algorithm that fears
+            controversy. Agora is built on the opposite assumptions — four of them.
+          </p>
+        </div>
+
+        <div class="principles">
+          <article class="principle" data-reveal>
+            <div class="principle__top">
+              <span class="principle__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a13.16 13.16 0 0 1-1.67 2.68" />
+                  <path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3 8 10 8a9.74 9.74 0 0 0 5.39-1.61" />
+                  <path d="M2 2l20 20" />
+                </svg>
+              </span>
+              <span class="principle__num">01</span>
+            </div>
+            <h3>You are not the product</h3>
+            <p>
+              No ads, no trackers, no engagement farming. Nothing to buy and nothing
+              to optimize. Your attention is the point of the square — not its inventory.
+            </p>
+          </article>
+
+          <article class="principle" data-reveal data-reveal-delay="90">
+            <div class="principle__top">
+              <span class="principle__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m3 11 18-5v12L3 14v-3z" />
+                  <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+                </svg>
+              </span>
+              <span class="principle__num">02</span>
+            </div>
+            <h3>Opinions are not threats</h3>
+            <p>
+              Criticize a government. Question the consensus. Raise issues the big
+              platforms make risky. Speech that challenges the status quo is what a
+              public square is for — no shadowbans, no silent demotion.
+            </p>
+          </article>
+
+          <article class="principle" data-reveal data-reveal-delay="180">
+            <div class="principle__top">
+              <span class="principle__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+              </span>
+              <span class="principle__num">03</span>
+            </div>
+            <h3>Chronology over algorithms</h3>
+            <p>
+              Absolute Chronology: the newest thing is simply the newest thing. No
+              ad-driven ranking, no manufactured outrage, no invisible hand deciding
+              what you deserve to see.
+            </p>
+          </article>
+
+          <article class="principle" data-reveal data-reveal-delay="270">
+            <div class="principle__top">
+              <span class="principle__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+                  <path d="m9 12 2 2 4-4" />
+                </svg>
+              </span>
+              <span class="principle__num">04</span>
+            </div>
+            <h3>Freedom with boundaries</h3>
+            <p>
+              Free speech is not free abuse. Vulgarity, harassment, hate, and content
+              that endangers people are strictly moderated — against rules that are
+              public, consistent, and human-readable.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ QUOTE ============ -->
+    <section class="section quote">
+      <div class="orb orb--one" aria-hidden="true"></div>
+      <div class="container" data-reveal>
+        <p class="eyebrow eyebrow--center" style="justify-content:center;">02 — A quiet thesis</p>
+        <blockquote>
+          &ldquo;If a room is worth being in, it should not need to beg you to stay.&rdquo;
+        </blockquote>
+        <cite>— The Agora team, on designing for return</cite>
+      </div>
+    </section>
+
+    <!-- ============ CTA ============ -->
+    <section class="section" id="get-app">
+      <div class="container">
+        <div class="cta-panel" data-reveal>
+          <h2>Bring your voice. <span class="accent">Leave the noise.</span></h2>
+          <p>
+            Agora for Android is live now — free, chronological, and governed by clear
+            rules instead of hidden metrics. One file, one tap, a square of your own.
+          </p>
+          <div class="hero__actions">
+            <a class="btn btn--primary btn--lg" data-page="download">
+              Download for Android
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+              </svg>
+            </a>
+            <a class="btn btn--ghost btn--lg" href="download.html#install">How installation works</a>
+          </div>
+          <p class="hero__meta">
+            <span>Android 8+</span>
+            <span>~24 MB</span>
+            <span>No ads · no tracking</span>
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ FOOTER (keep in sync across pages) ============ -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="site-footer__grid">
+        <div class="site-footer__brand">
+          <a class="nav__logo" href="index.html" aria-label="Agora — home">
+            <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+              <rect width="32" height="32" rx="8" fill="#3f39cb" />
+              <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
+            </svg>
+            <span>Agora</span>
+          </a>
+          <p>A human-first digital public square for free speech. Chronological by design, ad-free by principle.</p>
+          <span class="site-footer__signal"><i aria-hidden="true"></i> signal stable</span>
+        </div>
+
+        <nav aria-label="Footer">
+          <h4>Pages</h4>
+          <a href="index.html">The Square</a>
+          <a href="index.html#why">Why Agora</a>
+          <a href="download.html">Download</a>
+          <a href="shared-post.html">Shared post</a>
+        </nav>
+
+        <div class="site-footer__contact">
+          <h4>Contact</h4>
+          <p>
+            Feedback, questions, press:<br />
+            <a href="mailto:mail@auth-agora.info">mail@auth-agora.info</a>
+          </p>
+          <p>Android app · v0.9 beta<br />iOS &amp; desktop — coming soon</p>
+        </div>
+      </div>
+
+      <div class="site-footer__bottom">
+        <span>© <span id="year">2026</span> Agora — a public square for people</span>
+        <span>Free speech · moderated with care</span>
+        <span>Zero ads · zero tracking</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js" defer></script>
+</body>
 </html>

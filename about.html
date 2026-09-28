@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>About Agora — the vision &amp; the creator</title>
+  <meta name="description" content="The vision behind Agora: a censorship-resistant, ad-free public square for free speech. Meet the solo developer building it, and send feedback." />
+  <meta name="robots" content="index, follow" />
+  <meta name="theme-color" content="#05080f" />
+
+  <!-- Open Graph / Twitter -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="About Agora — the vision & the creator" />
+  <meta property="og:description" content="A censorship-resistant, ad-free public square for free speech. One developer. Zero investors. Zero ads." />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="About Agora — the vision & the creator" />
+  <meta name="twitter:description" content="A censorship-resistant, ad-free public square for free speech. One developer. Zero investors. Zero ads." />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- ============ HEADER (keep in sync across pages) ============ -->
+  <header class="site-header">
+    <div class="container nav">
+      <a class="nav__logo" href="index.html" aria-label="Agora — home">
+        <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <rect width="32" height="32" rx="8" fill="#3f39cb" />
+          <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
+        </svg>
+        <span>Agora</span>
+      </a>
+
+      <nav class="nav__links" aria-label="Primary">
+        <a class="nav__link" data-page="home" data-nav-key="home">The Square</a>
+        <a class="nav__link" href="index.html#why">Why Agora</a>
+        <a class="nav__link" data-page="download" data-nav-key="download">Download</a>
+        <a class="nav__link" data-page="about" data-nav-key="about">About</a>
+      </nav>
+
+      <div class="nav__actions">
+        <a class="btn btn--primary btn--sm nav__cta" data-page="download">Get the app</a>
+        <button class="nav__toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open navigation menu">
+          <span class="nav__toggle-bar"></span>
+          <span class="nav__toggle-bar"></span>
+        </button>
+      </div>
+    </div>
+
+    <nav id="mobile-menu" class="mobile-menu" aria-label="Mobile">
+      <a href="index.html">The Square</a>
+      <a href="index.html#why">Why Agora</a>
+      <a href="download.html">Download</a>
+      <a href="about.html">About</a>
+      <a class="btn btn--primary" href="download.html">Get the app</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <!-- ============ PAGE HERO ============ -->
+    <section class="page-hero">
+      <div class="orb orb--one" aria-hidden="true"></div>
+      <div class="container">
+        <p class="eyebrow">
+          <span class="eyebrow__dot" aria-hidden="true"></span>
+          About Agora
+        </p>
+        <h1 class="display">The vision behind<br /><span class="accent">the square.</span></h1>
+        <p class="lead">
+          Agora is not a feature list. It is a set of choices about what a
+          public space owes the people who enter it — and one person&rsquo;s
+          attempt to build exactly that.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============ VISION ============ -->
+    <section class="section section--alt" id="vision">
+      <div class="container vision-grid">
+        <div class="section-head" data-reveal style="margin-bottom:0;">
+          <p class="eyebrow">01 — Why Agora exists</p>
+          <h2 class="h2">The mainstream square is designed to make you pay.</h2>
+          <p>
+            Not with money — with attention. And when speech is the raw
+            material, the platforms that profit from it have a quiet interest
+            in which opinions travel and which ones stall.
+          </p>
+        </div>
+
+        <div class="vision-body" data-reveal data-reveal-delay="120">
+          <p>
+            On the big platforms, <strong>you are the product</strong>. Ads are
+            the engine, engagement is the fuel, and algorithms decide what gets
+            seen — including, quietly, what gets <em>un</em>-seen. The result is
+            a public square where challenging the status quo, criticizing
+            governments, or raising uncomfortable issues becomes a career risk
+            for your own reach. Free speech, when it depends on an invisible
+            ranking function, is free speech on a leash.
+          </p>
+          <p>
+            Agora inverts the model. <strong>You are the citizen</strong>. The
+            feed is chronological — the newest thing is simply the newest thing.
+            There are no ads to serve, so there is no reason to rank, suppress,
+            or shape your voice. What remains is a hard, public line where
+            freedom ends: vulgarity, harassment, hate, and content that
+            endangers people are moderated strictly, consistently, and under
+            rules anyone can read.
+          </p>
+
+          <div class="standards">
+            <div class="standard standard--refuse">
+              <h3>We refuse to</h3>
+              <ul>
+                <li>Sell your attention back to you</li>
+                <li>Rank speech by engagement score</li>
+                <li>Quietly demote uncomfortable opinions</li>
+                <li>Moderate in secret, against secret rules</li>
+              </ul>
+            </div>
+            <div class="standard standard--build">
+              <h3>We will</h3>
+              <ul>
+                <li>Keep the timeline strictly chronological</li>
+                <li>Let dissenting opinions travel as far as the rest</li>
+                <li>Enforce strict boundaries against vulgarity &amp; abuse</li>
+                <li>Publish our moderation rules in plain language</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CREATOR ============ -->
+    <section class="section" id="creator">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <p class="eyebrow">02 — The person behind it</p>
+          <h2 class="h2">Built by one. For everyone.</h2>
+          <p>
+            Agora is a solo project — no venture backing, no growth team,
+            no incentive to maximize the time you spend feeling anxious.
+          </p>
+        </div>
+
+        <div class="creator" data-reveal data-reveal-delay="120">
+          <div class="creator__card">
+            <!-- Replace avatar/initials + name below with the creator's real photo and name -->
+            <span class="creator__avatar" aria-hidden="true">JB</span>
+            <p class="creator__name">Jay B.</p>
+            <p class="creator__role">Solo developer · architect</p>
+            <div class="creator__stats">
+              <span><b>10+ yrs</b> native Android</span>
+              <span><b>Jetpack Compose</b> specialist</span>
+              <span><b>1</b> developer</span>
+              <span><b>0</b> investors · 0 ads</span>
+            </div>
+          </div>
+
+          <div class="creator__bio">
+            <p>
+              Jay has spent the last decade building <strong>native Android
+              applications</strong> — shipping production apps in Kotlin and
+              Jetpack Compose, from local-tools utilities to large-scale
+              consumer products. That depth on a single platform is exactly why
+              Agora launches on Android: every screen is native, fast, and
+              offline-friendly, with none of the weight a web wrapper carries.
+            </p>
+            <p>
+              But the app is the smaller half of the project. The architecture
+              was designed from day one to be
+              <strong>censorship-resistant by construction</strong>: a local-first
+              storage model so the timeline is never hostage to a single server,
+              encrypted synchronization, an open chronological API, and no
+              central control point where one opinion can be quietly deleted
+              without the rest of the square noticing.
+            </p>
+            <p class="highlight">
+              &ldquo;I&rsquo;ve built a lot of things that platforms later
+              reshaped to serve advertisers. Agora is the one I get to build
+              the way it should have been built all along.&rdquo;
+            </p>
+            <p>
+              One developer. No board, no advertisers, no growth KPIs. Just a
+              builder who believes a public square belongs to the people in it.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CONTACT / FEEDBACK ============ -->
+    <section class="section section--alt" id="contact">
+      <div class="container contact-grid">
+        <div class="section-head" data-reveal style="margin-bottom:0;">
+          <p class="eyebrow">03 — Send a signal</p>
+          <h2 class="h2">Feedback, ideas, or just hello.</h2>
+          <p>
+            This is an early-build platform, and the people in it shape what it
+            becomes. Everything sent here is read by the person who writes the
+            code.
+          </p>
+        </div>
+
+        <div class="form-card" data-reveal data-reveal-delay="120">
+          <!-- Placeholder form: app.js validates and confirms.
+               Wire the real endpoint in initContactForm() (see app.js). -->
+          <form id="feedback-form" novalidate>
+            <div class="form-row">
+              <div class="field">
+                <label for="fb-name">Name</label>
+                <input id="fb-name" name="name" type="text" placeholder="How should we address you?" autocomplete="name" required />
+              </div>
+              <div class="field">
+                <label for="fb-email">Email</label>
+                <input id="fb-email" name="email" type="email" placeholder="you@somewhere.com" autocomplete="email" required />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="fb-topic">Topic</label>
+              <select id="fb-topic" name="topic" required>
+                <option value="feedback" selected>General feedback</option>
+                <option value="bug">Bug report</option>
+                <option value="moderation">Moderation &amp; rules</option>
+                <option value="press">Press</option>
+                <option value="hello">Just saying hi</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="fb-message">Message</label>
+              <textarea id="fb-message" name="message" placeholder="What should the square hear?" required></textarea>
+            </div>
+
+            <button class="btn btn--primary btn--lg btn--block" type="submit">
+              Send message
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" />
+              </svg>
+            </button>
+
+            <p class="form-note">
+              Placeholder form — no data leaves your browser yet.<br />
+              Endpoint hookup lives in <code style="text-transform:none;letter-spacing:.04em;">app.js → initContactForm()</code>.
+            </p>
+          </form>
+
+          <div class="form-success" id="feedback-success" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" /><path d="m8.5 12.5 2.5 2.5 5-5.5" />
+            </svg>
+            <h3>Signal received.</h3>
+            <p>
+              Thank you — that&rsquo;s exactly the kind of input that shapes the
+              square. This demo form isn&rsquo;t connected to a server yet;
+              for anything urgent, email us directly below.
+            </p>
+          </div>
+
+          <p class="contact-alt">
+            Prefer email? <a href="mailto:mail@auth-agora.info">mail@auth-agora.info</a> —
+            answered by a human, usually the developer.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ FOOTER (keep in sync across pages) ============ -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="site-footer__grid">
+        <div class="site-footer__brand">
+          <a class="nav__logo" href="index.html" aria-label="Agora — home">
+            <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+              <rect width="32" height="32" rx="8" fill="#3f39cb" />
+              <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
+            </svg>
+            <span>Agora</span>
+          </a>
+          <p>A human-first digital public square for free speech. Chronological by design, ad-free by principle.</p>
+          <span class="site-footer__signal"><i aria-hidden="true"></i> signal stable</span>
+        </div>
+
+        <nav aria-label="Footer">
+          <h4>Pages</h4>
+          <a href="index.html">The Square</a>
+          <a href="index.html#why">Why Agora</a>
+          <a href="download.html">Download</a>
+          <a href="shared-post.html">Shared post</a>
+        </nav>
+
+        <div class="site-footer__contact">
+          <h4>Contact</h4>
+          <p>
+            Feedback, questions, press:<br />
+            <a href="mailto:mail@auth-agora.info">mail@auth-agora.info</a>
+          </p>
+          <p>Android app · v0.9 beta<br />iOS &amp; desktop — coming soon</p>
+        </div>
+      </div>
+
+      <div class="site-footer__bottom">
+        <span>© <span id="year">2026</span> Agora — a public square for people</span>
+        <span>Free speech · moderated with care</span>
+        <span>Zero ads · zero tracking</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
