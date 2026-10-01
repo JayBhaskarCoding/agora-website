@@ -337,10 +337,26 @@
     fetchPost(postId).then(renderPreview);
   }
 
+  /* Show device captures only once loaded. The existing bezels stay in
+     place with an honest pending state until the launch assets arrive. */
+  function initScreenshots() {
+    doc.querySelectorAll('.phone__screen img').forEach(function (image) {
+      function update() {
+        var ready = image.complete && image.naturalWidth > 0;
+        image.parentElement.classList.toggle('is-ready', ready);
+        image.setAttribute('aria-hidden', String(!ready));
+      }
+      image.addEventListener('load', update);
+      image.addEventListener('error', update);
+      update();
+    });
+  }
+
   /* ------------------------------------------------------------
      Boot
      ------------------------------------------------------------ */
   function boot() {
+    initScreenshots();
     initRouting();
     initMenu();
     initSmoothScroll();

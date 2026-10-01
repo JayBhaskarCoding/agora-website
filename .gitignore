@@ -8,3 +8,7 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Local validation artifacts
+.cache/
+__pycache__/

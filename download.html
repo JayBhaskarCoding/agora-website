@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Download Agora for Android</title>
   <meta name="description" content="Download the Agora Android APK. Free, no ads, no tracking. System requirements, version details, and a 3-step install guide." />
   <meta name="robots" content="index, follow" />
-  <meta name="theme-color" content="#05080f" />
+  <meta name="theme-color" content="#08060d" />
 
   <!-- Open Graph / Twitter -->
   <meta property="og:type" content="website" />
@@ -16,7 +16,7 @@
   <meta name="twitter:title" content="Download Agora for Android" />
   <meta name="twitter:description" content="The new town square for free speech. Free, no ads, no tracking — one APK, one tap." />
 
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href="/assets/agora-logo.svg" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -30,22 +30,18 @@
   <header class="site-header">
     <div class="container nav">
       <a class="nav__logo" href="/index.html" aria-label="Agora — home">
-        <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-          <rect width="32" height="32" rx="8" fill="#3f39cb" />
-          <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
-        </svg>
-        <span>Agora</span>
+        <img class="nav__logo-mark" src="/assets/agora-logo.svg" width="44" height="44" alt="Agora" />
       </a>
 
       <nav class="nav__links" aria-label="Primary">
-        <a class="nav__link" data-page="home" data-nav-key="home">The Square</a>
+        <a class="nav__link" href="/index.html" data-page="home" data-nav-key="home">The Square</a>
         <a class="nav__link" href="/index.html#why">Why Agora</a>
-        <a class="nav__link" data-page="download" data-nav-key="download">Download</a>
-        <a class="nav__link" data-page="about" data-nav-key="about">About</a>
+        <a class="nav__link" href="/download.html" data-page="download" data-nav-key="download">Download</a>
+        <a class="nav__link" href="/about.html" data-page="about" data-nav-key="about">About</a>
       </nav>
 
       <div class="nav__actions">
-        <a class="btn btn--primary btn--sm nav__cta" data-page="download">Get the app</a>
+        <a class="btn btn--primary btn--sm nav__cta" href="/download.html" data-page="download">Download APK</a>
         <button class="nav__toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open navigation menu">
           <span class="nav__toggle-bar"></span>
           <span class="nav__toggle-bar"></span>
@@ -58,7 +54,7 @@
       <a href="/index.html#why">Why Agora</a>
       <a href="/download.html">Download</a>
       <a href="/about.html">About</a>
-      <a class="btn btn--primary" href="/download.html">Get the app</a>
+      <a class="btn btn--primary" href="/download.html">Download APK</a>
     </nav>
   </header>
 
@@ -69,11 +65,11 @@
       <div class="container">
         <p class="eyebrow">
           <span class="eyebrow__dot" aria-hidden="true"></span>
-          Public release — the door is open
+          Android beta — ahead of launch
         </p>
         <h1 class="display">Enter the <span class="accent">square.</span></h1>
         <p class="lead">
-          Agora for Android is live. No waitlist, no ads, no algorithm deciding
+          Try the current Agora Android beta. No waitlist, no ads, no algorithm deciding
           what you deserve to see. One file, one tap.
         </p>
       </div>
@@ -84,34 +80,26 @@
       <div class="container">
         <div class="dl-card" data-reveal>
           <div>
-            <span class="dl-card__icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M7 4.5 5.6 2.8M17 4.5l1.4-1.7" />
-                <path d="M5.5 12a6.5 6.5 0 0 1 13 0v6h-13Z" />
-                <circle cx="9.5" cy="11" r="0.4" fill="currentColor" />
-                <circle cx="14.5" cy="11" r="0.4" fill="currentColor" />
-                <path d="M8 19v2M16 19v2" />
-              </svg>
-            </span>
+            <img class="dl-card__icon" src="/assets/agora-logo.svg" width="56" height="56" alt="Agora" />
             <h2>Agora for Android</h2>
             <p class="dl-card__desc">
               Native, fast, and offline-friendly. Built the way the square is run:
               chronological feed, zero ads, and moderation by clear published rules.
             </p>
             <div class="badges">
-              <span class="badge badge--accent">v0.9.0 · beta</span>
-              <span class="badge badge--emerald">Free — forever</span>
-              <span class="badge">≈24 MB</span>
+              <span class="badge badge--accent">Android APK</span>
+              <span class="badge badge--subtle">Free — forever</span>
+              <span class="badge">≈38 MB</span>
               <span class="badge">Android 8.0+</span>
             </div>
           </div>
 
           <div class="dl-card__actions">
-            <a class="btn btn--primary btn--lg btn--block" href="/agora-beta.apk" download>
+            <a class="btn btn--primary btn--lg btn--block" href="/app-beta-v2.0.apk" download>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
               </svg>
-              Download the APK
+              Download APK
             </a>
             <a class="btn btn--ghost" href="/shared-post.html">How shared links work</a>
             <p class="dl-card__note">Direct download · no Play Store account needed</p>
@@ -122,8 +110,8 @@
           <figure class="phone phone--sm dl-card__visual" aria-hidden="true">
             <div class="phone__screen">
               <img src="/assets/home-feed.png" width="1080" height="1920" loading="lazy" decoding="async" alt="" />
+              <span class="phone__pending">Android preview<br /><small>Device capture coming soon</small></span>
             </div>
-            <span class="phone__notch"></span>
           </figure>
         </div>
       </div>
@@ -148,7 +136,7 @@
             <ul class="spec-list">
               <li><span class="k">Operating system</span><span class="v">Android 8.0 (Oreo) or newer<small>API level 26+</small></span></li>
               <li><span class="k">Memory</span><span class="v">2 GB RAM recommended<small>1 GB is the minimum</small></span></li>
-              <li><span class="k">Storage</span><span class="v">≈24 MB install size<small>plus room for cached media</small></span></li>
+              <li><span class="k">Storage</span><span class="v">≈38 MB download<small>plus room for cached media</small></span></li>
               <li><span class="k">Architectures</span><span class="v">arm64-v8a · armeabi-v7a · x86_64</span></li>
               <li><span class="k">Connectivity</span><span class="v">Internet for the square<small>local timeline works offline</small></span></li>
             </ul>
@@ -162,7 +150,7 @@
               Version details
             </h3>
             <ul class="spec-list">
-              <li><span class="k">Version</span><span class="v">0.9.0 (beta)<small>build 2026.09</small></span></li>
+              <li><span class="k">Version</span><span class="v">Beta<small>app-beta-v2.0.apk</small></span></li>
               <li><span class="k">Package name</span><span class="v">com.example.agora</span></li>
               <li><span class="k">Updates</span><span class="v">Manual<small>a fresh APK here as new builds ship</small></span></li>
               <li><span class="k">Data</span><span class="v">Local-first + encrypted sync<small>your account, your terms</small></span></li>
@@ -193,7 +181,7 @@
             </div>
             <h3>Download</h3>
             <p>
-              Tap <code>Download the APK</code> above. The file saves to your
+              Tap <code>Download APK</code> above. The file saves to your
               <strong> Downloads</strong> folder — no app store, no account.
             </p>
           </article>
@@ -259,11 +247,7 @@
       <div class="site-footer__grid">
         <div class="site-footer__brand">
           <a class="nav__logo" href="/index.html" aria-label="Agora — home">
-            <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-              <rect width="32" height="32" rx="8" fill="#3f39cb" />
-              <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
-            </svg>
-            <span>Agora</span>
+            <img class="nav__logo-mark" src="/assets/agora-logo.svg" width="44" height="44" alt="Agora" />
           </a>
           <p>A human-first digital public square for free speech. Chronological by design, ad-free by principle.</p>
           <span class="site-footer__signal"><i aria-hidden="true"></i> signal stable</span>
@@ -281,9 +265,9 @@
           <h4>Contact</h4>
           <p>
             Feedback, questions, press:<br />
-            <a href="mailto:mail@auth-agora.info">mail@auth-agora.info</a>
+            <a href="mailto:mail@agora.in.net">mail@agora.in.net</a>
           </p>
-          <p>Android app · v0.9 beta<br />iOS &amp; desktop — coming soon</p>
+          <p>Android app · APK<br />iOS &amp; desktop — coming soon</p>
         </div>
       </div>
 
