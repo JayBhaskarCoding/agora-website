@@ -29,6 +29,7 @@
   --accent: #8B5CF6;
   --accent-deep: #7C3AED;
   --accent-soft: rgba(139, 92, 246, 0.08);
+  --brand-gradient: linear-gradient(90deg, #7C3AED 0%, #8B5CF6 48%, #60A5FA 100%);
   --glass: rgba(19, 20, 29, 0.88);
   --refuse: #FB7185;
   --refuse-border: rgba(244, 63, 94, 0.25);
@@ -320,17 +321,22 @@ h1, h2, h3 {
   flex: none;
 }
 
-/* All filled purple actions share the same dark label. Use the brighter
-   violet for readable contrast at every button size, including on hover. */
+/* All filled actions share the same dark label and violet-to-blue brand
+   gradient at every button size, including on hover. */
 .btn--primary {
   border-radius: 9999px;
+  /* Keep the accent as the fallback while the violet-to-blue brand gradient
+     gives the actions and wordmark a shared visual signal. */
   background: var(--accent);
+  background-image: var(--brand-gradient);
   color: #110819;
   box-shadow: 0 0 0 0 rgba(139, 92, 246, 0);
 }
 
 .btn--primary:hover {
   background: var(--accent);
+  background-image: var(--brand-gradient);
+  filter: saturate(1.08) brightness(1.04);
   transform: translateY(-2px);
   box-shadow: 0 14px 40px -12px rgba(139, 92, 246, 0.45);
 }
@@ -427,11 +433,19 @@ h1, h2, h3 {
 }
 
 .nav__logo-dot {
+  display: inline-block;
   margin-left: 0.035em;
-  color: var(--accent);
+  color: var(--accent); /* solid fallback for browsers without text clipping */
+  background-image: var(--brand-gradient);
+  background-size: 180% 100%;
+  background-position: left center;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
   font-size: 1.18em;
   line-height: 0.75;
-  text-shadow: 0 0 12px rgba(139, 92, 246, 0.45);
+  filter: drop-shadow(0 0 7px rgba(139, 92, 246, 0.38));
+  transition: background-position 0.35s var(--ease), filter 0.25s ease;
 }
 
 .nav__logo:hover .nav__logo-name,
@@ -441,7 +455,8 @@ h1, h2, h3 {
 
 .nav__logo:hover .nav__logo-dot,
 .nav__logo:focus-visible .nav__logo-dot {
-  color: #A78BFA;
+  background-position: right center;
+  filter: drop-shadow(0 0 9px rgba(96, 165, 250, 0.52));
 }
 
 .nav__logo--footer .nav__logo-name {

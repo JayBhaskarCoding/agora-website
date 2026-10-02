@@ -95,8 +95,9 @@ nav), `≥769px` desktop nav, `≥1024px` wide layouts.
   violet period used inside the app. The same lockup is shared across every
   page; `shared-post.html`'s slim footer uses the `.nav__logo--compact` variant
   so it stays compact without changing the brand treatment.
-- UI palette: deep dark surfaces, glass panels, and solid `#8B5CF6` pill-shaped
-  primary buttons with dark text for readable contrast. Original logo artwork is
+- UI palette: deep dark surfaces, glass panels, and violet-to-blue gradient
+  pill-shaped primary buttons with dark text for readable contrast. The same
+  gradient carries the period in the `agora.` lockup. Original logo artwork is
   centralized at `/assets/agora-logo.svg` for replacement with the final approved export.
 - `about.html` names Jayvardhan Bhaskar as the app and website developer and shares
   his motivation. The portrait is stored at `/assets/developer.png`; the avatar
