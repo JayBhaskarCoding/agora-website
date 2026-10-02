@@ -37,11 +37,18 @@
   // arrived on — e.g. a shared link like /shared-post.html?post=…
   var PAGE_MAP = {
     home: '/index.html',
-    why: '/index.html#why',
+    why: '/index.html#why-agora',
     download: '/download.html',
-    about: '/about.html',
-    shared: '/shared-post.html'
+    about: '/about.html'
   };
+
+  function getHashTarget(hash) {
+    try {
+      return doc.getElementById(decodeURIComponent(hash.slice(1)));
+    } catch (error) {
+      return null;
+    }
+  }
 
   function initRouting() {
     var links = doc.querySelectorAll('a[data-page]');
@@ -50,10 +57,10 @@
       if (target) link.setAttribute('href', target);
     });
 
-    // If the page was opened with a hash (e.g. index.html#why),
+    // If the page was opened with a hash (e.g. index.html#why-agora),
     // glide to the target once layout is ready.
     if (window.location.hash) {
-      var target = doc.querySelector(window.location.hash);
+      var target = getHashTarget(window.location.hash);
       if (target) {
         window.setTimeout(function () {
           target.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
@@ -122,11 +129,12 @@
         var hash = link.getAttribute('href');
         if (!hash || hash === '#' || hash.length < 2) return;
 
-        var target = doc.querySelector(hash);
+        var target = getHashTarget(hash);
         if (!target) return;
 
         event.preventDefault();
-        var top = target.getBoundingClientRect().top + window.scrollY - HEADER_OFFSET;
+        var offset = parseFloat(window.getComputedStyle(target).scrollMarginTop) || HEADER_OFFSET;
+        var top = target.getBoundingClientRect().top + window.scrollY - offset;
         window.scrollTo({ top: Math.max(top, 0), behavior: reduceMotion() ? 'auto' : 'smooth' });
 
         // Keep the URL shareable without piling up history entries.
@@ -337,10 +345,10 @@
     fetchPost(postId).then(renderPreview);
   }
 
-  /* Show device captures only once loaded. The existing bezels stay in
-     place with an honest pending state until the launch assets arrive. */
-  function initScreenshots() {
-    doc.querySelectorAll('.phone__screen img').forEach(function (image) {
+  /* Reveal device captures and the developer portrait only once loaded.
+     Pending states preserve the layout until the real assets arrive. */
+  function initImages() {
+    doc.querySelectorAll('.phone__screen img, .developer-avatar').forEach(function (image) {
       function update() {
         var ready = image.complete && image.naturalWidth > 0;
         image.parentElement.classList.toggle('is-ready', ready);
@@ -356,7 +364,7 @@
      Boot
      ------------------------------------------------------------ */
   function boot() {
-    initScreenshots();
+    initImages();
     initRouting();
     initMenu();
     initSmoothScroll();
