@@ -11,12 +11,11 @@ If delivering PNG instead, update all logo sources and favicon MIME types togeth
 
 ## Developer portrait
 
-Upload your own portrait as `/assets/developer.png`. Use a square image (at least
-320×320 pixels), with your face centered and enough room for a circular crop.
-The About page displays it at 160×160 with `object-fit: cover`, a subtle ring,
-and a restrained violet glow. Until it arrives, the container shows a clearly
-labeled pending state, not an invented photo. Replace `[Developer name]` and
-`[Personal motivation: …]` in `about.html` before publishing the creator section.
+The About page displays Jayvardhan Bhaskar's portrait from `/assets/developer.png`
+at 160×160 with `object-fit: cover`, a subtle ring, and a restrained violet glow.
+If the image cannot load, the container shows a labeled fallback rather than
+an invented photo. When replacing the portrait, use a square image (at least
+320×320 pixels) with enough room for a circular crop.
 
 ## Screenshot checklist — exactly 3 unique captures
 

@@ -146,23 +146,35 @@ class LaunchContract(unittest.TestCase):
         avatars = [a for tag, a in page.tags if a.get("class") == "developer-avatar"]
         self.assertEqual(len(avatars), 1)
         self.assertEqual(avatars[0]["src"], "/assets/developer.png")
-        self.assertEqual(avatars[0]["alt"], "Developer")
+        self.assertEqual(avatars[0]["alt"], "Jayvardhan Bhaskar")
         avatar_rule = re.search(r"\.developer-avatar \{([^}]+)\}", self.css)[1]
         self.assertIn("border-radius: 50%", avatar_rule)
         self.assertIn("object-fit: cover", avatar_rule)
         about = (ROOT / "about.html").read_text()
         for obsolete in ["Jay B.", "10+ yrs", "last decade", "specialist", "encrypted synchronization", "No board"]:
             self.assertNotIn(obsolete, about)
-        self.assertIn("[Developer name]", about)
-        self.assertIn('data-placeholder="personal-motivation"', about)
+        self.assertIn("Jayvardhan Bhaskar", about)
+        self.assertIn("App &amp; website developer", about)
+        self.assertIn("social media does not", about)
+        self.assertIn("suppress voices", about)
+        self.assertIn("fun project", about)
+        self.assertNotIn("[Developer name]", about)
+        self.assertNotIn("[Personal motivation:", about)
         self.assertIn('id="get-app"', about)
         self.assertIn('Bring your voice.', about)
         self.assertIn('color: var(--refuse)', self.css)
         self.assertIn('color: var(--build)', self.css)
 
-    def test_get_app_label_color(self):
-        rule = re.search(r"\.btn--get-app \{([^}]+)\}", self.css)[1]
-        self.assertIn("color: #110819", rule)
+    def test_primary_button_label_color(self):
+        # Get the app, Download APK, and Send message all use this shared rule.
+        primary = re.search(r"\.btn--primary \{([^}]+)\}", self.css)[1]
+        self.assertIn("color: #110819", primary)
+        self.assertIn("background: var(--accent)", primary)
+        self.assertNotRegex(self.css, r"\.btn--get-app \{[^}]*color:")
+        for page in self.pages.values():
+            for tag, attrs in page.tags:
+                if "btn--get-app" in attrs.get("class", "").split():
+                    self.assertIn("btn--primary", attrs["class"].split())
 
     def test_theme_contract(self):
         for token in ["--bg: #0A0B0E;", "--surface: #13141D;", "--accent: #8B5CF6;",
@@ -170,7 +182,7 @@ class LaunchContract(unittest.TestCase):
                       "--border: rgba(255, 255, 255, 0.08);"]:
             self.assertIn(token, self.css)
         primary = re.search(r"\.btn--primary \{([^}]+)\}", self.css)[1]
-        self.assertIn("background: var(--accent-deep)", primary)
+        self.assertIn("background: var(--accent)", primary)
         self.assertIn("border-radius: 9999px", primary)
         self.assertIn("backdrop-filter: blur(18px)", self.css)
         self.assertEqual(self.css.count("{"), self.css.count("}"))
