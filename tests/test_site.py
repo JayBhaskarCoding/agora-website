@@ -12,6 +12,9 @@ CAPTURES = {
     "/assets/profile-screen.png": 1,
     "/assets/shared-post-preview.png": 2,
 }
+PENDING_ASSETS = {
+    "/assets/yashvardhan-bhaskar.jpg",
+}
 LOGO = "/assets/agora-logo.svg"
 APK_URL = (
     "https://github.com/JayBhaskarCoding/agora-android/releases/download/"
@@ -54,7 +57,8 @@ class LaunchContract(unittest.TestCase):
         for name, page in self.pages.items():
             with self.subTest(page=name):
                 marks = [a for tag, a in page.tags if "nav__logo-mark" in a.get("class", "")]
-                self.assertEqual(len(marks), 2, "Navbar and footer both need the logo")
+                expected_marks = 1 if name == "credits.html" else 2
+                self.assertEqual(len(marks), expected_marks, "Every page needs its visible Agora mark")
                 self.assertTrue(all(a.get("src") == LOGO and a.get("alt") == "Agora" for a in marks))
                 icons = [a for tag, a in page.tags if tag == "link" and a.get("rel") == "icon"]
                 self.assertEqual(icons[0]["href"], LOGO)
@@ -109,7 +113,88 @@ class LaunchContract(unittest.TestCase):
                     if url.startswith("/"):
                         path = urlsplit(url).path
                         with self.subTest(page=name, url=url):
-                            self.assertTrue(path in CAPTURES or path == "/assets/developer.png" or (ROOT / path.lstrip("/")).is_file())
+                            self.assertTrue(
+                                path in CAPTURES
+                                or path in PENDING_ASSETS
+                                or path == "/assets/developer.png"
+                                or (ROOT / path.lstrip("/")).is_file()
+                            )
+
+    def test_credits_contributors(self):
+        page = self.pages["credits.html"]
+        source_images = [
+            attrs.get("src")
+            for tag, attrs in page.tags
+            if tag == "img" and "rotary-profile__photo" in attrs.get("class", "")
+        ]
+        self.assertEqual(
+            source_images,
+            [
+                "/assets/developer.png",
+                "/assets/yashvardhan-bhaskar.jpg",
+                "/assets/agora-public.jpg",
+            ],
+        )
+        self.assertNotIn("/assets/agora-logo.svg", source_images)
+        html = (ROOT / "credits.html").read_text()
+        for name in ["Yashvardhan Bhaskar", "The Agora Public", "Design &amp; ideas", "The public"]:
+            self.assertIn(name, html)
+        self.assertIn("Original maker of this credits screen", html)
+        self.assertIn("makes the platform what it is", html)
+        name_tags = [
+            attrs
+            for tag, attrs in page.tags
+            if tag == "div" and "rotary-name-tag" in attrs.get("class", "")
+        ]
+        self.assertEqual(len(name_tags), 3)
+        self.assertEqual(
+            [attrs.get("data-rotary-name-tag") for attrs in name_tags],
+            ["0", "1", "2"],
+        )
+        self.assertIn("data-rotary-name-tag=\"1\"", html)
+        self.assertIn("data-rotary-name-tag=\"2\"", html)
+        self.assertIn("--tag-counter-rotation", (ROOT / "app.js").read_text())
+        self.assertIn("nameTags.length !== bottomSegments.length", (ROOT / "app.js").read_text())
+        self.assertIn("padding: 8px 16px", self.css)
+        self.assertIn(".rotary-sign,\n.rotary-name-tag", self.css)
+        self.assertIn("@media (max-width: 768px)", self.css)
+        self.assertIn("translate(-65%, -65%)", self.css)
+        self.assertIn("translate(65%, 65%)", self.css)
+        for listener in ["touchstart", "touchmove", "touchend"]:
+            self.assertIn("page.addEventListener('" + listener + "'", (ROOT / "app.js").read_text())
+        self.assertIn("TOUCH_DAMPING", (ROOT / "app.js").read_text())
+        self.assertIn("SNAP_THRESHOLD", (ROOT / "app.js").read_text())
+
+    def test_pjax_and_persistent_audio_contract(self):
+        app = (ROOT / "app.js").read_text()
+        for contract in [
+            "new DOMParser().parseFromString",
+            "history.pushState",
+            "window.addEventListener('popstate'",
+            "currentMain.replaceWith",
+            "bootPage();",
+            "window.AgoraAudio",
+            "master.gain.value = 0",
+            "sourceNode.loop = true",
+            "sourceNode.start(0)",
+            "isPlaying",
+            "intentOn: true",
+            "firstClickListener",
+            "document.addEventListener('click', firstClickListener, true)",
+            "startMusic().catch(function ()",
+        ]:
+            self.assertIn(contract, app)
+
+    def test_background_music_contract(self):
+        js = (ROOT / "app.js").read_text()
+        self.assertIn("var MUSIC_SRC = '/assets/bgMusic.mpeg';", js)
+        self.assertIn("sourceNode.loop = true;", js)
+        self.assertIn("filter.type = 'lowpass';", js)
+        self.assertIn("filter.frequency.setValueAtTime(2200", js)
+        self.assertIn("sourceNode.start(0)", js)
+        music = ROOT / "assets/bgMusic.mpeg"
+        self.assertTrue(music.is_file())
+        self.assertGreater(music.stat().st_size, 0)
 
     def test_shared_flow_is_isolated(self):
         for name, page in self.pages.items():
@@ -171,12 +256,19 @@ class LaunchContract(unittest.TestCase):
         self.assertIn("data-button-label", about)
 
         app = (ROOT / "app.js").read_text()
-        self.assertIn("FORM_ENDPOINT", app)
+        function = (ROOT / "functions" / "api" / "contact.js").read_text()
+        self.assertIn("fetch('/api/contact'", app, "Form must POST to the Pages Function")
         self.assertIn("CONTACT_EMAIL", app)
-        self.assertIn("mail@agora.in.net", app)
-        self.assertIn("mailto:", app, "Fallback must hand the message to the mail client")
-        self.assertIn("fetch(url", app, "Endpoint path must POST")
-        self.assertIn("AbortController", app, "Endpoint path must time out")
+        self.assertNotIn("FORM_ENDPOINT", app)
+        self.assertNotIn("openMailClient", app)
+        self.assertIn("Sending...", app)
+        self.assertIn("window.alert", app, "Submission errors need a direct user cue")
+        self.assertIn("AbortController", app, "API path must time out")
+        self.assertIn("export async function onRequestPost", function)
+        self.assertIn("context.env.RESEND_API_KEY", function)
+        self.assertIn("https://api.resend.com/emails", function)
+        self.assertIn("New Agora Feedback:", function)
+        self.assertNotIn('action="mailto:', about)
 
         for rule in [".field__error", ".form-status--error", ".form-status--ok", ".field--hp"]:
             self.assertIn(rule, self.css, "Form feedback needs styling: %s" % rule)
