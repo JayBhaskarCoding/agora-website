@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Credits — Agora</title>
+  <meta name="description" content="Credits for the people and ideas behind Agora." />
+  <meta name="robots" content="index, follow" />
+  <meta name="theme-color" content="#0A0B0E" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Credits — Agora" />
+  <meta property="og:description" content="The people and ideas behind the Agora public square." />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Credits — Agora" />
+  <meta name="twitter:description" content="The people and ideas behind the Agora public square." />
+
+  <link rel="icon" type="image/svg+xml" href="/assets/agora-logo.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="credits-rotary-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- A compact chrome layer keeps the credits screen branded without taking
+       the rotary composition out of its single viewport. -->
+  <header class="credits-screen-header">
+    <a class="nav__logo brand-lockup credits-screen-brand" href="/index.html" aria-label="Agora — home">
+      <img class="nav__logo-mark" src="/assets/agora-logo.svg" width="44" height="44" alt="Agora" />
+      <span class="nav__logo-name" aria-label="Agora">
+        <span class="nav__logo-word">agora</span><span class="nav__logo-dot" aria-hidden="true">.</span>
+      </span>
+    </a>
+
+    <h1 id="credits-title">CREDITS</h1>
+
+    <nav class="credits-screen-actions" aria-label="Credits navigation">
+      <a class="mono" href="/index.html#why-agora">Why Agora</a>
+      <a class="credits-screen-exit mono" href="/index.html" aria-label="Back to Agora home">back to square <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main id="main" class="credits-rotary" aria-labelledby="credits-title">
+    <!-- Three equal sectors rotate as one upper-left contribution wheel. -->
+    <section class="rotary-disc rotary-disc--top" data-rotary-disc="top" aria-label="Team contributions wheel">
+      <div class="rotary-disc__plate" data-rotary-plate>
+        <span class="rotary-disc__ring rotary-disc__ring--one" aria-hidden="true"></span>
+        <span class="rotary-disc__ring rotary-disc__ring--two" aria-hidden="true"></span>
+        <span class="rotary-disc__ring rotary-disc__ring--three" aria-hidden="true"></span>
+
+        <div class="rotary-disc__sector-track" data-rotary-track>
+          <article class="rotary-segment rotary-segment--contribution" data-rotary-segment="0" aria-label="Contribution segment one">
+            <div class="rotary-segment__content rotary-segment__content--contribution">
+              <p class="rotary-disc__contributions" data-segment-contributions>
+                Created the code, engineered the backend, and shaped the calm visual system behind Agora.
+              </p>
+            </div>
+          </article>
+          <article class="rotary-segment rotary-segment--contribution" data-rotary-segment="1" aria-label="Contribution segment two">
+            <div class="rotary-segment__content rotary-segment__content--contribution">
+              <p class="rotary-disc__contributions" data-segment-contributions>
+                Original maker of this credits screen, turning its visual language, motion, and sense of space into something people can feel.
+              </p>
+            </div>
+          </article>
+          <article class="rotary-segment rotary-segment--contribution" data-rotary-segment="2" aria-label="Contribution segment three">
+            <div class="rotary-segment__content rotary-segment__content--contribution">
+              <p class="rotary-disc__contributions" data-segment-contributions>
+                For everyone who uses Agora, tests it in the real world, and makes the platform what it is through every visit and conversation.
+              </p>
+            </div>
+          </article>
+        </div>
+
+        <div class="rotary-tag-track" data-rotary-tags aria-label="Contributor roles">
+          <div class="rotary-sign-hanger" data-rotary-tag="0">
+            <span class="rotary-sign-hanger__cord" aria-hidden="true"></span>
+            <span class="rotary-sign" data-rotary-role>Developer</span>
+          </div>
+          <div class="rotary-sign-hanger" data-rotary-tag="1">
+            <span class="rotary-sign-hanger__cord" aria-hidden="true"></span>
+            <span class="rotary-sign" data-rotary-role>Design &amp; ideas</span>
+          </div>
+          <div class="rotary-sign-hanger" data-rotary-tag="2">
+            <span class="rotary-sign-hanger__cord" aria-hidden="true"></span>
+            <span class="rotary-sign" data-rotary-role>The public</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Three equal sectors rotate as one lower-right profile wheel. -->
+    <section class="rotary-disc rotary-disc--bottom" data-rotary-disc="bottom" aria-label="Team profile wheel">
+      <div class="rotary-disc__plate" data-rotary-plate>
+        <span class="rotary-disc__ring rotary-disc__ring--one" aria-hidden="true"></span>
+        <span class="rotary-disc__ring rotary-disc__ring--two" aria-hidden="true"></span>
+        <span class="rotary-disc__ring rotary-disc__ring--three" aria-hidden="true"></span>
+
+        <div class="rotary-disc__sector-track" data-rotary-track>
+          <article class="rotary-segment rotary-segment--profile" data-rotary-segment="0" aria-label="Profile segment one">
+            <div class="rotary-segment__content rotary-segment__content--profile">
+              <div class="rotary-profile__photo-frame" data-rotary-photo-frame role="img" aria-label="Jayvardhan Bhaskar profile image">
+                <img class="rotary-profile__photo" data-rotary-photo src="/assets/developer.png" width="180" height="180" alt="Jayvardhan Bhaskar profile image" />
+                <span class="rotary-profile__pending" aria-hidden="true"><strong>JB</strong><small>portrait unavailable</small></span>
+              </div>
+              <p class="rotary-segment__bio" data-segment-bio>Building a quieter, more human public square — one thoughtful detail at a time.</p>
+            </div>
+          </article>
+          <article class="rotary-segment rotary-segment--profile" data-rotary-segment="1" aria-label="Profile segment two">
+            <div class="rotary-segment__content rotary-segment__content--profile">
+              <div class="rotary-profile__photo-frame" data-rotary-photo-frame role="img" aria-label="Yashvardhan Bhaskar portrait pending">
+                <img class="rotary-profile__photo" data-rotary-photo src="/assets/yashvardhan-bhaskar.jpg" width="180" height="180" alt="Yashvardhan Bhaskar profile image" />
+                <span class="rotary-profile__pending" aria-hidden="true"><strong>YB</strong><small>portrait incoming</small></span>
+              </div>
+              <p class="rotary-segment__bio" data-segment-bio>A designer and idea innovator — the original maker of this credits screen.</p>
+            </div>
+          </article>
+          <article class="rotary-segment rotary-segment--profile" data-rotary-segment="2" aria-label="Profile segment three">
+            <div class="rotary-segment__content rotary-segment__content--profile">
+              <div class="rotary-profile__photo-frame" data-rotary-photo-frame role="img" aria-label="The Agora Public community illustration">
+                <img class="rotary-profile__photo" data-rotary-photo src="/assets/agora-public.jpg" width="180" height="180" alt="Illustration of the Agora public gathered around a shared space" />
+                <span class="rotary-profile__pending" aria-hidden="true"><strong>AP</strong><small>the people who make it</small></span>
+              </div>
+              <p class="rotary-segment__bio" data-segment-bio>The people who use, question, and return to Agora — the reason this public square exists.</p>
+            </div>
+          </article>
+        </div>
+
+        <!-- The label lives on the circumference, never inside a profile sector. -->
+        <div class="rotary-name-tag" data-rotary-name-tag aria-label="Current member">
+          <span class="rotary-name-tag__line" aria-hidden="true"></span>
+          <span data-rotary-tag-name>Jayvardhan Bhaskar</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="credits-rotary-status" aria-live="polite">
+      <span class="credits-rotary-status__hint mono">wheel to rotate</span>
+      <span class="credits-rotary-status__count mono"><span data-rotary-count>01</span> / <span data-rotary-total>03</span></span>
+      <a class="credits-screen-contact mono" href="mailto:mail@agora.in.net">mail@agora.in.net</a>
+    </div>
+
+    <div class="credits-scroll-affordance" data-scroll-affordance aria-hidden="true">
+      <span class="credits-scroll-affordance__label mono">Scroll to explore</span>
+      <span class="credits-scroll-affordance__mouse">
+        <span class="credits-scroll-affordance__wheel"></span>
+      </span>
+      <span class="credits-scroll-affordance__chevron" aria-hidden="true"></span>
+    </div>
+  </main>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
