@@ -102,7 +102,7 @@ nav), `≥769px` desktop nav, `≥1024px` wide layouts.
   Original logo artwork is centralized at `/assets/agora-logo.svg` for
   replacement with the final approved export.
 - Ambient interaction is opt-in: the sound control starts a very soft Web Audio
-  soundscape after a user gesture, and the subtle dot matrix breathes with it.
+  soundscape after a user gesture, and the visible dot-matrix mesh breathes with it.
   The custom cursor is limited to fine pointers and is disabled for reduced motion.
 - `about.html` names Jayvardhan Bhaskar as the app and website developer and shares
   his motivation. The portrait is stored at `/assets/developer.png`; the avatar

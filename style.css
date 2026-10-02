@@ -109,7 +109,7 @@ body {
   width: 100%;
   height: 100%;
   pointer-events: none;
-  opacity: 0.7;
+  opacity: 0.95;
   mix-blend-mode: screen;
 }
 
@@ -182,41 +182,48 @@ main,
     position: fixed;
     top: 0;
     left: 0;
+    z-index: 10000 !important;
     display: block;
-    width: 13px;
-    height: 13px;
-    border: 1px solid rgba(167, 139, 250, 0.9);
+    width: 14px;
+    height: 14px;
+    border: 2px solid #F8FAFC;
     border-radius: 50%;
-    background: rgba(139, 92, 246, 0.3);
-    box-shadow: 0 0 18px rgba(139, 92, 246, 0.45);
+    background: #A78BFA;
+    box-shadow: 0 0 0 2px rgba(10, 11, 14, 0.9),
+      0 0 18px rgba(96, 165, 250, 0.95);
     opacity: 0;
     pointer-events: none;
     transform: translate3d(-100px, -100px, 0) translate(-50%, -50%);
-    transition: width 0.25s var(--ease), height 0.25s var(--ease),
-      opacity 0.2s ease, background-color 0.25s ease,
-      border-color 0.25s ease, box-shadow 0.25s ease;
+    transition: width 0.14s var(--ease), height 0.14s var(--ease),
+      opacity 0.12s ease, background-color 0.14s ease,
+      border-color 0.14s ease, box-shadow 0.14s ease;
     will-change: transform, width, height;
   }
 
   body.has-custom-cursor .cursor-orb.is-visible {
-    opacity: 0.85;
+    opacity: 1;
   }
 
+  /* A small solid violet/blue point is easier to track over both dark cards
+     and the photographic app captures than a translucent blob. */
   body.has-custom-cursor .cursor-orb.is-hovering {
-    width: 28px;
-    height: 28px;
-    border-color: rgba(96, 165, 250, 0.9);
-    background: rgba(139, 92, 246, 0.12);
-    box-shadow: 0 0 24px rgba(96, 165, 250, 0.35);
+    width: 20px;
+    height: 20px;
+    border-color: #FFFFFF;
+    background: #C4B5FD;
+    box-shadow: 0 0 0 2px rgba(10, 11, 14, 0.9),
+      0 0 22px rgba(96, 165, 250, 0.95);
   }
 
+  /* Pressing/selecting expands into an unmistakable hollow ring. */
   body.has-custom-cursor .cursor-orb.is-pressed {
     width: 62px;
     height: 62px;
-    border-color: rgba(167, 139, 250, 0.85);
-    background: rgba(139, 92, 246, 0.08);
-    box-shadow: 0 0 0 8px rgba(139, 92, 246, 0.08),
-      0 0 34px rgba(96, 165, 250, 0.38);
+    border: 2px solid #C4B5FD;
+    background: transparent;
+    box-shadow: 0 0 0 3px rgba(10, 11, 14, 0.9),
+      0 0 0 9px rgba(139, 92, 246, 0.14),
+      0 0 34px rgba(96, 165, 250, 0.85);
     opacity: 1;
   }
 }
@@ -314,7 +321,8 @@ ol {
 }
 
 .section--alt {
-  background: var(--bg-soft);
+  /* Let the site-wide dot mesh remain visible through the alternate band. */
+  background: rgba(14, 15, 21, 0.82);
   border-block: 1px solid var(--border);
 }
 
@@ -2219,7 +2227,7 @@ h1, h2, h3 {
 /* ---------- 18. Footer ---------- */
 .site-footer {
   border-top: 1px solid var(--border);
-  background: var(--bg-soft);
+  background: rgba(14, 15, 21, 0.84);
   padding-top: clamp(2.75rem, 6vw, 4rem);
 }
 

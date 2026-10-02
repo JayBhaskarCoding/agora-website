@@ -592,8 +592,10 @@
     }
 
     function frame() {
-      currentX += (targetX - currentX) * 0.18;
-      currentY += (targetY - currentY) * 0.18;
+      // Keep a tiny amount of easing without the laggy trail of a slow
+      // interpolation; the orb should feel attached to the pointer.
+      currentX += (targetX - currentX) * 0.78;
+      currentY += (targetY - currentY) * 0.78;
       cursor.style.transform = 'translate3d(' + currentX + 'px,' + currentY + 'px,0) translate(-50%, -50%)';
       window.requestAnimationFrame(frame);
     }
@@ -811,8 +813,8 @@
           var driftY = Math.cos((time * 0.19) + dot.phase) * (1.5 + energy * 5);
           var x = (dot.column * density) + driftX - density;
           var y = (dot.row * density) + driftY - density;
-          var radius = 0.45 + (wave * 0.45) + (pulse * 0.6);
-          var alpha = 0.018 + (wave * 0.016) + (pulse * 0.045);
+          var radius = 0.7 + (wave * 0.55) + (pulse * 0.7);
+          var alpha = 0.045 + (wave * 0.028) + (pulse * 0.06);
           var color = (dot.column + dot.row) % 4 === 0 ? '96,165,250' : '139,92,246';
 
           context.beginPath();
