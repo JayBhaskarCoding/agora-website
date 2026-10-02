@@ -397,40 +397,60 @@ h1, h2, h3 {
 .nav__logo {
   display: inline-flex;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.65rem;
   flex: none;
 }
 
 .nav__logo-mark {
-  width: 44px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
   object-fit: contain;
   flex: none;
 }
 
-/* Brand lockup — the wordmark sits beside the mark, in the site type style */
+/* Brand lockup — the app's lowercase wordmark, with its violet period. */
 .nav__logo-name {
+  display: inline-flex;
+  align-items: baseline;
   font-family: var(--font-sans);
-  font-size: 1.18rem;
+  font-size: 1.35rem;
   font-weight: 700;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.065em;
   line-height: 1;
   color: var(--text);
+  white-space: nowrap;
   transition: color 0.25s ease;
+}
+
+.nav__logo-word {
+  text-transform: lowercase;
+}
+
+.nav__logo-dot {
+  margin-left: 0.035em;
+  color: var(--accent);
+  font-size: 1.18em;
+  line-height: 0.75;
+  text-shadow: 0 0 12px rgba(139, 92, 246, 0.45);
 }
 
 .nav__logo:hover .nav__logo-name,
 .nav__logo:focus-visible .nav__logo-name {
-  color: var(--accent);
+  color: var(--text);
+}
+
+.nav__logo:hover .nav__logo-dot,
+.nav__logo:focus-visible .nav__logo-dot {
+  color: #A78BFA;
 }
 
 .nav__logo--footer .nav__logo-name {
-  font-size: 1.25rem;
+  font-size: 1.4rem;
 }
 
-/* Compact variant — for the tiny mono slim footer */
+/* Compact variant — keep the same app wordmark in the slim footer. */
 .nav__logo--compact {
-  gap: 0.5rem;
+  gap: 0.45rem;
 }
 
 .nav__logo--compact .nav__logo-mark {
@@ -439,12 +459,16 @@ h1, h2, h3 {
 }
 
 .nav__logo--compact .nav__logo-name {
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  font-weight: 500;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--text-dim);
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.06em;
+  text-transform: none;
+  color: var(--text);
+}
+
+.nav__logo--compact .nav__logo-dot {
+  font-size: 1.1em;
 }
 
 .nav__links {
