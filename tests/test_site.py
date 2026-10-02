@@ -13,6 +13,10 @@ CAPTURES = {
     "/assets/shared-post-preview.png": 2,
 }
 LOGO = "/assets/agora-logo.svg"
+APK_URL = (
+    "https://github.com/JayBhaskarCoding/agora-android/releases/download/"
+    "v2.0-beta/app-beta-v2.0.apk"
+)
 
 
 class Page(HTMLParser):
@@ -57,16 +61,23 @@ class LaunchContract(unittest.TestCase):
                 self.assertEqual(icons[0]["type"], "image/svg+xml")
 
     def test_download_ctas(self):
-        downloads = 0
-        for page in self.pages.values():
+        downloads = []
+        for name, page in self.pages.items():
             for attrs, text in page.anchors:
+                label = " ".join(text.split())
                 if "btn--primary" in attrs.get("class", ""):
-                    self.assertEqual(" ".join(text.split()), "Download APK")
-                    self.assertIn(attrs.get("href"), ["/download.html", "/app-beta-v2.0.apk"])
-                if "download" in attrs:
-                    downloads += 1
-                    self.assertTrue((ROOT / attrs["href"].lstrip("/")).is_file())
-        self.assertEqual(downloads, 2)
+                    expected = "Download APK" if name == "download.html" and attrs.get("href") == APK_URL else "Get the app"
+                    self.assertEqual(label, expected)
+                    self.assertEqual("btn--get-app" in attrs.get("class", "").split(), label == "Get the app")
+                    self.assertIn(attrs.get("href"), ["/download.html", APK_URL])
+                if attrs.get("href", "").endswith(".apk"):
+                    downloads.append(name)
+                    self.assertEqual(attrs["href"], APK_URL)
+                    self.assertNotIn("data-page", attrs, "Routing must not override the release URL")
+                    self.assertNotIn("download", attrs, "GitHub handles the cross-origin attachment")
+            if name != "download.html":
+                self.assertNotIn("download apk", (ROOT / name).read_text().lower())
+        self.assertCountEqual(downloads, ["download.html", "shared-post.html"])
 
     def test_contact_links(self):
         for page in self.pages.values():
@@ -90,7 +101,7 @@ class LaunchContract(unittest.TestCase):
         self.assertIn("object-fit: contain", self.css)
 
     def test_local_assets_and_links(self):
-        # Only the three explicitly documented, pending captures may be absent.
+        # Only documented launch captures and the developer portrait may be absent.
         for name, page in self.pages.items():
             for tag, attrs in page.tags:
                 for attr in ("src", "href"):
@@ -98,10 +109,66 @@ class LaunchContract(unittest.TestCase):
                     if url.startswith("/"):
                         path = urlsplit(url).path
                         with self.subTest(page=name, url=url):
-                            self.assertTrue(path in CAPTURES or (ROOT / path.lstrip("/")).is_file())
+                            self.assertTrue(path in CAPTURES or path == "/assets/developer.png" or (ROOT / path.lstrip("/")).is_file())
+
+    def test_shared_flow_is_isolated(self):
+        for name, page in self.pages.items():
+            for attrs, text in page.anchors:
+                path = urlsplit(attrs.get("href", "")).path
+                self.assertNotIn(path, ["/shared-post.html", "shared-post.html"])
+                self.assertFalse(path.startswith(("/post/", "/p/")))
+                self.assertNotEqual(attrs.get("data-page"), "shared")
+        self.assertNotIn("How shared links work", (ROOT / "download.html").read_text())
+        self.assertNotIn("shared:", (ROOT / "app.js").read_text())
+        robots = [a for tag, a in self.pages["shared-post.html"].tags if a.get("name") == "robots"]
+        self.assertIn("noindex", robots[0]["content"])
+        # External deep-link routes remain intact.
+        redirects = (ROOT / "_redirects").read_text()
+        for route in ["/post/:id", "/p/:id"]:
+            self.assertIn(route, redirects)
+
+    def test_why_agora_links(self):
+        home = self.pages["index.html"]
+        targets = [a for tag, a in home.tags if a.get("id") == "why-agora"]
+        self.assertEqual(len(targets), 1)
+        for name, page in self.pages.items():
+            links = [(a, text) for a, text in page.anchors if text.strip() == "Why Agora"]
+            self.assertTrue(links)
+            for attrs, text in links:
+                self.assertIn(attrs["href"], ["#why-agora", "/index.html#why-agora"])
+            self.assertNotRegex((ROOT / name).read_text(), r'#why["\']')
+        rule = re.search(r"#why-agora \{([^}]+)\}", self.css)[1]
+        self.assertIn("scroll-margin-top: 5rem", rule)
+        self.assertIn("scroll-behavior: smooth", self.css)
+
+    def test_creator_and_about_cta(self):
+        page = self.pages["about.html"]
+        avatars = [a for tag, a in page.tags if a.get("class") == "developer-avatar"]
+        self.assertEqual(len(avatars), 1)
+        self.assertEqual(avatars[0]["src"], "/assets/developer.png")
+        self.assertEqual(avatars[0]["alt"], "Developer")
+        avatar_rule = re.search(r"\.developer-avatar \{([^}]+)\}", self.css)[1]
+        self.assertIn("border-radius: 50%", avatar_rule)
+        self.assertIn("object-fit: cover", avatar_rule)
+        about = (ROOT / "about.html").read_text()
+        for obsolete in ["Jay B.", "10+ yrs", "last decade", "specialist", "encrypted synchronization", "No board"]:
+            self.assertNotIn(obsolete, about)
+        self.assertIn("[Developer name]", about)
+        self.assertIn('data-placeholder="personal-motivation"', about)
+        self.assertIn('id="get-app"', about)
+        self.assertIn('Bring your voice.', about)
+        self.assertIn('color: var(--refuse)', self.css)
+        self.assertIn('color: var(--build)', self.css)
+
+    def test_get_app_label_color(self):
+        rule = re.search(r"\.btn--get-app \{([^}]+)\}", self.css)[1]
+        self.assertIn("color: #110819", rule)
 
     def test_theme_contract(self):
-        self.assertIn("--accent-deep: #A855F7;", self.css)
+        for token in ["--bg: #0A0B0E;", "--surface: #13141D;", "--accent: #8B5CF6;",
+                      "--accent-deep: #7C3AED;", "--text: #F3F4F6;", "--text-dim: #9CA3AF;",
+                      "--border: rgba(255, 255, 255, 0.08);"]:
+            self.assertIn(token, self.css)
         primary = re.search(r"\.btn--primary \{([^}]+)\}", self.css)[1]
         self.assertIn("background: var(--accent-deep)", primary)
         self.assertIn("border-radius: 9999px", primary)

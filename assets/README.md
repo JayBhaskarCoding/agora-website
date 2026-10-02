@@ -6,8 +6,17 @@
 favicon, and the download card. It contains the existing repository logo artwork
 (previously `favicon.svg`), not the generic circle used by the old navbar.
 Replace this file with the final approved SVG export without changing any HTML.
-Keep the artwork's native colors; the surrounding UI uses purple `#A855F7`.
+Keep the artwork's native colors; the surrounding UI uses violet `#8B5CF6` / `#7C3AED`.
 If delivering PNG instead, update all logo sources and favicon MIME types together.
+
+## Developer portrait
+
+Upload your own portrait as `/assets/developer.png`. Use a square image (at least
+320×320 pixels), with your face centered and enough room for a circular crop.
+The About page displays it at 160×160 with `object-fit: cover`, a subtle ring,
+and a restrained violet glow. Until it arrives, the container shows a clearly
+labeled pending state, not an invented photo. Replace `[Developer name]` and
+`[Personal motivation: …]` in `about.html` before publishing the creator section.
 
 ## Screenshot checklist — exactly 3 unique captures
 
@@ -43,8 +52,9 @@ The preserved layout has **6 placements**, filled by **3 files**:
 
 - Replace/approve the SVG logo and upload all three captures above.
 - Once captures are approved, replace the homepage's screenshot-preparation copy.
-- Current downloads serve `/app-beta-v2.0.apk` (37,917,762 bytes, about 38 MB).
-  This is the existing beta, not a newly signed or verified official release.
+- Direct downloads use the [v2.0-beta GitHub release](https://github.com/JayBhaskarCoding/agora-android/releases/download/v2.0-beta/app-beta-v2.0.apk).
+  The local `app-beta-v2.0.apk` is no longer linked from the website.
+  This is a beta, not a newly signed or verified official release.
   Upload the final release and update both direct links in `download.html` and
   `shared-post.html`, plus version, minimum Android version, and file-size copy
   after checking the release manifest. No APK was modified by the theme update.
