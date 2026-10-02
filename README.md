@@ -13,7 +13,7 @@ Pure **vanilla HTML / CSS / JS** — no frameworks, no build step. Serve the rep
 | `index.html`       | Home — hero, motive/philosophy, CTAs                                    |
 | `shared-post.html` | Landing for shared post links (WhatsApp, etc.) when the app is not installed. Parses `?post=` / `?post_id=` / `?id=` and renders a preview stub until the backend is connected |
 | `download.html`    | APK download, system requirements, version details, 3-step install guide |
-| `about.html`       | Vision, creator bio (placeholder), feedback form (placeholder)           |
+| `about.html`       | Vision, Jayvardhan Bhaskar's creator bio, feedback form (placeholder)     |
 
 Shared assets:
 
@@ -75,12 +75,12 @@ nav), `≥769px` desktop nav, `≥1024px` wide layouts.
 
 ## Notes
 
-- UI palette: deep dark surfaces, glass panels, and solid `#7C3AED` pill-shaped
-  primary buttons. Original logo artwork is centralized at `/assets/agora-logo.svg`
-  for replacement with the final approved export.
-- Customize the `[Developer name]` and `[Personal motivation: …]` placeholders
-  in `about.html`, and upload your own portrait to `/assets/developer.png`.
-  The avatar reserves space and shows a pending state until the image loads.
+- UI palette: deep dark surfaces, glass panels, and solid `#8B5CF6` pill-shaped
+  primary buttons with dark text for readable contrast. Original logo artwork is
+  centralized at `/assets/agora-logo.svg` for replacement with the final approved export.
+- `about.html` names Jayvardhan Bhaskar as the app and website developer and shares
+  his motivation. The portrait is stored at `/assets/developer.png`; the avatar
+  reserves space and shows a fallback if the image cannot load.
 - `vite.config.ts` and `tsconfig.json` are unused legacy scaffold configuration.
 
 ## Launch handoff & validation

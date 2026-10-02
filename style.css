@@ -320,20 +320,17 @@ h1, h2, h3 {
   flex: none;
 }
 
+/* All filled purple actions share the same dark label. Use the brighter
+   violet for readable contrast at every button size, including on hover. */
 .btn--primary {
   border-radius: 9999px;
-  background: var(--accent-deep);
-  color: var(--text);
+  background: var(--accent);
+  color: #110819;
   box-shadow: 0 0 0 0 rgba(139, 92, 246, 0);
 }
 
-/* Restore the original dark label on exploratory app CTAs only. */
-.btn--get-app {
-  color: #110819;
-}
-
 .btn--primary:hover {
-  background: var(--accent-deep);
+  background: var(--accent);
   transform: translateY(-2px);
   box-shadow: 0 14px 40px -12px rgba(139, 92, 246, 0.45);
 }
@@ -1780,13 +1777,6 @@ h1, h2, h3 {
 
 .developer-portrait.is-ready .developer-portrait__pending {
   display: none;
-}
-
-.creator__placeholder {
-  padding: 1rem;
-  border: 1px dashed var(--border-strong);
-  border-radius: 0.75rem;
-  font-size: 0.9rem;
 }
 
 .creator__bio p {
