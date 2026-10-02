@@ -596,6 +596,15 @@ h1, h2, h3 {
   display: inline-flex;
 }
 
+/* The slim shared-link header has no hamburger, so the lockup, the secondary
+   link and the CTA all share one row. On phones the secondary link yields
+   first: the header must never overflow horizontally (the body clips it). */
+@media (max-width: 480px) {
+  .shared .nav__link {
+    display: none;
+  }
+}
+
 /* ---------- 6. Hero (home) ---------- */
 .hero {
   position: relative;
