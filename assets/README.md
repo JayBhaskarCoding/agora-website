@@ -9,7 +9,27 @@ Replace this file with the final approved SVG export without changing any HTML.
 Keep the artwork's native colors; the surrounding UI uses violet `#8B5CF6` / `#7C3AED`.
 If delivering PNG instead, update all logo sources and favicon MIME types together.
 
-## Developer portrait
+## Credits portraits
+
+The Credits page displays Jayvardhan Bhaskar's portrait from
+`/assets/developer.png` and reserves `/assets/yashvardhan-bhaskar.jpg` for
+Yashvardhan Bhaskar's supplied portrait. If Yashvardhan's image is not present,
+the rotary card shows a designed initials placeholder rather than inventing a
+photo. When adding the portrait, use a square image (at least 320×320 pixels)
+with enough room for a circular crop.
+
+The third Credits profile uses `/assets/agora-public.jpg`: a purpose-made
+community illustration for the people who use Agora. It is intentionally not
+the Agora logo or app mark; replace it only if the public/community artwork is
+updated deliberately.
+
+## Background music
+
+`/assets/bgMusic.mpeg` is the looping ambient track used by every page. The
+single-page app decodes it into one persistent Web Audio buffer source and routes
+it through a gentle low-pass filter, compressor, and very low master gain so the
+track stays soft rather than sharp. Browsers may wait for the visitor's first
+gesture before allowing sound; that first click starts the persistent source.
 
 The About page displays Jayvardhan Bhaskar's portrait from `/assets/developer.png`
 at 160×160 with `object-fit: cover`, a subtle ring, and a restrained violet glow.

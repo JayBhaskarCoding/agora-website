@@ -13,7 +13,8 @@ Pure **vanilla HTML / CSS / JS** — no frameworks, no build step. Serve the rep
 | `index.html`       | Home — hero, motive/philosophy, CTAs                                    |
 | `shared-post.html` | Landing for shared post links (WhatsApp, etc.) when the app is not installed. Parses `?post=` / `?post_id=` / `?id=` and renders a preview stub until the backend is connected |
 | `download.html`    | APK download, system requirements, version details, 3-step install guide |
-| `about.html`       | Vision, Jayvardhan Bhaskar's creator bio, feedback form (placeholder)     |
+| `about.html`       | Vision, Jayvardhan Bhaskar's creator bio, and the live feedback form     |
+| `credits.html`     | Fixed-screen rotary team credits with synchronized off-screen discs and a pendulum role sign |
 
 Shared assets:
 
@@ -49,25 +50,21 @@ The repository root **is** the static site. Point any static host
 keep `_redirects` / `robots.txt` in place. To test a shared link on a
 custom domain, share e.g. `https://your-domain/shared-post.html?post=<id>`.
 
-## Wiring up the backend (TODOs, all in `app.js`)
+## Wiring up the backend
 
 - `initSharedPost()` — `fetchPost(id)` is a stub returning a simulated
-  payload after a delay. Replace with
-  `GET /api/v1/posts/:id` (payload shape documented in the comment).
-- `initContactForm()` — the About-page form is **live**. It validates every
-  field (inline errors, announced in a live region), then delivers the
-  message one of two ways:
-
-  1. **Endpoint** — set `FORM_ENDPOINT` at the top of `app.js` (or
-     `data-endpoint="…"` on the form) to `POST` JSON to Formspree,
-     Web3Forms, your own `/api/feedback`, … A `2xx` counts as success;
-     failures surface the real reason and keep the typed message.
-  2. **Mail client** — with no endpoint set (the default), the form opens
-     the visitor's mail app with a prefilled message addressed to
-     `mail@agora.in.net`. Nothing is silently dropped.
+  payload after a delay. Replace with `GET /api/v1/posts/:id` when the API is live.
+- `functions/api/contact.js` — Cloudflare Pages Function used by the About-page
+  feedback form. It validates JSON or FormData, escapes the submitted values,
+  and sends the message through Resend to `mail@agora.in.net`.
+- Set `RESEND_API_KEY` as a Cloudflare Pages environment variable (and as a
+  local secret when using `wrangler pages dev`). Never put the key in `app.js`
+  or any browser-delivered file. The browser posts to `/api/contact`, shows
+  `Sending...` while the request is in flight, and reveals the inline
+  `Signal received` panel on a successful JSON response.
 
   A hidden honeypot field absorbs bots, and `SUBMIT_TIMEOUT` (12s) keeps a
-  slow endpoint from hanging the button.
+  slow API request from hanging the button.
 
 ## Asset paths
 
@@ -87,16 +84,29 @@ nav), `≥769px` desktop nav, `≥1024px` wide layouts.
 
 ## Notes
 
-- The feedback form on `about.html` works without a server: set
-  `FORM_ENDPOINT` in `app.js` to collect submissions over HTTP, or leave it
-  empty to hand messages to the visitor's mail client.
-- Brand lockup: the header and footer render the mark **plus** the “Agora”
-  wordmark beside it (`.nav__logo-name` in `style.css`) — one shared lockup on
-  every page. `shared-post.html`'s slim footer uses the `.nav__logo--compact`
-  variant (smaller mark, mono uppercase name) to fit its tiny mono row.
-- UI palette: deep dark surfaces, glass panels, and solid `#8B5CF6` pill-shaped
-  primary buttons with dark text for readable contrast. Original logo artwork is
-  centralized at `/assets/agora-logo.svg` for replacement with the final approved export.
+- The feedback form on `about.html` uses the same-origin `/api/contact`
+  Cloudflare Pages Function and Resend. Keep `RESEND_API_KEY` server-side; the
+  direct email link below the form remains available as a human fallback.
+- Brand lockup: the header and footer render the app-style mark **plus** the
+  lowercase `agora.` wordmark (`.nav__logo-name` in `style.css`), including the
+  violet period used inside the app. The same lockup is shared across every
+  page; `shared-post.html`'s slim footer uses the `.nav__logo--compact` variant
+  so it stays compact without changing the brand treatment.
+- UI palette: deep dark surfaces, glass panels, and violet-to-blue gradient
+  pill-shaped primary buttons with dark text for readable contrast. The same
+  gradient carries the period in the `agora.` lockup, while the wordmark fades
+  from full brightness on the left to roughly 74% visibility on the right.
+  Original logo artwork is centralized at `/assets/agora-logo.svg` for
+  replacement with the final approved export.
+- Navigation is a lightweight vanilla-JS PJAX flow: internal HTML links are fetched,
+  the target header/main shell is swapped in place, and history back/forward rehydrates
+  the correct page without a full document reload.
+- Ambient interaction uses `/assets/bgMusic.mpeg` as a softly filtered, low-volume
+  looping Web Audio buffer. A single AudioBufferSourceNode and gain graph live outside
+  the swapped page shell, so the track continues across PJAX navigation without a
+  reset or volume spike. The first document click satisfies autoplay policy; the
+  visible dot-matrix mesh breathes with the track. The custom cursor is limited to
+  fine pointers and is disabled for reduced motion.
 - `about.html` names Jayvardhan Bhaskar as the app and website developer and shares
   his motivation. The portrait is stored at `/assets/developer.png`; the avatar
   reserves space and shows a fallback if the image cannot load.
