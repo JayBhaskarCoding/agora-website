@@ -31,6 +31,7 @@
     <div class="container nav">
       <a class="nav__logo" href="/index.html" aria-label="Agora — home">
         <img class="nav__logo-mark" src="/assets/agora-logo.svg" width="44" height="44" alt="Agora" />
+        <span class="nav__logo-name">Agora</span>
       </a>
 
       <nav class="nav__links" aria-label="Primary">
@@ -198,46 +199,62 @@
         </div>
 
         <div class="form-card" data-reveal data-reveal-delay="120">
-          <!-- Placeholder form: app.js validates and confirms.
-               Wire the real endpoint in initContactForm() (see app.js). -->
+          <!-- Live form: app.js validates every field, then either POSTs the
+               message to FORM_ENDPOINT (see app.js) or hands it to the
+               visitor's mail client addressed to mail@agora.in.net. -->
           <form id="feedback-form" novalidate>
             <div class="form-row">
               <div class="field">
                 <label for="fb-name">Name</label>
-                <input id="fb-name" name="name" type="text" placeholder="How should we address you?" autocomplete="name" required />
+                <input id="fb-name" name="name" type="text" placeholder="How should we address you?"
+                       autocomplete="name" maxlength="80" required data-validate aria-describedby="fb-name-error" />
+                <p class="field__error" id="fb-name-error" data-error-for="name" hidden></p>
               </div>
               <div class="field">
                 <label for="fb-email">Email</label>
-                <input id="fb-email" name="email" type="email" placeholder="you@somewhere.com" autocomplete="email" required />
+                <input id="fb-email" name="email" type="email" placeholder="you@somewhere.com"
+                       autocomplete="email" maxlength="120" required data-validate aria-describedby="fb-email-error" />
+                <p class="field__error" id="fb-email-error" data-error-for="email" hidden></p>
               </div>
             </div>
 
             <div class="field">
               <label for="fb-topic">Topic</label>
-              <select id="fb-topic" name="topic" required>
+              <select id="fb-topic" name="topic" required data-validate aria-describedby="fb-topic-error">
                 <option value="feedback" selected>General feedback</option>
                 <option value="bug">Bug report</option>
                 <option value="moderation">Moderation &amp; rules</option>
                 <option value="press">Press</option>
                 <option value="hello">Just saying hi</option>
               </select>
+              <p class="field__error" id="fb-topic-error" data-error-for="topic" hidden></p>
             </div>
 
             <div class="field">
               <label for="fb-message">Message</label>
-              <textarea id="fb-message" name="message" placeholder="What should the square hear?" required></textarea>
+              <textarea id="fb-message" name="message" placeholder="What should the square hear?"
+                        maxlength="2000" required data-validate aria-describedby="fb-message-error"></textarea>
+              <p class="field__error" id="fb-message-error" data-error-for="message" hidden></p>
             </div>
 
-            <button class="btn btn--primary btn--lg btn--block" type="submit">
-              Send message
+            <!-- Spam trap: hidden from people, irresistible to bots. -->
+            <div class="field field--hp" aria-hidden="true">
+              <label for="fb-company">Company</label>
+              <input id="fb-company" name="company" type="text" tabindex="-1" autocomplete="off" data-honeypot />
+            </div>
+
+            <button class="btn btn--primary btn--lg btn--block" type="submit" data-submit>
+              <span data-button-label>Send message</span>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" />
               </svg>
             </button>
 
+            <p class="form-status" id="feedback-status" role="status" aria-live="polite" hidden></p>
+
             <p class="form-note">
-              Placeholder form — no data leaves your browser yet.<br />
-              Endpoint hookup lives in <code style="text-transform:none;letter-spacing:.04em;">app.js → initContactForm()</code>.
+              Opens in your own mail app, addressed to <code>mail@agora.in.net</code>.<br />
+              Have a server? Set <code>FORM_ENDPOINT</code> in app.js — no other change needed.
             </p>
           </form>
 
@@ -246,10 +263,8 @@
               <circle cx="12" cy="12" r="9" /><path d="m8.5 12.5 2.5 2.5 5-5.5" />
             </svg>
             <h3>Signal received.</h3>
-            <p>
-              Thank you — that&rsquo;s exactly the kind of input that shapes the
-              square. This demo form isn&rsquo;t connected to a server yet;
-              for anything urgent, email us directly below.
+            <p data-success-note>
+              Your message is on its way — a human reads every one of these.
             </p>
           </div>
 
@@ -280,8 +295,9 @@
     <div class="container">
       <div class="site-footer__grid">
         <div class="site-footer__brand">
-          <a class="nav__logo" href="/index.html" aria-label="Agora — home">
+          <a class="nav__logo nav__logo--footer" href="/index.html" aria-label="Agora — home">
             <img class="nav__logo-mark" src="/assets/agora-logo.svg" width="44" height="44" alt="Agora" />
+            <span class="nav__logo-name">Agora</span>
           </a>
           <p>A human-first digital public square for free speech. Chronological by design, ad-free by principle.</p>
           <span class="site-footer__signal"><i aria-hidden="true"></i> signal stable</span>

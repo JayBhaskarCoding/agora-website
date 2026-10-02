@@ -54,8 +54,20 @@ custom domain, share e.g. `https://your-domain/shared-post.html?post=<id>`.
 - `initSharedPost()` — `fetchPost(id)` is a stub returning a simulated
   payload after a delay. Replace with
   `GET /api/v1/posts/:id` (payload shape documented in the comment).
-- `initContactForm()` — the About-page form is a demo; replace the
-  `setTimeout` with a `POST` to your feedback endpoint.
+- `initContactForm()` — the About-page form is **live**. It validates every
+  field (inline errors, announced in a live region), then delivers the
+  message one of two ways:
+
+  1. **Endpoint** — set `FORM_ENDPOINT` at the top of `app.js` (or
+     `data-endpoint="…"` on the form) to `POST` JSON to Formspree,
+     Web3Forms, your own `/api/feedback`, … A `2xx` counts as success;
+     failures surface the real reason and keep the typed message.
+  2. **Mail client** — with no endpoint set (the default), the form opens
+     the visitor's mail app with a prefilled message addressed to
+     `mail@agora.in.net`. Nothing is silently dropped.
+
+  A hidden honeypot field absorbs bots, and `SUBMIT_TIMEOUT` (12s) keeps a
+  slow endpoint from hanging the button.
 
 ## Asset paths
 
@@ -75,6 +87,13 @@ nav), `≥769px` desktop nav, `≥1024px` wide layouts.
 
 ## Notes
 
+- The feedback form on `about.html` works without a server: set
+  `FORM_ENDPOINT` in `app.js` to collect submissions over HTTP, or leave it
+  empty to hand messages to the visitor's mail client.
+- Brand lockup: the header and footer render the mark **plus** the “Agora”
+  wordmark beside it (`.nav__logo-name` in `style.css`) — one shared lockup on
+  every page. `shared-post.html`'s slim footer uses the `.nav__logo--compact`
+  variant (smaller mark, mono uppercase name) to fit its tiny mono row.
 - UI palette: deep dark surfaces, glass panels, and solid `#8B5CF6` pill-shaped
   primary buttons with dark text for readable contrast. Original logo artwork is
   centralized at `/assets/agora-logo.svg` for replacement with the final approved export.

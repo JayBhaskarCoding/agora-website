@@ -397,6 +397,7 @@ h1, h2, h3 {
 .nav__logo {
   display: inline-flex;
   align-items: center;
+  gap: 0.7rem;
   flex: none;
 }
 
@@ -405,6 +406,45 @@ h1, h2, h3 {
   height: 44px;
   object-fit: contain;
   flex: none;
+}
+
+/* Brand lockup — the wordmark sits beside the mark, in the site type style */
+.nav__logo-name {
+  font-family: var(--font-sans);
+  font-size: 1.18rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  color: var(--text);
+  transition: color 0.25s ease;
+}
+
+.nav__logo:hover .nav__logo-name,
+.nav__logo:focus-visible .nav__logo-name {
+  color: var(--accent);
+}
+
+.nav__logo--footer .nav__logo-name {
+  font-size: 1.25rem;
+}
+
+/* Compact variant — for the tiny mono slim footer */
+.nav__logo--compact {
+  gap: 0.5rem;
+}
+
+.nav__logo--compact .nav__logo-mark {
+  width: 24px;
+  height: 24px;
+}
+
+.nav__logo--compact .nav__logo-name {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 
 .nav__links {
@@ -554,6 +594,15 @@ h1, h2, h3 {
 
 .shared .nav__cta {
   display: inline-flex;
+}
+
+/* The slim shared-link header has no hamburger, so the lockup, the secondary
+   link and the CTA all share one row. On phones the secondary link yields
+   first: the header must never overflow horizontally (the body clips it). */
+@media (max-width: 480px) {
+  .shared .nav__link {
+    display: none;
+  }
 }
 
 /* ---------- 6. Hero (home) ---------- */
@@ -1894,6 +1943,59 @@ h1, h2, h3 {
   line-height: 2;
 }
 
+.form-note code {
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+
+/* Validation feedback — inline, announced, never colour-only */
+.field__error {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--refuse);
+}
+
+.field.has-error input,
+.field.has-error select,
+.field.has-error textarea {
+  border-color: rgba(244, 63, 94, 0.55);
+}
+
+.field.has-error input:focus,
+.field.has-error select:focus,
+.field.has-error textarea:focus {
+  border-color: rgba(244, 63, 94, 0.75);
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.14);
+}
+
+.form-status {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.form-status--error {
+  color: var(--refuse);
+}
+
+.form-status--ok {
+  color: var(--build);
+}
+
+/* Honeypot: off-screen for people, still in the form for bots */
+.field--hp {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .form-success {
   text-align: center;
   padding: 2.5rem 1rem;
@@ -2208,9 +2310,21 @@ h1, h2, h3 {
     width: min(1120px, 100% - 2rem);
   }
 
+  .nav__logo {
+    gap: 0.55rem;
+  }
+
   .nav__logo-mark {
     width: 38px;
     height: 38px;
+  }
+
+  .nav__logo-name {
+    font-size: 1.08rem;
+  }
+
+  .nav__logo--footer .nav__logo-name {
+    font-size: 1.15rem;
   }
 
   .nav__toggle {
