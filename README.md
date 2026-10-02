@@ -4,8 +4,7 @@ The launch site for **Agora**, the new town square for free speech.
 A human-first digital public square: zero ads, absolute chronology, strict
 moderation of harm.
 
-Pure **vanilla HTML / CSS / JS** — no frameworks, no build step. Every page
-runs locally, straight from the file system.
+Pure **vanilla HTML / CSS / JS** — no frameworks, no build step. Serve the repository root locally to resolve root-absolute asset URLs.
 
 ## Pages
 
@@ -22,8 +21,8 @@ Shared assets:
 | ------------------ | -------------------------------------------------- |
 | `style.css`        | Mobile-first design system for all pages           |
 | `app.js`           | Routing, mobile menu, smooth scroll, reveals, feedback form, shared-post preview |
-| `agora-beta.apk`   | The current Android build served by the download buttons |
-| `favicon.svg`      | Logo / tab icon                                    |
+| `app-beta-v2.0.apk`   | The current Android build served by the download buttons |
+| `assets/agora-logo.svg`      | Logo / tab icon                                    |
 | `assets/`          | App screenshots shown in the phone frames — see `assets/README.md` for the exact filenames to replace |
 
 ## Run locally
@@ -76,9 +75,24 @@ nav), `≥769px` desktop nav, `≥1024px` wide layouts.
 
 ## Notes
 
-- Brand assets (palette, type, voice) match the Agora app and logo:
-  ink navy + cyan signal + emerald status; indigo/cream logo mark.
+- UI palette: deep dark surfaces, glass panels, and solid `#A855F7` pill-shaped
+  primary buttons. Original logo artwork is centralized at `/assets/agora-logo.svg`
+  for replacement with the final approved export.
 - The placeholder name "Jay B." on `about.html` — replace with the
-  creator's real name/photo.
-- `src/`, `vite.config.ts`, `tsconfig.json` are a legacy React scaffold
-  from an earlier concept and are no longer used by the site.
+  creator's real name (the generic initials avatar has been removed).
+- `vite.config.ts` and `tsconfig.json` are unused legacy scaffold configuration.
+
+## Launch handoff & validation
+
+See [`assets/README.md`](assets/README.md) for the exact **3 screenshot files**
+that fill all **6 placements**, logo replacement instructions, and APK handoff.
+Old generated screenshot stand-ins have been removed; their frames remain and
+show a pending message until real captures are uploaded. Do not add device frames.
+
+All contact links use `mail@agora.in.net`. Download CTAs lead to the download
+page or serve the existing beta APK; this update does not certify a final release.
+
+```bash
+npm test             # dependency-free HTML/asset/theme contract tests
+node --check app.js  # JavaScript syntax validation
+```

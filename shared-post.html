@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Someone shared an Agora post with you</title>
   <meta name="description" content="It looks like someone shared an Agora post with you, but you don't have the app installed yet. Download Agora for Android — free, no ads, no tracking." />
   <meta name="robots" content="index, follow" />
-  <meta name="theme-color" content="#05080f" />
+  <meta name="theme-color" content="#08060d" />
 
   <!-- Open Graph / Twitter (used when the link lands in chat apps) -->
   <meta property="og:type" content="website" />
@@ -16,7 +16,7 @@
   <meta name="twitter:title" content="Someone shared an Agora post with you" />
   <meta name="twitter:description" content="Agora is the new town square for free speech. Get the Android app to read the post." />
 
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href="/assets/agora-logo.svg" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -30,11 +30,7 @@
   <header class="site-header">
     <div class="container nav">
       <a class="nav__logo" href="/index.html" aria-label="Agora — home">
-        <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-          <rect width="32" height="32" rx="8" fill="#3f39cb" />
-          <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
-        </svg>
-        <span>Agora</span>
+        <img class="nav__logo-mark" src="/assets/agora-logo.svg" width="44" height="44" alt="Agora" />
       </a>
 
       <div class="nav__actions">
@@ -64,11 +60,11 @@
         </p>
 
         <div class="btn-row">
-          <a class="btn btn--primary btn--lg btn--block" href="/agora-beta.apk" download>
+          <a class="btn btn--primary btn--lg btn--block" href="/app-beta-v2.0.apk" download>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
             </svg>
-            Download Agora (APK)
+            Download APK
           </a>
           <a class="btn btn--ghost" href="/download.html">Learn more</a>
           <a class="btn btn--ghost" href="/index.html">About Agora</a>
@@ -96,7 +92,6 @@
           <!-- Loading state: id found, (simulated) fetch in flight -->
           <div id="preview-loading" hidden>
             <div class="post-preview__head">
-              <span class="post-preview__avatar">?</span>
               <div>
                 <p class="post-preview__author">fetching author…</p>
                 <p class="post-preview__time"><span data-preview-status>fetching preview…</span></p>
@@ -110,7 +105,6 @@
           <!-- Result state: simulated payload rendered -->
           <div id="preview-result" hidden>
             <div class="post-preview__head">
-              <span class="post-preview__avatar">•</span>
               <div>
                 <p class="post-preview__author" data-author>—</p>
                 <p class="post-preview__time"><span data-created>—</span></p>
@@ -134,8 +128,8 @@
           <div class="phone__screen">
             <img src="/assets/shared-post-preview.png" width="1080" height="1920" loading="lazy" decoding="async"
                  alt="How a shared post looks once opened inside the Agora Android app" />
+            <span class="phone__pending">Android preview<br /><small>Device capture coming soon</small></span>
           </div>
-          <span class="phone__notch" aria-hidden="true"></span>
         </figure>
         <div class="peek__text">
           <p class="eyebrow">Inside the app</p>
@@ -167,7 +161,7 @@
             </div>
             <h3>Download</h3>
             <p>
-              Tap <code>Download Agora (APK)</code> above. The file (≈24&nbsp;MB)
+              Tap <code>Download APK</code> above. The file (≈38&nbsp;MB)
               saves to your <strong>Downloads</strong> folder — no app store,
               no account needed.
             </p>
@@ -230,7 +224,10 @@
   <footer class="slim-footer">
     <div class="container">
       <span>© <span id="year">2026</span> Agora — a public square for people</span>
-      <a href="/index.html">agora / home</a>
+      <a class="nav__logo" href="/index.html" aria-label="Agora — home">
+        <img class="nav__logo-mark" src="/assets/agora-logo.svg" width="44" height="44" alt="Agora" />
+      </a>
+      <a href="mailto:mail@agora.in.net">mail@agora.in.net</a>
       <a href="/download.html">all downloads</a>
     </div>
   </footer>

@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Agora — The internet, with room to think.</title>
   <meta name="description" content="Agora is the new town square for free speech: a human-first public square with zero ads, absolute chronology, and strict moderation of harm. Download the Android app." />
   <meta name="robots" content="index, follow" />
-  <meta name="theme-color" content="#05080f" />
+  <meta name="theme-color" content="#08060d" />
 
   <!-- Open Graph / Twitter -->
   <meta property="og:type" content="website" />
@@ -16,7 +16,7 @@
   <meta name="twitter:title" content="Agora — The internet, with room to think." />
   <meta name="twitter:description" content="A human-first digital public square for free speech. Zero ads. Absolute chronology. Strict moderation." />
 
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href="/assets/agora-logo.svg" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -30,22 +30,18 @@
   <header class="site-header">
     <div class="container nav">
       <a class="nav__logo" href="/index.html" aria-label="Agora — home">
-        <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-          <rect width="32" height="32" rx="8" fill="#3f39cb" />
-          <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
-        </svg>
-        <span>Agora</span>
+        <img class="nav__logo-mark" src="/assets/agora-logo.svg" width="44" height="44" alt="Agora" />
       </a>
 
       <nav class="nav__links" aria-label="Primary">
-        <a class="nav__link" data-page="home" data-nav-key="home">The Square</a>
+        <a class="nav__link" href="/index.html" data-page="home" data-nav-key="home">The Square</a>
         <a class="nav__link" href="/index.html#why">Why Agora</a>
-        <a class="nav__link" data-page="download" data-nav-key="download">Download</a>
-        <a class="nav__link" data-page="about" data-nav-key="about">About</a>
+        <a class="nav__link" href="/download.html" data-page="download" data-nav-key="download">Download</a>
+        <a class="nav__link" href="/about.html" data-page="about" data-nav-key="about">About</a>
       </nav>
 
       <div class="nav__actions">
-        <a class="btn btn--primary btn--sm nav__cta" data-page="download">Get the app</a>
+        <a class="btn btn--primary btn--sm nav__cta" href="/download.html" data-page="download">Download APK</a>
         <button class="nav__toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open navigation menu">
           <span class="nav__toggle-bar"></span>
           <span class="nav__toggle-bar"></span>
@@ -58,7 +54,7 @@
       <a href="/index.html#why">Why Agora</a>
       <a href="/download.html">Download</a>
       <a href="/about.html">About</a>
-      <a class="btn btn--primary" href="/download.html">Get the app</a>
+      <a class="btn btn--primary" href="/download.html">Download APK</a>
     </nav>
   </header>
 
@@ -88,8 +84,8 @@
           </p>
 
           <div class="hero__actions">
-            <a class="btn btn--primary btn--lg" data-page="download">
-              Download for Android
+            <a class="btn btn--primary btn--lg" href="/download.html" data-page="download">
+              Download APK
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
               </svg>
@@ -98,7 +94,7 @@
           </div>
 
           <p class="hero__meta">
-            <span>Android · v0.9 beta</span>
+            <span>Android · APK</span>
             <span>Zero ads</span>
             <span>Absolute chronology</span>
             <span>Moderated with care</span>
@@ -106,10 +102,10 @@
         </div>
 
         <!-- ============ HERO SCREENSHOT ============
-             Real app screenshot inside a phone bezel.
+             App screenshot slot inside a clean Android bezel.
              TODO (screenshots): replace /assets/home-feed.png with your real
-             9:16 portrait Android screenshot (e.g. 1080×1920 or 1080×2400 PNG).
-             The frame is aspect-ratio locked, so any 9:16-ish capture fits. -->
+             portrait Android screenshot (1080×1920 PNG preferred).
+             Taller captures are contained, never cropped; do not add a device frame. -->
         <div class="hero__visual" data-reveal>
           <figure class="phone phone--hero">
             <div class="phone__screen">
@@ -121,10 +117,10 @@
                 decoding="async"
                 fetchpriority="high"
               />
+              <span class="phone__pending">Android preview<br /><small>Device capture coming soon</small></span>
             </div>
-            <span class="phone__notch" aria-hidden="true"></span>
           </figure>
-          <p class="hero__visual-caption mono" aria-hidden="true">Home feed · v0.9 beta</p>
+          <p class="hero__visual-caption mono" aria-hidden="true">Home feed · Android</p>
         </div>
       </div>
     </section>
@@ -229,10 +225,10 @@
       <div class="container">
         <div class="section-head section-head--center" data-reveal>
           <p class="eyebrow eyebrow--center">02 — Inside the app</p>
-          <h2 class="h2">The square, as it actually looks.</h2>
+          <h2 class="h2">A closer look at the square.</h2>
           <p>
-            No concept renders. These are screenshots from the current Android
-            build — the same feed, profile, and post views you install.
+            Explore the feed, profile, and shared-post experience. Updated Android
+            screenshots are being prepared for launch.
           </p>
         </div>
 
@@ -242,8 +238,8 @@
               <div class="phone__screen">
                 <img src="/assets/home-feed.png" width="1080" height="1920" loading="lazy" decoding="async"
                      alt="Agora home feed: newest posts first, no ranking, no ads" />
+                <span class="phone__pending">Android preview<br /><small>Device capture coming soon</small></span>
               </div>
-              <span class="phone__notch" aria-hidden="true"></span>
             </div>
             <figcaption>
               <strong>Home feed</strong>
@@ -256,8 +252,8 @@
               <div class="phone__screen">
                 <img src="/assets/profile-screen.png" width="1080" height="1920" loading="lazy" decoding="async"
                      alt="Agora profile screen: a member's posts and details" />
+                <span class="phone__pending">Android preview<br /><small>Device capture coming soon</small></span>
               </div>
-              <span class="phone__notch" aria-hidden="true"></span>
             </div>
             <figcaption>
               <strong>Profile</strong>
@@ -270,8 +266,8 @@
               <div class="phone__screen">
                 <img src="/assets/shared-post-preview.png" width="1080" height="1920" loading="lazy" decoding="async"
                      alt="A single Agora post opened from a shared link" />
+                <span class="phone__pending">Android preview<br /><small>Device capture coming soon</small></span>
               </div>
-              <span class="phone__notch" aria-hidden="true"></span>
             </div>
             <figcaption>
               <strong>Shared post</strong>
@@ -300,12 +296,12 @@
         <div class="cta-panel" data-reveal>
           <h2>Bring your voice. <span class="accent">Leave the noise.</span></h2>
           <p>
-            Agora for Android is live now — free, chronological, and governed by clear
+            Try the Agora Android beta — free, chronological, and governed by clear
             rules instead of hidden metrics. One file, one tap, a square of your own.
           </p>
           <div class="hero__actions">
-            <a class="btn btn--primary btn--lg" data-page="download">
-              Download for Android
+            <a class="btn btn--primary btn--lg" href="/download.html" data-page="download">
+              Download APK
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
               </svg>
@@ -314,7 +310,7 @@
           </div>
           <p class="hero__meta">
             <span>Android 8+</span>
-            <span>~24 MB</span>
+            <span>~38 MB</span>
             <span>No ads · no tracking</span>
           </p>
         </div>
@@ -328,11 +324,7 @@
       <div class="site-footer__grid">
         <div class="site-footer__brand">
           <a class="nav__logo" href="/index.html" aria-label="Agora — home">
-            <svg class="nav__logo-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-              <rect width="32" height="32" rx="8" fill="#3f39cb" />
-              <circle cx="16" cy="16" r="7.2" fill="none" stroke="#ebeacb" stroke-width="3.4" />
-            </svg>
-            <span>Agora</span>
+            <img class="nav__logo-mark" src="/assets/agora-logo.svg" width="44" height="44" alt="Agora" />
           </a>
           <p>A human-first digital public square for free speech. Chronological by design, ad-free by principle.</p>
           <span class="site-footer__signal"><i aria-hidden="true"></i> signal stable</span>
@@ -350,9 +342,9 @@
           <h4>Contact</h4>
           <p>
             Feedback, questions, press:<br />
-            <a href="mailto:mail@auth-agora.info">mail@auth-agora.info</a>
+            <a href="mailto:mail@agora.in.net">mail@agora.in.net</a>
           </p>
-          <p>Android app · v0.9 beta<br />iOS &amp; desktop — coming soon</p>
+          <p>Android app · APK<br />iOS &amp; desktop — coming soon</p>
         </div>
       </div>
 

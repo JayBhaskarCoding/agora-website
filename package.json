@@ -4,6 +4,7 @@
   "private": true,
   "description": "Agora — the new town square for free speech. Static multi-page marketing site (vanilla HTML/CSS/JS).",
   "scripts": {
+    "test": "python3 -m unittest discover -s tests -v",
     "dev": "python3 -m http.server 5173 --bind 0.0.0.0",
     "start": "python3 -m http.server 5173 --bind 0.0.0.0",
     "preview": "python3 -m http.server 4173 --bind 0.0.0.0"
