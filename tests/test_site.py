@@ -141,6 +141,46 @@ class LaunchContract(unittest.TestCase):
         self.assertIn("scroll-margin-top: 5rem", rule)
         self.assertIn("scroll-behavior: smooth", self.css)
 
+    def test_feedback_form_is_wired(self):
+        """The About form must actually deliver: validated, announced, sent."""
+        about = (ROOT / "about.html").read_text()
+        page = self.pages["about.html"]
+
+        form = [a for tag, a in page.tags if a.get("id") == "feedback-form"]
+        self.assertEqual(len(form), 1, "About page needs the feedback form")
+
+        # No stale placeholder copy left behind.
+        for stale in ["Placeholder form", "no data leaves your browser", "isn\u2019t connected to a server yet"]:
+            self.assertNotIn(stale, about)
+
+        # Every validated field is marked and owns an inline error slot.
+        for name in ["name", "email", "topic", "message"]:
+            self.assertIn('data-validate', about)
+            self.assertIn('data-error-for="%s"' % name, about)
+            self.assertIn('aria-describedby="fb-%s-error"' % name, about)
+
+        # Submit outcome is announced, not silent.
+        status = [a for tag, a in page.tags if a.get("id") == "feedback-status"]
+        self.assertEqual(len(status), 1)
+        self.assertEqual(status[0].get("role"), "status")
+        self.assertEqual(status[0].get("aria-live"), "polite")
+
+        # Spam trap + JS-driven success copy.
+        self.assertIn("data-honeypot", about)
+        self.assertIn("data-success-note", about)
+        self.assertIn("data-button-label", about)
+
+        app = (ROOT / "app.js").read_text()
+        self.assertIn("FORM_ENDPOINT", app)
+        self.assertIn("CONTACT_EMAIL", app)
+        self.assertIn("mail@agora.in.net", app)
+        self.assertIn("mailto:", app, "Fallback must hand the message to the mail client")
+        self.assertIn("fetch(url", app, "Endpoint path must POST")
+        self.assertIn("AbortController", app, "Endpoint path must time out")
+
+        for rule in [".field__error", ".form-status--error", ".form-status--ok", ".field--hp"]:
+            self.assertIn(rule, self.css, "Form feedback needs styling: %s" % rule)
+
     def test_creator_and_about_cta(self):
         page = self.pages["about.html"]
         avatars = [a for tag, a in page.tags if a.get("class") == "developer-avatar"]

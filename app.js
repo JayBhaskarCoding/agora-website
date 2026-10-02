@@ -12,7 +12,7 @@
      3. Smooth scrolling  — header-offset aware, reduced-motion safe
      4. Reveal on scroll  — IntersectionObserver entrance animations
      5. Chrome            — header scroll state, active nav, year
-     6. Feedback form     — placeholder submit (no backend yet)
+     6. Feedback form     — validation + submit (endpoint or mail client)
      7. Shared-post       — URL param parsing + post preview stub
    ============================================================ */
 
@@ -199,35 +199,225 @@
   }
 
   /* ------------------------------------------------------------
-     6. FEEDBACK FORM (placeholder)
-     No backend yet — the form validates, "sends", and confirms.
+     6. FEEDBACK FORM
+     Validates properly, then delivers the message one of two ways:
+
+       · ENDPOINT — set FORM_ENDPOINT below (or data-endpoint="…"
+         on the form) to POST JSON to Formspree, Web3Forms, your
+         own /api/feedback, …  Expects a 2xx response.
+       · MAILTO   — with no endpoint configured, the message is
+         handed to the visitor's mail client, addressed to
+         CONTACT_EMAIL. Nothing is silently dropped.
+
+     Both paths end in the same accessible success panel.
      ------------------------------------------------------------ */
+  var FORM_ENDPOINT = '';                    // e.g. 'https://formspree.io/f/abcdwxyz'
+  var CONTACT_EMAIL = 'mail@agora.in.net';
+  var SUBMIT_TIMEOUT = 12000;                // ms before we give up on the endpoint
+
   function initContactForm() {
     var form = doc.getElementById('feedback-form');
     if (!form) return;
 
     var success = doc.getElementById('feedback-success');
-    var button = form.querySelector('button[type="submit"]');
+    var status = doc.getElementById('feedback-status');
+    var button = form.querySelector('[data-submit]');
+    var label = button ? button.querySelector('[data-button-label]') : null;
+    var endpoint = form.getAttribute('data-endpoint') || FORM_ENDPOINT;
+    var idleLabel = label ? label.textContent : '';
+    var fields = form.querySelectorAll('[data-validate]');
+
+    var RULES = {
+      name: function (value) {
+        return value.trim().length >= 2 ? '' : 'Please tell us your name.';
+      },
+      email: function (value) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value.trim())
+          ? ''
+          : 'That email address looks incomplete.';
+      },
+      topic: function (value) {
+        return value ? '' : 'Choose a topic so it reaches the right inbox.';
+      },
+      message: function (value) {
+        var text = value.trim();
+        if (text.length < 10) return 'A little more detail helps — at least 10 characters.';
+        if (text.length > 2000) return 'Please keep it under 2000 characters.';
+        return '';
+      }
+    };
+
+    function setStatus(message, kind) {
+      if (!status) return;
+      status.textContent = message || '';
+      status.className = 'form-status' + (kind ? ' form-status--' + kind : '');
+      status.hidden = !message;
+    }
+
+    function setError(input, message) {
+      var note = form.querySelector('[data-error-for="' + input.name + '"]');
+      var wrap = input.closest ? input.closest('.field') : null;
+      if (message) {
+        input.setAttribute('aria-invalid', 'true');
+        if (wrap) wrap.classList.add('has-error');
+        if (note) {
+          note.textContent = message;
+          note.hidden = false;
+        }
+      } else {
+        input.removeAttribute('aria-invalid');
+        if (wrap) wrap.classList.remove('has-error');
+        if (note) {
+          note.textContent = '';
+          note.hidden = true;
+        }
+      }
+    }
+
+    function validate(input) {
+      var rule = RULES[input.name];
+      if (!rule) return true;
+      var message = rule(input.value || '');
+      setError(input, message);
+      return !message;
+    }
+
+    // Only nag once a field has been touched — never on first focus.
+    Array.prototype.forEach.call(fields, function (input) {
+      input.addEventListener('blur', function () {
+        if ((input.value || '').trim() || input.getAttribute('aria-invalid')) validate(input);
+      });
+      input.addEventListener('input', function () {
+        if (input.getAttribute('aria-invalid')) validate(input);
+      });
+      input.addEventListener('change', function () {
+        if (input.getAttribute('aria-invalid') || input.tagName === 'SELECT') validate(input);
+      });
+    });
+
+    function setBusy(busy) {
+      if (button) {
+        button.disabled = busy;
+        if (busy) button.setAttribute('aria-busy', 'true');
+        else button.removeAttribute('aria-busy');
+      }
+      if (label) label.textContent = busy ? 'Sending…' : idleLabel;
+    }
+
+    function collect() {
+      var topic = form.elements.topic;
+      return {
+        name: (form.elements.name.value || '').trim(),
+        email: (form.elements.email.value || '').trim(),
+        topic: topic.value,
+        topicLabel: topic.options[topic.selectedIndex] ? topic.options[topic.selectedIndex].text : topic.value,
+        message: (form.elements.message.value || '').trim(),
+        page: window.location.href,
+        submittedAt: new Date().toISOString()
+      };
+    }
+
+    // Errors already written for humans survive the rejection handler below.
+    function friendly(message) {
+      var error = new Error(message);
+      error.friendly = true;
+      return error;
+    }
+
+    function postFeedback(url, payload) {
+      var controller = typeof AbortController === 'function' ? new AbortController() : null;
+      var timer = window.setTimeout(function () {
+        if (controller) controller.abort();
+      }, SUBMIT_TIMEOUT);
+
+      return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller ? controller.signal : undefined
+      }).then(function (response) {
+        if (!response.ok) throw friendly('The server refused the message (HTTP ' + response.status + ').');
+        return response.text().catch(function () { return ''; });   // many endpoints reply with an empty body
+      }).then(function () {
+        window.clearTimeout(timer);
+        return true;
+      }, function (error) {
+        window.clearTimeout(timer);
+        if (error && error.friendly) throw error;
+        if (error && error.name === 'AbortError') throw friendly('That took too long. Please try again.');
+        throw friendly('We couldn\'t reach the server. Check your connection and try again.');
+      });
+    }
+
+    function openMailClient(payload) {
+      var subject = '[Agora] ' + payload.topicLabel;
+      var body = 'Name: ' + payload.name + '\n' +
+        'Email: ' + payload.email + '\n' +
+        'Topic: ' + payload.topicLabel + '\n\n' +
+        payload.message + '\n\n' +
+        '— sent from ' + payload.page;
+      window.location.href = 'mailto:' + CONTACT_EMAIL +
+        '?subject=' + encodeURIComponent(subject) +
+        '&body=' + encodeURIComponent(body);
+    }
+
+    function showSuccess(mode) {
+      var note = success ? success.querySelector('[data-success-note]') : null;
+      if (note) {
+        note.textContent = mode === 'mailto'
+          ? 'Your mail app should be open with the message ready to send to ' + CONTACT_EMAIL +
+            '. If nothing opened, write to us directly below.'
+          : 'Your message is on its way — a human reads every one of these.';
+      }
+      form.hidden = true;
+      if (success) {
+        success.hidden = false;
+        success.setAttribute('tabindex', '-1');
+        success.focus();
+      }
+    }
 
     form.addEventListener('submit', function (event) {
       event.preventDefault();
-      if (!form.reportValidity()) return;
+      setStatus('');
 
-      button.disabled = true;
-      button.textContent = 'Sending…';
+      var firstInvalid = null;
+      Array.prototype.forEach.call(fields, function (input) {
+        if (!validate(input) && !firstInvalid) firstInvalid = input;
+      });
 
-      /* TODO: wire up the real endpoint, e.g.
-         var payload = Object.fromEntries(new FormData(form).entries());
-         fetch('/api/feedback', {
-           method: 'POST',
-           headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify(payload)
-         });
-      */
-      window.setTimeout(function () {
-        form.hidden = true;
-        if (success) success.hidden = false;
-      }, 900);
+      if (firstInvalid) {
+        setStatus('Check the highlighted fields and try again.', 'error');
+        firstInvalid.focus();
+        return;
+      }
+
+      // Honeypot: people never see this field, so a value means a bot.
+      var trap = form.querySelector('[data-honeypot]');
+      if (trap && trap.value) {
+        showSuccess('sent');
+        return;
+      }
+
+      var payload = collect();
+      setBusy(true);
+
+      if (!endpoint) {
+        openMailClient(payload);
+        setBusy(false);
+        showSuccess('mailto');
+        return;
+      }
+
+      postFeedback(endpoint, payload).then(function () {
+        setBusy(false);
+        showSuccess('sent');
+      }, function (error) {
+        setBusy(false);
+        setStatus(error && error.message
+          ? error.message
+          : 'Something went wrong. Please try again, or email ' + CONTACT_EMAIL + '.', 'error');
+      });
     });
   }
 

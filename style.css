@@ -1943,6 +1943,59 @@ h1, h2, h3 {
   line-height: 2;
 }
 
+.form-note code {
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+
+/* Validation feedback — inline, announced, never colour-only */
+.field__error {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--refuse);
+}
+
+.field.has-error input,
+.field.has-error select,
+.field.has-error textarea {
+  border-color: rgba(244, 63, 94, 0.55);
+}
+
+.field.has-error input:focus,
+.field.has-error select:focus,
+.field.has-error textarea:focus {
+  border-color: rgba(244, 63, 94, 0.75);
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.14);
+}
+
+.form-status {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.form-status--error {
+  color: var(--refuse);
+}
+
+.form-status--ok {
+  color: var(--build);
+}
+
+/* Honeypot: off-screen for people, still in the form for bots */
+.field--hp {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .form-success {
   text-align: center;
   padding: 2.5rem 1rem;
