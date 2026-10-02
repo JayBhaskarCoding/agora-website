@@ -100,6 +100,135 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* Ambient layer and controls are created by app.js so the same quiet
+   experience follows visitors across every page. */
+.ambient-dot-matrix {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.7;
+  mix-blend-mode: screen;
+}
+
+main,
+.site-footer,
+.slim-footer {
+  position: relative;
+  z-index: 1;
+}
+
+.ambient-toggle {
+  position: fixed;
+  right: 1.25rem;
+  bottom: max(1.25rem, env(safe-area-inset-bottom));
+  z-index: 70;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.35rem;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 9999px;
+  color: var(--text-dim);
+  background: rgba(19, 20, 29, 0.78);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 35px -22px rgba(139, 92, 246, 0.8);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+  transition: color 0.25s ease, border-color 0.25s ease,
+    background-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.ambient-toggle svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--accent);
+}
+
+.ambient-toggle:hover,
+.ambient-toggle:focus-visible,
+.ambient-toggle.is-on {
+  border-color: rgba(139, 92, 246, 0.6);
+  color: var(--text);
+  background: rgba(28, 25, 45, 0.88);
+  box-shadow: 0 14px 38px -20px rgba(139, 92, 246, 0.9);
+}
+
+.ambient-toggle.is-on svg {
+  color: #60A5FA;
+}
+
+/* Hidden until the JS enhancement is active. Pointer and reduced-motion
+   users retain their native cursor and the full default interaction model. */
+.cursor-orb {
+  display: none;
+}
+
+@media (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  body.has-custom-cursor,
+  body.has-custom-cursor * {
+    cursor: none !important;
+  }
+
+  body.has-custom-cursor .cursor-orb {
+    position: fixed;
+    top: 0;
+    left: 0;
+    display: block;
+    width: 13px;
+    height: 13px;
+    border: 1px solid rgba(167, 139, 250, 0.9);
+    border-radius: 50%;
+    background: rgba(139, 92, 246, 0.3);
+    box-shadow: 0 0 18px rgba(139, 92, 246, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(-100px, -100px, 0) translate(-50%, -50%);
+    transition: width 0.25s var(--ease), height 0.25s var(--ease),
+      opacity 0.2s ease, background-color 0.25s ease,
+      border-color 0.25s ease, box-shadow 0.25s ease;
+    will-change: transform, width, height;
+  }
+
+  body.has-custom-cursor .cursor-orb.is-visible {
+    opacity: 0.85;
+  }
+
+  body.has-custom-cursor .cursor-orb.is-hovering {
+    width: 28px;
+    height: 28px;
+    border-color: rgba(96, 165, 250, 0.9);
+    background: rgba(139, 92, 246, 0.12);
+    box-shadow: 0 0 24px rgba(96, 165, 250, 0.35);
+  }
+
+  body.has-custom-cursor .cursor-orb.is-pressed {
+    width: 62px;
+    height: 62px;
+    border-color: rgba(167, 139, 250, 0.85);
+    background: rgba(139, 92, 246, 0.08);
+    box-shadow: 0 0 0 8px rgba(139, 92, 246, 0.08),
+      0 0 34px rgba(96, 165, 250, 0.38);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .ambient-toggle {
+    right: 0.85rem;
+    bottom: max(0.85rem, env(safe-area-inset-bottom));
+    padding-inline: 0.7rem;
+  }
+}
+
 img,
 svg,
 video {
@@ -418,18 +547,22 @@ h1, h2, h3 {
 .nav__logo-name {
   display: inline-flex;
   align-items: baseline;
+  overflow: visible;
   font-family: var(--font-sans);
   font-size: 1.35rem;
   font-weight: 700;
   letter-spacing: -0.065em;
-  line-height: 1;
+  line-height: 1.15;
   color: var(--text);
   white-space: nowrap;
   transition: color 0.25s ease;
 }
 
 .nav__logo-word {
+  display: inline-block;
+  padding-bottom: 0.08em;
   text-transform: lowercase;
+  line-height: 1.15;
   /* Keep the first letters at full brightness, then let the wordmark settle
      into roughly 74% visibility toward the right edge. */
   color: var(--text); /* solid fallback for browsers without text clipping */

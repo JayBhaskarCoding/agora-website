@@ -14,6 +14,7 @@
      5. Chrome            — header scroll state, active nav, year
      6. Feedback form     — validation + submit (endpoint or mail client)
      7. Shared-post       — URL param parsing + post preview stub
+     8. Ambient layer      — custom cursor, soundscape, synced dot matrix
    ============================================================ */
 
 (function agoraApp() {
@@ -551,10 +552,294 @@
   }
 
   /* ------------------------------------------------------------
+     8. AMBIENT EXPERIENCE
+     A pointer-only cursor orb, a low-contrast dot matrix, and an
+     opt-in Web Audio soundscape. Audio starts from the visitor's
+     button tap so browser autoplay rules and user preference are
+     respected; the matrix uses the same slow pulse when enabled.
+     ------------------------------------------------------------ */
+  function initCursor() {
+    var finePointer = window.matchMedia && window.matchMedia('(pointer: fine)');
+    if (!finePointer || !finePointer.matches || reduceMotion()) return;
+
+    var cursor = doc.createElement('span');
+    cursor.className = 'cursor-orb';
+    cursor.setAttribute('aria-hidden', 'true');
+    doc.body.appendChild(cursor);
+    doc.body.classList.add('has-custom-cursor');
+
+    var targetX = -100;
+    var targetY = -100;
+    var currentX = targetX;
+    var currentY = targetY;
+    var interactiveSelector = 'a, button, input, select, textarea, summary, [role="button"], [data-cursor="interactive"]';
+
+    function setInteractive(target) {
+      var element = target && target.closest ? target.closest(interactiveSelector) : null;
+      cursor.classList.toggle('is-hovering', !!element);
+    }
+
+    function move(event) {
+      if (event.pointerType && event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
+      targetX = event.clientX;
+      targetY = event.clientY;
+      cursor.classList.add('is-visible');
+      setInteractive(event.target);
+    }
+
+    function hide() {
+      cursor.classList.remove('is-visible', 'is-hovering', 'is-pressed');
+    }
+
+    function frame() {
+      currentX += (targetX - currentX) * 0.18;
+      currentY += (targetY - currentY) * 0.18;
+      cursor.style.transform = 'translate3d(' + currentX + 'px,' + currentY + 'px,0) translate(-50%, -50%)';
+      window.requestAnimationFrame(frame);
+    }
+
+    doc.addEventListener('pointermove', move, { passive: true });
+    doc.addEventListener('pointerdown', function (event) {
+      if (event.button === 0) cursor.classList.add('is-pressed');
+    }, { passive: true });
+    doc.addEventListener('pointerup', function () {
+      cursor.classList.remove('is-pressed');
+    }, { passive: true });
+    doc.addEventListener('pointercancel', function () {
+      cursor.classList.remove('is-pressed');
+    }, { passive: true });
+    window.addEventListener('blur', hide);
+    doc.documentElement.addEventListener('mouseleave', hide);
+    window.requestAnimationFrame(frame);
+  }
+
+  function initAmbientExperience() {
+    var audio = {
+      context: null,
+      master: null,
+      analyser: null,
+      data: null,
+      enabled: false,
+      energy: 0,
+      unavailable: false
+    };
+
+    function updateSoundButton(button, label) {
+      if (!button || !label) return;
+      var on = audio.enabled;
+      button.classList.toggle('is-on', on);
+      button.setAttribute('aria-pressed', String(on));
+      button.setAttribute('aria-label', on ? 'Turn ambient sound off' : 'Turn ambient sound on');
+      label.textContent = on ? 'sound on' : 'sound off';
+    }
+
+    function ensureAudio() {
+      if (audio.context) return true;
+      var AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) {
+        audio.unavailable = true;
+        return false;
+      }
+
+      try {
+        var context = new AudioContext();
+        var master = context.createGain();
+        var filter = context.createBiquadFilter();
+        var analyser = context.createAnalyser();
+        var now = context.currentTime;
+
+        master.gain.setValueAtTime(0.0001, now);
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(1050, now);
+        filter.Q.setValueAtTime(0.35, now);
+        analyser.fftSize = 128;
+        analyser.smoothingTimeConstant = 0.9;
+
+        master.connect(filter);
+        filter.connect(analyser);
+        analyser.connect(context.destination);
+
+        // A very quiet suspended chord: warm sine waves rather than a looped
+        // song, so it stays unobtrusive beneath the page and carries no media.
+        var notes = [174.61, 261.63, 349.23, 523.25];
+        var levels = [0.012, 0.008, 0.005, 0.0025];
+        var lfo = context.createOscillator();
+        var lfoDepth = context.createGain();
+        lfo.type = 'sine';
+        lfo.frequency.setValueAtTime(0.045, now);
+        lfoDepth.gain.setValueAtTime(4, now);
+        lfo.connect(lfoDepth);
+        lfo.start(now);
+
+        notes.forEach(function (frequency, index) {
+          var oscillator = context.createOscillator();
+          var level = context.createGain();
+          oscillator.type = index === 0 ? 'sine' : 'triangle';
+          oscillator.frequency.setValueAtTime(frequency, now);
+          oscillator.detune.setValueAtTime(index * 2 - 3, now);
+          level.gain.setValueAtTime(levels[index], now);
+          lfoDepth.connect(oscillator.detune);
+          oscillator.connect(level);
+          level.connect(master);
+          oscillator.start(now);
+        });
+
+        audio.context = context;
+        audio.master = master;
+        audio.analyser = analyser;
+        audio.data = new Uint8Array(analyser.frequencyBinCount);
+        return true;
+      } catch (error) {
+        audio.unavailable = true;
+        return false;
+      }
+    }
+
+    function setSound(enabled) {
+      if (!ensureAudio()) return false;
+      var context = audio.context;
+      if (context.state === 'suspended') context.resume();
+
+      audio.enabled = enabled;
+      var now = context.currentTime;
+      audio.master.gain.cancelScheduledValues(now);
+      audio.master.gain.setTargetAtTime(enabled ? 0.021 : 0.0001, now, enabled ? 2.4 : 0.4);
+      return true;
+    }
+
+    function getEnergy() {
+      if (!audio.enabled || !audio.analyser || !audio.data) {
+        audio.energy *= 0.94;
+        return audio.energy;
+      }
+
+      audio.analyser.getByteFrequencyData(audio.data);
+      var total = 0;
+      var count = 0;
+      for (var index = 2; index < Math.min(audio.data.length, 18); index += 1) {
+        total += audio.data[index];
+        count += 1;
+      }
+      var next = count ? total / count / 255 : 0;
+      audio.energy += (next - audio.energy) * 0.08;
+      return audio.energy;
+    }
+
+    function getPulse(timestamp) {
+      var clock = audio.context ? audio.context.currentTime : timestamp / 1000;
+      var breathe = 0.5 + (0.5 * Math.sin(clock * Math.PI * 0.09));
+      return audio.enabled ? (audio.energy * 0.65) + (breathe * 0.18) : 0;
+    }
+
+    function initSoundControl() {
+      var button = doc.createElement('button');
+      var label = doc.createElement('span');
+      button.type = 'button';
+      button.className = 'ambient-toggle';
+      button.setAttribute('aria-pressed', 'false');
+      button.setAttribute('aria-label', 'Turn ambient sound on');
+      button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h3l4 3V7l-4 3H4Z"/><path d="M16 9.5a4 4 0 0 1 0 5"/><path d="M18.5 7a7.5 7.5 0 0 1 0 10"/></svg>';
+      label.textContent = 'sound off';
+      button.appendChild(label);
+      doc.body.appendChild(button);
+
+      button.addEventListener('click', function () {
+        var next = !audio.enabled;
+        if (!setSound(next)) {
+          label.textContent = 'sound unavailable';
+          button.setAttribute('aria-label', 'Ambient sound unavailable in this browser');
+          button.setAttribute('aria-disabled', 'true');
+          return;
+        }
+        updateSoundButton(button, label);
+      });
+
+      return { button: button, label: label };
+    }
+
+    function initDotMatrix() {
+      var canvas = doc.createElement('canvas');
+      var context = canvas.getContext('2d');
+      if (!context) return;
+
+      canvas.className = 'ambient-dot-matrix';
+      canvas.setAttribute('aria-hidden', 'true');
+      doc.body.insertBefore(canvas, doc.body.firstChild);
+
+      var width = 0;
+      var height = 0;
+      var density = 36;
+      var columns = 0;
+      var rows = 0;
+      var dots = [];
+      var pixelRatio = 1;
+
+      function resize() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        density = width < 600 ? 30 : 36;
+        pixelRatio = Math.min(window.devicePixelRatio || 1, 1.75);
+        canvas.width = Math.floor(width * pixelRatio);
+        canvas.height = Math.floor(height * pixelRatio);
+        canvas.style.width = width + 'px';
+        canvas.style.height = height + 'px';
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+
+        columns = Math.ceil(width / density) + 2;
+        rows = Math.ceil(height / density) + 2;
+        dots = [];
+        for (var row = 0; row < rows; row += 1) {
+          for (var column = 0; column < columns; column += 1) {
+            dots.push({
+              row: row,
+              column: column,
+              phase: (row * 0.71) + (column * 0.37)
+            });
+          }
+        }
+      }
+
+      function draw(timestamp) {
+        var time = timestamp / 1000;
+        var energy = getEnergy();
+        var pulse = getPulse(timestamp);
+        context.clearRect(0, 0, width, height);
+
+        dots.forEach(function (dot) {
+          var wave = 0.5 + (0.5 * Math.sin((time * 0.22) + dot.phase));
+          var driftX = Math.sin((time * 0.28) + dot.phase + dot.row * 0.08) * (1.5 + energy * 7);
+          var driftY = Math.cos((time * 0.19) + dot.phase) * (1.5 + energy * 5);
+          var x = (dot.column * density) + driftX - density;
+          var y = (dot.row * density) + driftY - density;
+          var radius = 0.45 + (wave * 0.45) + (pulse * 0.6);
+          var alpha = 0.018 + (wave * 0.016) + (pulse * 0.045);
+          var color = (dot.column + dot.row) % 4 === 0 ? '96,165,250' : '139,92,246';
+
+          context.beginPath();
+          context.fillStyle = 'rgba(' + color + ',' + alpha + ')';
+          context.arc(x, y, radius, 0, Math.PI * 2);
+          context.fill();
+        });
+
+        if (!reduceMotion()) window.requestAnimationFrame(draw);
+      }
+
+      resize();
+      window.addEventListener('resize', resize, { passive: true });
+      draw(0);
+    }
+
+    initCursor();
+    initSoundControl();
+    initDotMatrix();
+  }
+
+  /* ------------------------------------------------------------
      Boot
      ------------------------------------------------------------ */
   function boot() {
     initImages();
+    initAmbientExperience();
     initRouting();
     initMenu();
     initSmoothScroll();
