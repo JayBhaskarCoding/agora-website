@@ -203,10 +203,9 @@
         </div>
 
         <div class="form-card" data-reveal data-reveal-delay="120">
-          <!-- Live form: app.js validates every field, then either POSTs the
-               message to FORM_ENDPOINT (see app.js) or hands it to the
-               visitor's mail client addressed to mail@agora.in.net. -->
-          <form id="feedback-form" novalidate>
+          <!-- Live form: app.js validates every field and POSTs the message
+               to the same-origin Cloudflare Pages Function at /api/contact. -->
+          <form id="feedback-form" method="post" novalidate>
             <div class="form-row">
               <div class="field">
                 <label for="fb-name">Name</label>
@@ -257,8 +256,8 @@
             <p class="form-status" id="feedback-status" role="status" aria-live="polite" hidden></p>
 
             <p class="form-note">
-              Opens in your own mail app, addressed to <code>mail@agora.in.net</code>.<br />
-              Have a server? Set <code>FORM_ENDPOINT</code> in app.js — no other change needed.
+              Sent securely through the Agora contact service.<br />
+              A human reply goes to the email address you provide.
             </p>
           </form>
 

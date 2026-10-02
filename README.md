@@ -50,25 +50,21 @@ The repository root **is** the static site. Point any static host
 keep `_redirects` / `robots.txt` in place. To test a shared link on a
 custom domain, share e.g. `https://your-domain/shared-post.html?post=<id>`.
 
-## Wiring up the backend (TODOs, all in `app.js`)
+## Wiring up the backend
 
 - `initSharedPost()` — `fetchPost(id)` is a stub returning a simulated
-  payload after a delay. Replace with
-  `GET /api/v1/posts/:id` (payload shape documented in the comment).
-- `initContactForm()` — the About-page form is **live**. It validates every
-  field (inline errors, announced in a live region), then delivers the
-  message one of two ways:
-
-  1. **Endpoint** — set `FORM_ENDPOINT` at the top of `app.js` (or
-     `data-endpoint="…"` on the form) to `POST` JSON to Formspree,
-     Web3Forms, your own `/api/feedback`, … A `2xx` counts as success;
-     failures surface the real reason and keep the typed message.
-  2. **Mail client** — with no endpoint set (the default), the form opens
-     the visitor's mail app with a prefilled message addressed to
-     `mail@agora.in.net`. Nothing is silently dropped.
+  payload after a delay. Replace with `GET /api/v1/posts/:id` when the API is live.
+- `functions/api/contact.js` — Cloudflare Pages Function used by the About-page
+  feedback form. It validates JSON or FormData, escapes the submitted values,
+  and sends the message through Resend to `mail@agora.in.net`.
+- Set `RESEND_API_KEY` as a Cloudflare Pages environment variable (and as a
+  local secret when using `wrangler pages dev`). Never put the key in `app.js`
+  or any browser-delivered file. The browser posts to `/api/contact`, shows
+  `Sending...` while the request is in flight, and reveals the inline
+  `Signal received` panel on a successful JSON response.
 
   A hidden honeypot field absorbs bots, and `SUBMIT_TIMEOUT` (12s) keeps a
-  slow endpoint from hanging the button.
+  slow API request from hanging the button.
 
 ## Asset paths
 
@@ -88,9 +84,9 @@ nav), `≥769px` desktop nav, `≥1024px` wide layouts.
 
 ## Notes
 
-- The feedback form on `about.html` works without a server: set
-  `FORM_ENDPOINT` in `app.js` to collect submissions over HTTP, or leave it
-  empty to hand messages to the visitor's mail client.
+- The feedback form on `about.html` uses the same-origin `/api/contact`
+  Cloudflare Pages Function and Resend. Keep `RESEND_API_KEY` server-side; the
+  direct email link below the form remains available as a human fallback.
 - Brand lockup: the header and footer render the app-style mark **plus** the
   lowercase `agora.` wordmark (`.nav__logo-name` in `style.css`), including the
   violet period used inside the app. The same lockup is shared across every

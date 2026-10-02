@@ -203,20 +203,12 @@
 
   /* ------------------------------------------------------------
      6. FEEDBACK FORM
-     Validates properly, then delivers the message one of two ways:
-
-       · ENDPOINT — set FORM_ENDPOINT below (or data-endpoint="…"
-         on the form) to POST JSON to Formspree, Web3Forms, your
-         own /api/feedback, …  Expects a 2xx response.
-       · MAILTO   — with no endpoint configured, the message is
-         handed to the visitor's mail client, addressed to
-         CONTACT_EMAIL. Nothing is silently dropped.
-
-     Both paths end in the same accessible success panel.
+     Validates locally, then posts JSON to the same-origin Cloudflare
+     Pages Function at /api/contact. The API keeps the Resend key
+     server-side and returns a JSON success or error response.
      ------------------------------------------------------------ */
-  var FORM_ENDPOINT = '';                    // e.g. 'https://formspree.io/f/abcdwxyz'
   var CONTACT_EMAIL = 'mail@agora.in.net';
-  var SUBMIT_TIMEOUT = 12000;                // ms before we give up on the endpoint
+  var SUBMIT_TIMEOUT = 12000;                // ms before we give up on the API
 
   function initContactForm() {
     var form = doc.getElementById('feedback-form');
@@ -226,7 +218,6 @@
     var status = doc.getElementById('feedback-status');
     var button = form.querySelector('[data-submit]');
     var label = button ? button.querySelector('[data-button-label]') : null;
-    var endpoint = form.getAttribute('data-endpoint') || FORM_ENDPOINT;
     var idleLabel = label ? label.textContent : '';
     var fields = form.querySelectorAll('[data-validate]');
 
@@ -304,7 +295,7 @@
         if (busy) button.setAttribute('aria-busy', 'true');
         else button.removeAttribute('aria-busy');
       }
-      if (label) label.textContent = busy ? 'Sending…' : idleLabel;
+      if (label) label.textContent = busy ? 'Sending...' : idleLabel;
     }
 
     function collect() {
@@ -327,50 +318,41 @@
       return error;
     }
 
-    function postFeedback(url, payload) {
+    function postFeedback(payload) {
       var controller = typeof AbortController === 'function' ? new AbortController() : null;
       var timer = window.setTimeout(function () {
         if (controller) controller.abort();
       }, SUBMIT_TIMEOUT);
 
-      return fetch(url, {
+      return fetch('/api/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(payload),
         signal: controller ? controller.signal : undefined
       }).then(function (response) {
-        if (!response.ok) throw friendly('The server refused the message (HTTP ' + response.status + ').');
-        return response.text().catch(function () { return ''; });   // many endpoints reply with an empty body
-      }).then(function () {
+        if (!response.ok) {
+          return response.json().catch(function () { return {}; }).then(function (body) {
+            var detail = body && body.error ? ' ' + body.error : '';
+            throw friendly('The message could not be sent (HTTP ' + response.status + ').' + detail);
+          });
+        }
+        return response.json().catch(function () { return { ok: true }; });
+      }).then(function (body) {
         window.clearTimeout(timer);
+        if (body && body.ok === false) throw friendly(body.error || 'The server could not accept the message.');
         return true;
       }, function (error) {
         window.clearTimeout(timer);
         if (error && error.friendly) throw error;
         if (error && error.name === 'AbortError') throw friendly('That took too long. Please try again.');
-        throw friendly('We couldn\'t reach the server. Check your connection and try again.');
+        throw friendly('We couldn\'t reach the contact service. Check your connection and try again.');
       });
     }
 
-    function openMailClient(payload) {
-      var subject = '[Agora] ' + payload.topicLabel;
-      var body = 'Name: ' + payload.name + '\n' +
-        'Email: ' + payload.email + '\n' +
-        'Topic: ' + payload.topicLabel + '\n\n' +
-        payload.message + '\n\n' +
-        '— sent from ' + payload.page;
-      window.location.href = 'mailto:' + CONTACT_EMAIL +
-        '?subject=' + encodeURIComponent(subject) +
-        '&body=' + encodeURIComponent(body);
-    }
-
-    function showSuccess(mode) {
+    function showSuccess() {
       var note = success ? success.querySelector('[data-success-note]') : null;
       if (note) {
-        note.textContent = mode === 'mailto'
-          ? 'Your mail app should be open with the message ready to send to ' + CONTACT_EMAIL +
-            '. If nothing opened, write to us directly below.'
-          : 'Your message is on its way — a human reads every one of these.';
+        note.textContent = 'Your message is on its way — a human reads every one of these.';
       }
       form.hidden = true;
       if (success) {
@@ -398,28 +380,25 @@
       // Honeypot: people never see this field, so a value means a bot.
       var trap = form.querySelector('[data-honeypot]');
       if (trap && trap.value) {
-        showSuccess('sent');
+        showSuccess();
         return;
       }
 
       var payload = collect();
       setBusy(true);
 
-      if (!endpoint) {
-        openMailClient(payload);
+      postFeedback(payload).then(function () {
         setBusy(false);
-        showSuccess('mailto');
-        return;
-      }
-
-      postFeedback(endpoint, payload).then(function () {
-        setBusy(false);
-        showSuccess('sent');
+        showSuccess();
       }, function (error) {
         setBusy(false);
-        setStatus(error && error.message
+        var message = error && error.message
           ? error.message
-          : 'Something went wrong. Please try again, or email ' + CONTACT_EMAIL + '.', 'error');
+          : 'Something went wrong. Please try again, or email ' + CONTACT_EMAIL + '.';
+        setStatus(message, 'error');
+        // Keep the error visible in the form and give a short, direct cue
+        // that the submission did not disappear silently.
+        if (typeof window.alert === 'function') window.alert(message);
       });
     });
   }
