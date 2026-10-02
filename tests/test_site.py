@@ -142,6 +142,17 @@ class LaunchContract(unittest.TestCase):
         self.assertIn("Original maker of this credits screen", html)
         self.assertIn("makes the platform what it is", html)
 
+    def test_background_music_contract(self):
+        js = (ROOT / "app.js").read_text()
+        self.assertIn("var MUSIC_SRC = '/assets/bgMusic.mpeg';", js)
+        self.assertIn("element.loop = true;", js)
+        self.assertIn("filter.type = 'lowpass';", js)
+        self.assertIn("filter.frequency.setValueAtTime(2200", js)
+        self.assertIn("audio.element.play()", js)
+        music = ROOT / "assets/bgMusic.mpeg"
+        self.assertTrue(music.is_file())
+        self.assertGreater(music.stat().st_size, 0)
+
     def test_shared_flow_is_isolated(self):
         for name, page in self.pages.items():
             for attrs, text in page.anchors:

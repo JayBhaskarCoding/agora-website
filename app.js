@@ -540,10 +540,10 @@
 
   /* ------------------------------------------------------------
      8. AMBIENT EXPERIENCE
-     A pointer-only cursor orb, a low-contrast dot matrix, and an
-     opt-in Web Audio soundscape. Audio starts from the visitor's
-     button tap so browser autoplay rules and user preference are
-     respected; the matrix uses the same slow pulse when enabled.
+     A pointer-only cursor orb, a low-contrast dot matrix, and a
+     softly filtered looping background track. The browser is asked to
+     start the music automatically; if autoplay is blocked, the first
+     visitor gesture starts it instead. The matrix uses the same pulse.
      ------------------------------------------------------------ */
   function initCursor() {
     var finePointer = window.matchMedia && window.matchMedia('(pointer: fine)');
@@ -605,97 +605,202 @@
   }
 
   function initAmbientExperience() {
+    var MUSIC_SRC = '/assets/bgMusic.mpeg';
     var audio = {
+      element: null,
       context: null,
+      source: null,
       master: null,
+      filter: null,
+      compressor: null,
       analyser: null,
       data: null,
       enabled: false,
       energy: 0,
-      unavailable: false
+      unavailable: false,
+      gestureArmed: false
     };
+    var soundControl = { button: null, label: null };
+    var removeGestureListeners = null;
 
     function updateSoundButton(button, label) {
       if (!button || !label) return;
+      if (audio.unavailable) {
+        button.classList.remove('is-on');
+        button.setAttribute('aria-pressed', 'false');
+        button.setAttribute('aria-label', 'Background music unavailable');
+        label.textContent = 'sound unavailable';
+        return;
+      }
       var on = audio.enabled;
       button.classList.toggle('is-on', on);
       button.setAttribute('aria-pressed', String(on));
-      button.setAttribute('aria-label', on ? 'Turn ambient sound off' : 'Turn ambient sound on');
+      button.setAttribute('aria-label', on ? 'Turn background music off' : 'Turn background music on');
       label.textContent = on ? 'sound on' : 'sound off';
+    }
+
+    function markUnavailable() {
+      audio.unavailable = true;
+      audio.enabled = false;
+      updateSoundButton(soundControl.button, soundControl.label);
+    }
+
+    function createAudioElement() {
+      if (audio.element) return audio.element;
+
+      var element = doc.createElement('audio');
+      var primarySource = doc.createElement('source');
+      primarySource.src = MUSIC_SRC;
+      primarySource.type = 'audio/mpeg';
+      element.appendChild(primarySource);
+      element.preload = 'auto';
+      element.loop = true;
+      element.autoplay = true;
+      element.setAttribute('playsinline', '');
+      element.setAttribute('aria-hidden', 'true');
+      element.tabIndex = -1;
+      element.hidden = true;
+      element.addEventListener('error', markUnavailable);
+      element.addEventListener('ended', function () {
+        // loop is the normal path; this keeps playback continuous in older
+        // engines that do not honor the property consistently.
+        if (audio.enabled) {
+          var restart = element.play();
+          if (restart && restart.catch) restart.catch(function () {});
+        }
+      });
+      doc.body.appendChild(element);
+      audio.element = element;
+      return element;
     }
 
     function ensureAudio() {
       if (audio.context) return true;
       var AudioContext = window.AudioContext || window.webkitAudioContext;
       if (!AudioContext) {
-        audio.unavailable = true;
+        markUnavailable();
         return false;
       }
 
       try {
+        var element = createAudioElement();
         var context = new AudioContext();
+        var source = context.createMediaElementSource(element);
         var master = context.createGain();
         var filter = context.createBiquadFilter();
+        var compressor = context.createDynamicsCompressor();
         var analyser = context.createAnalyser();
         var now = context.currentTime;
 
+        // Roll off the brittle top end and keep the file comfortably beneath
+        // speech and interface sounds. The compressor also tames sharp peaks.
         master.gain.setValueAtTime(0.0001, now);
         filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(1050, now);
-        filter.Q.setValueAtTime(0.35, now);
+        filter.frequency.setValueAtTime(2200, now);
+        filter.Q.setValueAtTime(0.25, now);
+        compressor.threshold.setValueAtTime(-24, now);
+        compressor.knee.setValueAtTime(18, now);
+        compressor.ratio.setValueAtTime(3, now);
+        compressor.attack.setValueAtTime(0.035, now);
+        compressor.release.setValueAtTime(0.45, now);
         analyser.fftSize = 128;
         analyser.smoothingTimeConstant = 0.9;
 
-        master.connect(filter);
-        filter.connect(analyser);
+        source.connect(filter);
+        filter.connect(compressor);
+        compressor.connect(master);
+        master.connect(analyser);
         analyser.connect(context.destination);
 
-        // A very quiet suspended chord: warm sine waves rather than a looped
-        // song, so it stays unobtrusive beneath the page and carries no media.
-        var notes = [174.61, 261.63, 349.23, 523.25];
-        var levels = [0.012, 0.008, 0.005, 0.0025];
-        var lfo = context.createOscillator();
-        var lfoDepth = context.createGain();
-        lfo.type = 'sine';
-        lfo.frequency.setValueAtTime(0.045, now);
-        lfoDepth.gain.setValueAtTime(4, now);
-        lfo.connect(lfoDepth);
-        lfo.start(now);
-
-        notes.forEach(function (frequency, index) {
-          var oscillator = context.createOscillator();
-          var level = context.createGain();
-          oscillator.type = index === 0 ? 'sine' : 'triangle';
-          oscillator.frequency.setValueAtTime(frequency, now);
-          oscillator.detune.setValueAtTime(index * 2 - 3, now);
-          level.gain.setValueAtTime(levels[index], now);
-          lfoDepth.connect(oscillator.detune);
-          oscillator.connect(level);
-          level.connect(master);
-          oscillator.start(now);
-        });
-
         audio.context = context;
+        audio.source = source;
         audio.master = master;
+        audio.filter = filter;
+        audio.compressor = compressor;
         audio.analyser = analyser;
         audio.data = new Uint8Array(analyser.frequencyBinCount);
         return true;
       } catch (error) {
-        audio.unavailable = true;
+        markUnavailable();
         return false;
       }
     }
 
-    function setSound(enabled) {
-      if (!ensureAudio()) return false;
-      var context = audio.context;
-      if (context.state === 'suspended') context.resume();
+    function disarmGestureStart() {
+      if (removeGestureListeners) removeGestureListeners();
+      removeGestureListeners = null;
+      audio.gestureArmed = false;
+    }
 
-      audio.enabled = enabled;
-      var now = context.currentTime;
-      audio.master.gain.cancelScheduledValues(now);
-      audio.master.gain.setTargetAtTime(enabled ? 0.021 : 0.0001, now, enabled ? 2.4 : 0.4);
-      return true;
+    function setSound(enabled) {
+      if (!ensureAudio()) return Promise.reject(new Error('Background music is unavailable.'));
+
+      var context = audio.context;
+      var resume = context.state === 'suspended' ? context.resume() : Promise.resolve();
+      return resume.then(function () {
+        var now = context.currentTime;
+        audio.master.gain.cancelScheduledValues(now);
+        audio.master.gain.setTargetAtTime(enabled ? 0.075 : 0.0001, now, enabled ? 2.8 : 0.45);
+
+        if (!enabled) {
+          audio.element.pause();
+          audio.enabled = false;
+          return true;
+        }
+
+        audio.element.loop = true;
+        var playback = audio.element.play();
+        return Promise.resolve(playback).then(function () {
+          audio.enabled = true;
+          return true;
+        });
+      }).catch(function (error) {
+        audio.enabled = false;
+        throw error;
+      });
+    }
+
+    function armGestureStart() {
+      if (audio.gestureArmed || audio.unavailable) return;
+      audio.gestureArmed = true;
+
+      function resumeFromGesture(event) {
+        var target = event.target;
+        var clickedSoundControl = target && target.closest && target.closest('.ambient-toggle');
+        // Let the button's click handler own its first interaction so one tap
+        // cannot enable and immediately toggle the music back off.
+        if (clickedSoundControl) return;
+
+        disarmGestureStart();
+        setSound(true).then(function () {
+          updateSoundButton(soundControl.button, soundControl.label);
+        }).catch(function () {
+          if (audio.element && audio.element.error) markUnavailable();
+        });
+      }
+
+      var events = ['pointerdown', 'keydown', 'touchstart'];
+      events.forEach(function (eventName) {
+        doc.addEventListener(eventName, resumeFromGesture, { passive: true });
+      });
+      removeGestureListeners = function () {
+        events.forEach(function (eventName) {
+          doc.removeEventListener(eventName, resumeFromGesture);
+        });
+      };
+    }
+
+    function tryStartMusic() {
+      setSound(true).then(function () {
+        disarmGestureStart();
+        updateSoundButton(soundControl.button, soundControl.label);
+      }).catch(function () {
+        if (audio.element && audio.element.error) {
+          markUnavailable();
+        } else {
+          armGestureStart();
+        }
+      });
     }
 
     function getEnergy() {
@@ -723,29 +828,36 @@
     }
 
     function initSoundControl() {
+      createAudioElement();
       var button = doc.createElement('button');
       var label = doc.createElement('span');
       button.type = 'button';
       button.className = 'ambient-toggle';
       button.setAttribute('aria-pressed', 'false');
-      button.setAttribute('aria-label', 'Turn ambient sound on');
+      button.setAttribute('aria-label', 'Turn background music on');
       button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h3l4 3V7l-4 3H4Z"/><path d="M16 9.5a4 4 0 0 1 0 5"/><path d="M18.5 7a7.5 7.5 0 0 1 0 10"/></svg>';
       label.textContent = 'sound off';
       button.appendChild(label);
       doc.body.appendChild(button);
+      soundControl.button = button;
+      soundControl.label = label;
 
       button.addEventListener('click', function () {
+        if (audio.unavailable) return;
         var next = !audio.enabled;
-        if (!setSound(next)) {
-          label.textContent = 'sound unavailable';
-          button.setAttribute('aria-label', 'Ambient sound unavailable in this browser');
-          button.setAttribute('aria-disabled', 'true');
-          return;
-        }
-        updateSoundButton(button, label);
+        setSound(next).then(function () {
+          if (next) disarmGestureStart();
+          updateSoundButton(button, label);
+        }).catch(function () {
+          if (audio.element && audio.element.error) {
+            markUnavailable();
+          } else {
+            label.textContent = 'tap to retry';
+          }
+        });
       });
 
-      return { button: button, label: label };
+      updateSoundButton(button, label);
     }
 
     function initDotMatrix() {
@@ -822,6 +934,7 @@
 
     initCursor();
     initSoundControl();
+    tryStartMusic();
     initDotMatrix();
   }
 

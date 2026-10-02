@@ -23,6 +23,14 @@ community illustration for the people who use Agora. It is intentionally not
 the Agora logo or app mark; replace it only if the public/community artwork is
 updated deliberately.
 
+## Background music
+
+`/assets/bgMusic.mpeg` is the looping ambient track used by every page. The
+browser audio element is routed through a gentle low-pass filter, compressor,
+and very low master gain so the track stays soft rather than sharp. Autoplay is
+attempted, but browsers may wait for the visitor's first gesture before allowing
+sound.
+
 The About page displays Jayvardhan Bhaskar's portrait from `/assets/developer.png`
 at 160×160 with `object-fit: cover`, a subtle ring, and a restrained violet glow.
 If the image cannot load, the container shows a labeled fallback rather than
