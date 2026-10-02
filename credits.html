@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Credits — Agora</title>
+  <meta name="description" content="Meet the people, ideas, and early square members behind Agora." />
+  <meta name="robots" content="index, follow" />
+  <meta name="theme-color" content="#0A0B0E" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Credits — Agora" />
+  <meta property="og:description" content="The people, ideas, and early square members behind Agora." />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Credits — Agora" />
+  <meta name="twitter:description" content="The people, ideas, and early square members behind Agora." />
+
+  <link rel="icon" type="image/svg+xml" href="/assets/agora-logo.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="credits-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- ============ HEADER (keep in sync across pages) ============ -->
+  <header class="site-header">
+    <div class="container nav">
+      <a class="nav__logo brand-lockup" href="/index.html" aria-label="Agora — home">
+        <img class="nav__logo-mark" src="/assets/agora-logo.svg" width="44" height="44" alt="Agora" />
+        <span class="nav__logo-name" aria-label="Agora">
+          <span class="nav__logo-word">agora</span><span class="nav__logo-dot" aria-hidden="true">.</span>
+        </span>
+      </a>
+
+      <nav class="nav__links" aria-label="Primary">
+        <a class="nav__link" href="/index.html" data-page="home" data-nav-key="home">The Square</a>
+        <a class="nav__link" href="/index.html#why-agora">Why Agora</a>
+        <a class="nav__link" href="/download.html" data-page="download" data-nav-key="download">Download</a>
+        <a class="nav__link" href="/about.html" data-page="about" data-nav-key="about">About</a>
+        <a class="nav__link" href="/credits.html" data-page="credits" data-nav-key="credits">Credits</a>
+      </nav>
+
+      <div class="nav__actions">
+        <a class="btn btn--primary btn--get-app btn--sm nav__cta" href="/download.html" data-page="download">Get the app</a>
+        <button class="nav__toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open navigation menu">
+          <span class="nav__toggle-bar"></span>
+          <span class="nav__toggle-bar"></span>
+        </button>
+      </div>
+    </div>
+
+    <nav id="mobile-menu" class="mobile-menu" aria-label="Mobile">
+      <a href="/index.html">The Square</a>
+      <a href="/index.html#why-agora">Why Agora</a>
+      <a href="/download.html">Download</a>
+      <a href="/about.html">About</a>
+      <a href="/credits.html" aria-current="page">Credits</a>
+      <a class="btn btn--primary btn--get-app" href="/download.html">Get the app</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <!-- ============ CREDITS HERO ============ -->
+    <section class="page-hero credits-hero">
+      <div class="orb orb--one" aria-hidden="true"></div>
+      <div class="orb orb--two" aria-hidden="true"></div>
+      <div class="container credits-hero__inner">
+        <p class="eyebrow">
+          <span class="eyebrow__dot" aria-hidden="true"></span>
+          The people behind the square
+        </p>
+        <h1 class="credits-title">CREDITS<span aria-hidden="true">.</span></h1>
+        <p class="lead credits-hero__lead">
+          Every quiet detail has a person, a question, or a small act of care
+          behind it. Here are the hands and minds that keep Agora open.
+        </p>
+        <div class="credits-hero__meta" aria-label="Credits page details">
+          <span>01 — The crew</span>
+          <span>02 — The signal</span>
+          <span>03 — The square</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ INTERACTIVE CREDITS CONSTELLATION ============ -->
+    <section class="section credits-section" id="team" aria-labelledby="credits-team-title">
+      <div class="container">
+        <div class="section-head credits-section__head" data-reveal>
+          <p class="eyebrow">01 — The crew</p>
+          <h2 class="h2" id="credits-team-title">Built by people who leave room.</h2>
+          <p>
+            Scroll through the signal. The gears turn with the page, the line
+            remembers your momentum, and the names follow the path we made together.
+          </p>
+        </div>
+
+        <div class="credits-physics" id="credits-physics" aria-label="Interactive credits constellation">
+          <svg class="credits-physics__svg" viewBox="0 0 1200 360" role="img" aria-label="Two interlocking gears above a spring-like path">
+            <defs>
+              <filter id="credits-glow" x="-40%" y="-40%" width="180%" height="180%">
+                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+
+            <path class="credits-wiggle-base" d="M0 246 C120 178 190 304 310 238 S500 176 610 246 S820 308 920 232 S1090 184 1200 246" />
+            <path class="credits-wiggle" data-credits-wiggle d="M0 246 C120 178 190 304 310 238 S500 176 610 246 S820 308 920 232 S1090 184 1200 246" />
+
+            <g class="credits-gear credits-gear--one" data-credits-gear="clockwise">
+              <circle class="credits-gear__teeth" cx="208" cy="136" r="86" />
+              <circle class="credits-gear__ring" cx="208" cy="136" r="67" />
+              <circle class="credits-gear__hub" cx="208" cy="136" r="11" />
+              <path class="credits-gear__spokes" d="M208 69v134M141 136h134M161 89l94 94M255 89l-94 94" />
+              <text x="208" y="131" text-anchor="middle">MAKE</text>
+              <text class="credits-gear__sub" x="208" y="151" text-anchor="middle">WITH CARE</text>
+            </g>
+
+            <g class="credits-gear credits-gear--two" data-credits-gear="counter-clockwise">
+              <circle class="credits-gear__teeth" cx="992" cy="136" r="86" />
+              <circle class="credits-gear__ring" cx="992" cy="136" r="67" />
+              <circle class="credits-gear__hub" cx="992" cy="136" r="11" />
+              <path class="credits-gear__spokes" d="M992 69v134M925 136h134M945 89l94 94M1039 89l-94 94" />
+              <text x="992" y="131" text-anchor="middle">SHARE</text>
+              <text class="credits-gear__sub" x="992" y="151" text-anchor="middle">THE SIGNAL</text>
+            </g>
+          </svg>
+
+          <span class="credits-physics__tag" data-credits-tag="0.14">FOUNDATION</span>
+          <span class="credits-physics__tag credits-physics__tag--violet" data-credits-tag="0.52">MOMENTUM</span>
+          <span class="credits-physics__tag credits-physics__tag--blue" data-credits-tag="0.83">RETURN</span>
+          <span class="credits-physics__hint mono">scroll to disturb the signal</span>
+        </div>
+
+        <div class="credits-grid">
+          <article class="credit-card" data-reveal>
+            <div class="credit-card__topline">
+              <span class="credit-card__index">01</span>
+              <span class="credit-card__status"><i aria-hidden="true"></i> origin point</span>
+            </div>
+            <div class="credit-card__identity">
+              <div class="credit-card__avatar-wrap">
+                <img class="credit-avatar" src="/assets/developer.png" width="160" height="160" alt="Jayvardhan Bhaskar" />
+              </div>
+              <div>
+                <h3>Jayvardhan Bhaskar</h3>
+                <p class="credit-card__role">Founder · App &amp; website developer</p>
+              </div>
+            </div>
+            <p class="credit-card__bio">
+              The builder behind Agora — shaping the product, writing the code,
+              and making space for a more human kind of conversation.
+            </p>
+            <blockquote class="credit-card__motto">
+              <span>Company motto</span>
+              “Make the room worth returning to.”
+            </blockquote>
+          </article>
+
+          <article class="credit-card" data-reveal data-reveal-delay="100">
+            <div class="credit-card__topline">
+              <span class="credit-card__index">02</span>
+              <span class="credit-card__status"><i aria-hidden="true"></i> signal shaping</span>
+            </div>
+            <div class="credit-card__identity">
+              <div class="credit-card__avatar-wrap credit-card__avatar-wrap--mark">
+                <img class="credit-avatar credit-avatar--mark" src="/assets/agora-logo.svg" width="160" height="160" alt="Agora design team placeholder" />
+              </div>
+              <div>
+                <h3>The Product Crew</h3>
+                <p class="credit-card__role">Interface · Motion · Direction</p>
+              </div>
+            </div>
+            <p class="credit-card__bio">
+              A collective placeholder for the people who turn principles into
+              pixels: the type, pacing, colors, and small interactions that make
+              the square feel calm instead of clinical.
+            </p>
+            <blockquote class="credit-card__motto">
+              <span>Company motto</span>
+              “Clarity is a kindness.”
+            </blockquote>
+          </article>
+
+          <article class="credit-card" data-reveal data-reveal-delay="200">
+            <div class="credit-card__topline">
+              <span class="credit-card__index">03</span>
+              <span class="credit-card__status"><i aria-hidden="true"></i> early signal</span>
+            </div>
+            <div class="credit-card__identity">
+              <div class="credit-card__avatar-wrap credit-card__avatar-wrap--mark">
+                <img class="credit-avatar credit-avatar--mark" src="/assets/agora-logo.svg" width="160" height="160" alt="Early Agora members placeholder" />
+              </div>
+              <div>
+                <h3>Early Square Members</h3>
+                <p class="credit-card__role">Testing · Feedback · Belief</p>
+              </div>
+            </div>
+            <p class="credit-card__bio">
+              The first people to tap, test, question, and come back. Their
+              rough edges and honest notes are part of the product, not noise
+              around it.
+            </p>
+            <blockquote class="credit-card__motto">
+              <span>Company motto</span>
+              “A public square is made by the public.”
+            </blockquote>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ THANK YOU ============ -->
+    <section class="section credits-thanks">
+      <div class="container" data-reveal>
+        <p class="eyebrow eyebrow--center">03 — The square</p>
+        <h2 class="h2">Thank you for making room.</h2>
+        <p>
+          Credits never really end. Every thoughtful post, useful report, and
+          generous disagreement adds another line to the shape of Agora.
+        </p>
+        <a class="btn btn--primary btn--get-app btn--lg" href="/download.html" data-page="download">Get the app</a>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ FOOTER (keep in sync across pages) ============ -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="site-footer__grid">
+        <div class="site-footer__brand">
+          <a class="nav__logo brand-lockup nav__logo--footer" href="/index.html" aria-label="Agora — home">
+            <img class="nav__logo-mark" src="/assets/agora-logo.svg" width="44" height="44" alt="Agora" />
+            <span class="nav__logo-name" aria-label="Agora">
+              <span class="nav__logo-word">agora</span><span class="nav__logo-dot" aria-hidden="true">.</span>
+            </span>
+          </a>
+          <p>A human-first digital public square for free speech. Chronological by design, ad-free by principle.</p>
+          <span class="site-footer__signal"><i aria-hidden="true"></i> signal stable</span>
+        </div>
+
+        <nav aria-label="Footer">
+          <h4>Pages</h4>
+          <a href="/index.html">The Square</a>
+          <a href="/index.html#why-agora">Why Agora</a>
+          <a href="/download.html">Download</a>
+          <a href="/about.html">About</a>
+          <a href="/credits.html" aria-current="page">Credits</a>
+        </nav>
+
+        <div class="site-footer__contact">
+          <h4>Contact</h4>
+          <p>
+            Feedback, questions, press:<br />
+            <a href="mailto:mail@agora.in.net">mail@agora.in.net</a>
+          </p>
+          <p>Android app · APK<br />iOS &amp; desktop — coming soon</p>
+        </div>
+      </div>
+
+      <div class="site-footer__bottom">
+        <span>© <span id="year">2026</span> Agora — a public square for people</span>
+        <span>Free speech · moderated with care</span>
+        <span>Zero ads · zero tracking</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

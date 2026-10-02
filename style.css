@@ -4,7 +4,7 @@
    Mobile-first, vanilla CSS. No frameworks, no build step.
 
    Breakpoints (mobile-first, min-width unless noted):
-     ≤480px   phone       — tuned in section 21 (max-width overrides)
+     ≤480px   phone       — tuned in section 22 (max-width overrides)
      ≤768px   tablet      — hamburger nav, single-column layouts
      ≥769px   desktop nav — inline links + CTA
      ≥1024px  wide        — two-column hero, three-column gallery
@@ -2224,7 +2224,458 @@ h1, h2, h3 {
   color: var(--text-dim);
 }
 
-/* ---------- 18. Footer ---------- */
+/* ---------- 18. Credits page ---------- */
+.credits-hero {
+  min-height: min(640px, 78vh);
+  display: grid;
+  align-items: center;
+  padding-top: calc(var(--header-h) + clamp(4rem, 11vw, 7rem));
+  padding-bottom: clamp(4.5rem, 10vw, 7rem);
+}
+
+.credits-hero__inner {
+  position: relative;
+}
+
+.credits-hero__lead {
+  max-width: 40rem;
+  margin-top: 1.7rem;
+  font-size: clamp(1rem, 1.8vw, 1.15rem);
+}
+
+.credits-title {
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 1.25rem;
+  font-size: clamp(4.4rem, 15vw, 10.5rem);
+  font-weight: 800;
+  letter-spacing: 0.035em;
+  line-height: 0.87;
+  color: transparent;
+  background: linear-gradient(105deg, #F3F4F6 4%, #B9A5FF 42%, #7C3AED 76%, #60A5FA 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-wrap: nowrap;
+}
+
+.credits-title span {
+  color: #60A5FA;
+  -webkit-text-fill-color: #60A5FA;
+}
+
+.credits-hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1.4rem;
+  margin-top: 2.2rem;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.credits-hero__meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.credits-hero__meta span::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.75);
+}
+
+.credits-section {
+  overflow: hidden;
+}
+
+.credits-section__head {
+  max-width: 42rem;
+}
+
+.credits-physics {
+  position: relative;
+  min-height: clamp(20rem, 34vw, 27rem);
+  margin-top: clamp(2.25rem, 5vw, 4rem);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(28rem 18rem at 12% 18%, rgba(139, 92, 246, 0.14), transparent 68%),
+    radial-gradient(28rem 18rem at 88% 18%, rgba(96, 165, 250, 0.1), transparent 68%),
+    rgba(19, 20, 29, 0.68);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025), var(--shadow-card);
+}
+
+.credits-physics::before,
+.credits-physics::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border-radius: 50%;
+  border: 1px solid rgba(139, 92, 246, 0.08);
+}
+
+.credits-physics::before {
+  width: 28rem;
+  height: 28rem;
+  left: -12rem;
+  bottom: -22rem;
+}
+
+.credits-physics::after {
+  width: 34rem;
+  height: 34rem;
+  right: -15rem;
+  top: -25rem;
+  border-color: rgba(96, 165, 250, 0.07);
+}
+
+.credits-physics__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.credits-wiggle-base,
+.credits-wiggle {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.credits-wiggle-base {
+  stroke: rgba(156, 163, 175, 0.22);
+  stroke-width: 1;
+  stroke-dasharray: 2 12;
+}
+
+.credits-wiggle {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  filter: url(#credits-glow);
+}
+
+.credits-gear {
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.credits-gear__teeth {
+  fill: rgba(139, 92, 246, 0.08);
+  stroke: rgba(167, 139, 250, 0.75);
+  stroke-width: 2;
+  stroke-dasharray: 2 8;
+  vector-effect: non-scaling-stroke;
+}
+
+.credits-gear__ring {
+  fill: rgba(10, 11, 14, 0.12);
+  stroke: rgba(96, 165, 250, 0.45);
+  stroke-width: 1;
+  stroke-dasharray: 1 7;
+  vector-effect: non-scaling-stroke;
+}
+
+.credits-gear__hub {
+  fill: var(--accent);
+  stroke: #C4B5FD;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.credits-gear__spokes {
+  fill: none;
+  stroke: rgba(156, 163, 175, 0.28);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.credits-gear text {
+  fill: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 2px;
+}
+
+.credits-gear text.credits-gear__sub {
+  fill: var(--text-faint);
+  font-size: 7px;
+  letter-spacing: 1.5px;
+}
+
+.credits-physics__tag {
+  position: absolute;
+  left: 14%;
+  top: 69%;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.7rem;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  border-radius: 9999px;
+  color: #C4B5FD;
+  background: rgba(10, 11, 14, 0.78);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 18px rgba(139, 92, 246, 0.16);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  will-change: left, top;
+}
+
+.credits-physics__tag--violet {
+  border-color: rgba(139, 92, 246, 0.55);
+  color: #A78BFA;
+}
+
+.credits-physics__tag--blue {
+  border-color: rgba(96, 165, 250, 0.55);
+  color: #93C5FD;
+}
+
+.credits-physics__hint {
+  position: absolute;
+  right: 1.25rem;
+  bottom: 1.15rem;
+  z-index: 2;
+  color: rgba(156, 163, 175, 0.68);
+  font-size: 0.58rem;
+}
+
+.credits-grid {
+  display: grid;
+  gap: 1.25rem;
+  margin-top: clamp(2rem, 5vw, 3.5rem);
+}
+
+.credit-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: clamp(1.35rem, 3vw, 2rem);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(20rem 12rem at 100% 0%, rgba(139, 92, 246, 0.1), transparent 64%),
+    rgba(19, 20, 29, 0.8);
+  box-shadow: var(--shadow-card);
+  transition: transform 0.4s var(--ease), border-color 0.4s ease, box-shadow 0.4s ease;
+}
+
+.credit-card::after {
+  content: "";
+  position: absolute;
+  right: -3rem;
+  bottom: -4rem;
+  width: 10rem;
+  height: 10rem;
+  border: 1px solid rgba(96, 165, 250, 0.1);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.credit-card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(139, 92, 246, 0.42);
+  box-shadow: 0 30px 70px -32px rgba(139, 92, 246, 0.42);
+}
+
+.credit-card__topline,
+.credit-card__identity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.credit-card__topline {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.credit-card__index {
+  color: var(--accent);
+}
+
+.credit-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: right;
+}
+
+.credit-card__status i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #6EE7B7;
+  box-shadow: 0 0 10px rgba(110, 231, 183, 0.75);
+}
+
+.credit-card__identity {
+  justify-content: flex-start;
+  margin-top: 1.7rem;
+}
+
+.credit-card__avatar-wrap {
+  position: relative;
+  flex: none;
+  width: 78px;
+  height: 78px;
+  padding: 3px;
+  border: 1px solid rgba(139, 92, 246, 0.75);
+  border-radius: 50%;
+  background: linear-gradient(135deg, #60A5FA, #8B5CF6 55%, #C4B5FD);
+  box-shadow: 0 0 24px rgba(139, 92, 246, 0.2);
+}
+
+.credit-card__avatar-wrap--mark {
+  border-color: rgba(96, 165, 250, 0.6);
+  background: linear-gradient(135deg, #8B5CF6, #60A5FA);
+}
+
+.credit-avatar {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 3px solid var(--surface);
+  border-radius: 50%;
+  background: var(--surface-2);
+  object-fit: cover;
+}
+
+.credit-avatar--mark {
+  padding: 1.1rem;
+  object-fit: contain;
+}
+
+.credit-card h3 {
+  font-size: clamp(1.08rem, 2vw, 1.3rem);
+  line-height: 1.15;
+}
+
+.credit-card__role {
+  margin-top: 0.45rem;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+.credit-card__bio {
+  margin-top: 1.5rem;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+  line-height: 1.75;
+}
+
+.credit-card__motto {
+  margin-top: auto;
+  padding: 1rem 0 0 1rem;
+  border-left: 2px solid var(--accent);
+  color: var(--text);
+  font-size: 0.96rem;
+  font-style: italic;
+  line-height: 1.6;
+}
+
+.credit-card__motto span {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.57rem;
+  font-style: normal;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.credits-thanks {
+  border-top: 1px solid var(--border);
+  background:
+    radial-gradient(36rem 18rem at 50% 0%, rgba(139, 92, 246, 0.14), transparent 65%),
+    rgba(14, 15, 21, 0.56);
+  text-align: center;
+}
+
+.credits-thanks .container {
+  display: grid;
+  justify-items: center;
+}
+
+.credits-thanks .h2 {
+  margin-top: 1rem;
+}
+
+.credits-thanks p:not(.eyebrow) {
+  max-width: 38rem;
+  margin-top: 1rem;
+  color: var(--text-dim);
+}
+
+.credits-thanks .btn {
+  margin-top: 1.8rem;
+}
+
+@media (min-width: 760px) {
+  .credits-grid {
+    grid-template-columns: repeat(3, 1fr);
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 600px) {
+  .credits-title {
+    font-size: clamp(3.7rem, 19vw, 6rem);
+    letter-spacing: 0.015em;
+  }
+
+  .credits-physics {
+    min-height: 17rem;
+  }
+
+  .credits-physics__hint {
+    right: 0.85rem;
+    bottom: 0.85rem;
+    font-size: 0.52rem;
+  }
+
+  .credits-physics__tag {
+    font-size: 0.5rem;
+    letter-spacing: 0.1em;
+  }
+
+  .credit-card__identity {
+    align-items: flex-start;
+  }
+}
+
+/* ---------- 19. Footer ---------- */
 .site-footer {
   border-top: 1px solid var(--border);
   background: rgba(14, 15, 21, 0.84);
@@ -2351,7 +2802,7 @@ h1, h2, h3 {
   }
 }
 
-/* ---------- 19. Reveal-on-scroll ---------- */
+/* ---------- 20. Reveal-on-scroll ---------- */
 [data-reveal] {
   opacity: 0;
   transform: translateY(22px);
@@ -2371,7 +2822,7 @@ h1, h2, h3 {
   }
 }
 
-/* ---------- 20. Responsive overrides (max-width) ----------
+/* ---------- 21. Responsive overrides (max-width) ----------
    The base styles above are mobile-first; these queries tighten
    spacing and stacking for tablets and phones where the fluid
    clamp() values alone are not enough.
@@ -2709,7 +3160,7 @@ h1, h2, h3 {
   }
 }
 
-/* ---------- 21. Utility ---------- */
+/* ---------- 22. Utility ---------- */
 .visually-hidden {
   position: absolute;
   width: 1px;

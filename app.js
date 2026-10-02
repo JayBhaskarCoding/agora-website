@@ -1,10 +1,11 @@
 /* ============================================================
    AGORA — app.js
-   Vanilla JS, zero dependencies. Powers all four pages:
+   Vanilla JS, zero dependencies. Powers all five pages:
      · index.html         (home)
      · shared-post.html   (shared-link landing)
      · download.html      (downloads)
      · about.html         (about the creator)
+     · credits.html       (interactive credits)
 
    Contents:
      1. Link routing      — flat multi-page navigation
@@ -40,7 +41,8 @@
     home: '/index.html',
     why: '/index.html#why-agora',
     download: '/download.html',
-    about: '/about.html'
+    about: '/about.html',
+    credits: '/credits.html'
   };
 
   function getHashTarget(hash) {
@@ -836,12 +838,160 @@
     initDotMatrix();
   }
 
+  function initCreditsPhysics() {
+    var stage = doc.getElementById('credits-physics');
+    if (!stage) return;
+
+    var line = stage.querySelector('[data-credits-wiggle]');
+    var svg = stage.querySelector('.credits-physics__svg');
+    var gearNodes = stage.querySelectorAll('[data-credits-gear]');
+    var tags = stage.querySelectorAll('[data-credits-tag]');
+    if (!line || !gearNodes.length) return;
+
+    var VIEWBOX_WIDTH = 1200;
+    var VIEWBOX_HEIGHT = 360;
+    var points = 32;
+    var state = {
+      targetScroll: window.scrollY || window.pageYOffset || 0,
+      visualScroll: window.scrollY || window.pageYOffset || 0,
+      lastScroll: window.scrollY || window.pageYOffset || 0,
+      lineOffset: 0,
+      lineVelocity: 0,
+      lastTime: 0,
+      raf: 0
+    };
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function pathFor(scrollPosition, offset) {
+      var path = '';
+      var linePoints = [];
+
+      for (var index = 0; index < points; index += 1) {
+        var progress = index / (points - 1);
+        var x = progress * VIEWBOX_WIDTH;
+        var envelope = Math.sin(Math.PI * progress);
+        var base = 246
+          + Math.sin(progress * Math.PI * 2.2) * 31
+          + Math.sin(progress * Math.PI * 5.2 + 0.4) * 11;
+        var travelingWave = Math.sin(progress * Math.PI * 5.4 + scrollPosition * 0.005) * offset * envelope;
+        var secondaryWave = Math.sin(progress * Math.PI * 9 + scrollPosition * 0.002) * offset * 0.18 * envelope;
+        var y = base + travelingWave + secondaryWave;
+        linePoints.push({ x: x, y: y });
+      }
+
+      path = 'M ' + linePoints[0].x.toFixed(2) + ' ' + linePoints[0].y.toFixed(2);
+      for (var pointIndex = 1; pointIndex < linePoints.length; pointIndex += 1) {
+        var previous = linePoints[pointIndex - 1];
+        var current = linePoints[pointIndex];
+        var midpoint = (previous.x + current.x) / 2;
+        path += ' C ' + midpoint.toFixed(2) + ' ' + previous.y.toFixed(2)
+          + ' ' + midpoint.toFixed(2) + ' ' + current.y.toFixed(2)
+          + ' ' + current.x.toFixed(2) + ' ' + current.y.toFixed(2);
+      }
+      return path;
+    }
+
+    function updateTags(scrollPosition) {
+      var totalLength;
+      try {
+        totalLength = line.getTotalLength();
+      } catch (error) {
+        return;
+      }
+      if (!totalLength) return;
+
+      var stageRect = stage.getBoundingClientRect();
+      var svgRect = svg ? svg.getBoundingClientRect() : stageRect;
+      var scale = Math.min(svgRect.width / VIEWBOX_WIDTH, svgRect.height / VIEWBOX_HEIGHT);
+      var offsetX = (svgRect.left - stageRect.left) + ((svgRect.width - VIEWBOX_WIDTH * scale) / 2);
+      var offsetY = (svgRect.top - stageRect.top) + ((svgRect.height - VIEWBOX_HEIGHT * scale) / 2);
+
+      Array.prototype.forEach.call(tags, function (tag) {
+        var progress = parseFloat(tag.getAttribute('data-credits-tag')) || 0;
+        var distance = (progress * totalLength + scrollPosition * 0.18) % totalLength;
+        if (distance < 0) distance += totalLength;
+        var point = line.getPointAtLength(distance);
+        tag.style.left = ((offsetX + point.x * scale) / stageRect.width * 100).toFixed(3) + '%';
+        tag.style.top = ((offsetY + point.y * scale) / stageRect.height * 100).toFixed(3) + '%';
+      });
+    }
+
+    function updateGears(scrollPosition) {
+      Array.prototype.forEach.call(gearNodes, function (gear) {
+        var direction = gear.getAttribute('data-credits-gear') === 'counter-clockwise' ? -1 : 1;
+        var centerX = direction < 0 ? 992 : 208;
+        var centerY = 136;
+        var translation = direction < 0 ? -307 : 307;
+        var rotation = scrollPosition * 0.22 * direction;
+        // Move the two circles together so their dashed edges interlock,
+        // then rotate each around its own local hub.
+        gear.setAttribute('transform', 'translate(' + translation + ' 0) rotate(' + rotation.toFixed(2) + ' ' + centerX + ' ' + centerY + ')');
+      });
+    }
+
+    function render() {
+      line.setAttribute('d', pathFor(state.visualScroll, state.lineOffset));
+      updateGears(state.visualScroll);
+      updateTags(state.visualScroll);
+    }
+
+    function queueFrame() {
+      if (!state.raf) state.raf = window.requestAnimationFrame(step);
+    }
+
+    function step(timestamp) {
+      state.raf = 0;
+      if (!state.lastTime) state.lastTime = timestamp;
+      var elapsed = clamp(timestamp - state.lastTime, 8, 34) / 16.67;
+      state.lastTime = timestamp;
+
+      var scrollGap = state.targetScroll - state.visualScroll;
+      state.visualScroll += scrollGap * (1 - Math.pow(0.78, elapsed));
+
+      // A damped spring: scrolling kicks the string, then stiffness pulls it
+      // back while friction quietly removes the energy.
+      state.lineVelocity += (-state.lineOffset * 0.11 - state.lineVelocity * 0.16) * elapsed;
+      state.lineOffset += state.lineVelocity * elapsed;
+      if (Math.abs(state.lineOffset) < 0.005 && Math.abs(state.lineVelocity) < 0.005) {
+        state.lineOffset = 0;
+        state.lineVelocity = 0;
+      }
+
+      render();
+
+      var stillMoving = Math.abs(state.targetScroll - state.visualScroll) > 0.08
+        || Math.abs(state.lineOffset) > 0.01
+        || Math.abs(state.lineVelocity) > 0.01;
+      if (stillMoving) queueFrame();
+    }
+
+    function handleScroll() {
+      var nextScroll = window.scrollY || window.pageYOffset || 0;
+      var delta = nextScroll - state.lastScroll;
+      state.targetScroll = nextScroll;
+      state.lastScroll = nextScroll;
+      // Clamp a wheel/touch flick so a single large jump stays playful rather
+      // than throwing the line outside the card.
+      state.lineVelocity = clamp(state.lineVelocity + clamp(delta * 0.055, -18, 18), -24, 24);
+      queueFrame();
+    }
+
+    render();
+    if (reduceMotion()) return;
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    queueFrame();
+  }
+
   /* ------------------------------------------------------------
      Boot
      ------------------------------------------------------------ */
   function boot() {
     initImages();
     initAmbientExperience();
+    initCreditsPhysics();
     initRouting();
     initMenu();
     initSmoothScroll();

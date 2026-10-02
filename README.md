@@ -14,6 +14,7 @@ Pure **vanilla HTML / CSS / JS** — no frameworks, no build step. Serve the rep
 | `shared-post.html` | Landing for shared post links (WhatsApp, etc.) when the app is not installed. Parses `?post=` / `?post_id=` / `?id=` and renders a preview stub until the backend is connected |
 | `download.html`    | APK download, system requirements, version details, 3-step install guide |
 | `about.html`       | Vision, Jayvardhan Bhaskar's creator bio, feedback form (placeholder)     |
+| `credits.html`     | Team credits, interlocking gears, spring line, and traveling tags          |
 
 Shared assets:
 
