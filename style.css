@@ -430,6 +430,21 @@ h1, h2, h3 {
 
 .nav__logo-word {
   text-transform: lowercase;
+  /* Keep the first letters at full brightness, then let the wordmark settle
+     into roughly 74% visibility toward the right edge. */
+  color: var(--text); /* solid fallback for browsers without text clipping */
+  background-image: linear-gradient(
+    90deg,
+    var(--text) 0%,
+    var(--text) 22%,
+    rgba(243, 244, 246, 0.9) 58%,
+    rgba(243, 244, 246, 0.74) 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .nav__logo-dot {

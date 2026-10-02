@@ -97,7 +97,9 @@ nav), `≥769px` desktop nav, `≥1024px` wide layouts.
   so it stays compact without changing the brand treatment.
 - UI palette: deep dark surfaces, glass panels, and violet-to-blue gradient
   pill-shaped primary buttons with dark text for readable contrast. The same
-  gradient carries the period in the `agora.` lockup. Original logo artwork is
+  gradient carries the period in the `agora.` lockup, while the wordmark fades
+  from full brightness on the left to roughly 74% visibility on the right.
+  Original logo artwork is
   centralized at `/assets/agora-logo.svg` for replacement with the final approved export.
 - `about.html` names Jayvardhan Bhaskar as the app and website developer and shares
   his motivation. The portrait is stored at `/assets/developer.png`; the avatar
