@@ -45,6 +45,16 @@
     credits: '/credits.html'
   };
 
+  var routerState = {
+    bound: false,
+    navigating: false,
+    abortController: null,
+    currentPath: ''
+  };
+  var menuState = { bound: false };
+  var chromeState = { bound: false };
+  var revealObserver = null;
+
   function getHashTarget(hash) {
     try {
       return doc.getElementById(decodeURIComponent(hash.slice(1)));
@@ -53,69 +63,196 @@
     }
   }
 
-  function initRouting() {
+  function canonicalPath(url) {
+    var path = url.pathname || '/index.html';
+    if (path === '/' || path === '') return '/index.html';
+    return path;
+  }
+
+  function syncPageLinks() {
     var links = doc.querySelectorAll('a[data-page]');
     Array.prototype.forEach.call(links, function (link) {
       var target = PAGE_MAP[link.getAttribute('data-page')];
       if (target) link.setAttribute('href', target);
     });
+  }
 
-    // If the page was opened with a hash (e.g. index.html#why-agora),
-    // glide to the target once layout is ready.
-    if (window.location.hash) {
-      var target = getHashTarget(window.location.hash);
-      if (target) {
-        window.setTimeout(function () {
-          target.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
-        }, 80);
-      }
+  function getInternalPageUrl(link) {
+    var href = link.getAttribute('href');
+    if (!href || href === '#' || link.hasAttribute('download') || link.target === '_blank') return null;
+    if (/^(mailto:|tel:|javascript:)/i.test(href)) return null;
+
+    var url;
+    try {
+      // A hash-only Why Agora link on a secondary page should still land on
+      // the home section; on the home page initSmoothScroll owns it instead.
+      url = /^#/.test(href) && !getHashTarget(href)
+        ? new URL('/index.html' + href, window.location.href)
+        : new URL(href, window.location.href);
+    } catch (error) {
+      return null;
     }
+    if (url.origin !== window.location.origin || !/^https?:$/.test(url.protocol)) return null;
+    if (!/(^|\/)([^/]+\.html?)$/i.test(url.pathname) && url.pathname !== '/') return null;
+    if (/\.apk$/i.test(url.pathname)) return null;
+    return url;
+  }
+
+  function scrollToRouteHash(hash) {
+    if (!hash) {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      return;
+    }
+    var target = getHashTarget(hash);
+    if (!target) return;
+    window.setTimeout(function () {
+      target.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+    }, 40);
+  }
+
+  function readPageShell(parsed) {
+    var main = parsed.querySelector('main') || parsed.querySelector('[data-page-content]');
+    var header = parsed.querySelector('body > header') || parsed.querySelector('header');
+    if (!main) throw new Error('The requested page has no primary content wrapper.');
+    return { main: main, header: header };
+  }
+
+  function updateDocumentShell(parsed, shell) {
+    var currentMain = doc.querySelector('main') || doc.querySelector('[data-page-content]');
+    var currentHeader = doc.querySelector('body > header') || doc.querySelector('header');
+    if (!currentMain) throw new Error('The current page has no primary content wrapper.');
+
+    if (currentHeader && shell.header) currentHeader.replaceWith(shell.header.cloneNode(true));
+    currentMain.replaceWith(shell.main.cloneNode(true));
+
+    var keepCursor = doc.body.classList.contains('has-custom-cursor');
+    doc.body.className = parsed.body.getAttribute('class') || '';
+    if (keepCursor) doc.body.classList.add('has-custom-cursor');
+    doc.documentElement.classList.remove('menu-open');
+
+    var nextTitle = parsed.querySelector('title');
+    if (nextTitle) doc.title = nextTitle.textContent;
+    var nextDescription = parsed.querySelector('meta[name="description"]');
+    var currentDescription = doc.querySelector('meta[name="description"]');
+    if (nextDescription && currentDescription) currentDescription.setAttribute('content', nextDescription.getAttribute('content') || '');
+  }
+
+  function routeTo(url, pushHistory) {
+    var targetPath = canonicalPath(url);
+    var currentUrl = new URL(window.location.href);
+    // Compare against the hydrated DOM route, not only location.pathname:
+    // popstate updates the address bar before this handler runs.
+    if (targetPath === routerState.currentPath && url.search === currentUrl.search) {
+      if (pushHistory && url.hash !== currentUrl.hash) window.history.pushState({}, '', url.href);
+      scrollToRouteHash(url.hash);
+      return Promise.resolve();
+    }
+    if (routerState.navigating) return Promise.resolve();
+
+    routerState.navigating = true;
+    if (routerState.abortController) routerState.abortController.abort();
+    routerState.abortController = typeof AbortController === 'function' ? new AbortController() : null;
+    doc.documentElement.classList.add('is-pjax-loading');
+
+    return fetch(url.href, {
+      headers: { 'X-Requested-With': 'PJAX' },
+      signal: routerState.abortController ? routerState.abortController.signal : undefined
+    }).then(function (response) {
+      if (!response.ok) throw new Error('Navigation failed (' + response.status + ').');
+      return response.text();
+    }).then(function (markup) {
+      var parsed = new DOMParser().parseFromString(markup, 'text/html');
+      var shell = readPageShell(parsed);
+      updateDocumentShell(parsed, shell);
+      if (pushHistory) window.history.pushState({ pjax: true }, '', url.href);
+      routerState.currentPath = targetPath;
+      bootPage();
+      scrollToRouteHash(url.hash);
+    }).catch(function (error) {
+      if (error && error.name === 'AbortError') return;
+      // A static fallback keeps the site navigable if a host blocks PJAX.
+      window.location.assign(url.href);
+    }).finally(function () {
+      routerState.navigating = false;
+      routerState.abortController = null;
+      doc.documentElement.classList.remove('is-pjax-loading');
+    });
+  }
+
+  function handleRouterClick(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    var link = event.target.closest ? event.target.closest('a') : null;
+    if (!link) return;
+    var url = getInternalPageUrl(link);
+    if (!url) return;
+    event.preventDefault();
+    routeTo(url, true);
+  }
+
+  function initRouting() {
+    syncPageLinks();
+    if (routerState.currentPath) return;
+    routerState.currentPath = canonicalPath(new URL(window.location.href));
+    if (routerState.bound) return;
+    routerState.bound = true;
+    doc.addEventListener('click', handleRouterClick);
+    window.addEventListener('popstate', function () {
+      routeTo(new URL(window.location.href), false);
+    });
   }
 
   /* ------------------------------------------------------------
      2. MOBILE MENU
      ------------------------------------------------------------ */
+  function setMenu(open) {
+    var toggle = doc.querySelector('.nav__toggle');
+    var menu = doc.querySelector('.mobile-menu');
+    if (!toggle || !menu) return;
+    toggle.classList.toggle('is-open', open);
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
+    menu.classList.toggle('is-open', open);
+    // Freeze the page behind the open menu (prevents scroll-through on phones).
+    doc.documentElement.classList.toggle('menu-open', open);
+  }
+
   function initMenu() {
     var toggle = doc.querySelector('.nav__toggle');
     var menu = doc.querySelector('.mobile-menu');
     if (!toggle || !menu) return;
 
-    function setMenu(open) {
-      toggle.classList.toggle('is-open', open);
-      toggle.setAttribute('aria-expanded', String(open));
-      toggle.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
-      menu.classList.toggle('is-open', open);
-      // Freeze the page behind the open menu (prevents scroll-through on phones).
-      doc.documentElement.classList.toggle('menu-open', open);
+    if (!toggle.dataset.menuBound) {
+      toggle.dataset.menuBound = 'true';
+      toggle.addEventListener('click', function () {
+        var currentMenu = doc.querySelector('.mobile-menu');
+        setMenu(!(currentMenu && currentMenu.classList.contains('is-open')));
+      });
+    }
+    if (!menu.dataset.menuBound) {
+      menu.dataset.menuBound = 'true';
+      menu.addEventListener('click', function (event) {
+        if (event.target.closest('a')) setMenu(false);
+      });
     }
 
-    toggle.addEventListener('click', function () {
-      setMenu(!menu.classList.contains('is-open'));
-    });
-
-    // Close after choosing a destination.
-    menu.addEventListener('click', function (event) {
-      if (event.target.closest('a')) setMenu(false);
-    });
-
-    // Close on Escape and on any tap outside the header.
+    if (menuState.bound) return;
+    menuState.bound = true;
     doc.addEventListener('keydown', function (event) {
       if (event.key === 'Escape') setMenu(false);
     });
-
     doc.addEventListener('click', function (event) {
-      if (!menu.classList.contains('is-open')) return;
+      var currentMenu = doc.querySelector('.mobile-menu');
+      if (!currentMenu || !currentMenu.classList.contains('is-open')) return;
       if (!event.target.closest('.site-header')) setMenu(false);
     });
 
     // Drop the menu state when resizing up to the desktop layout.
-    // Keep in sync with the desktop nav breakpoint in style.css.
     var desktop = window.matchMedia('(min-width: 769px)');
-    if (desktop.addEventListener) {
-      desktop.addEventListener('change', function (e) {
-        if (e.matches) setMenu(false);
-      });
-    }
+    var onBreakpoint = function (event) {
+      if (event.matches) setMenu(false);
+    };
+    if (desktop.addEventListener) desktop.addEventListener('change', onBreakpoint);
+    else if (desktop.addListener) desktop.addListener(onBreakpoint);
   }
 
   /* ------------------------------------------------------------
@@ -155,6 +292,10 @@
      ------------------------------------------------------------ */
   function initReveal() {
     var items = Array.prototype.slice.call(doc.querySelectorAll('[data-reveal]'));
+    if (revealObserver) {
+      revealObserver.disconnect();
+      revealObserver = null;
+    }
     if (!items.length) return;
 
     if (reduceMotion() || !('IntersectionObserver' in window)) {
@@ -162,18 +303,18 @@
       return;
     }
 
-    var observer = new IntersectionObserver(function (entries) {
+    revealObserver = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
         if (!entry.isIntersecting) return;
         var el = entry.target;
         var delay = parseInt(el.getAttribute('data-reveal-delay') || '0', 10);
         if (delay) el.style.transitionDelay = delay + 'ms';
         el.classList.add('is-visible');
-        observer.unobserve(el);
+        revealObserver.unobserve(el);
       });
     }, { threshold: 0.12, rootMargin: '0px 0px -7% 0px' });
 
-    items.forEach(function (el) { observer.observe(el); });
+    items.forEach(function (el) { revealObserver.observe(el); });
   }
 
   /* ------------------------------------------------------------
@@ -181,12 +322,13 @@
      Header border on scroll · active nav link · footer year.
      ------------------------------------------------------------ */
   function initChrome() {
-    var header = doc.querySelector('.site-header');
-    if (header) {
-      var onScroll = function () {
-        header.classList.toggle('is-scrolled', window.scrollY > 8);
-      };
-      onScroll();
+    var onScroll = function () {
+      var header = doc.querySelector('.site-header');
+      if (header) header.classList.toggle('is-scrolled', window.scrollY > 8);
+    };
+    onScroll();
+    if (!chromeState.bound) {
+      chromeState.bound = true;
       window.addEventListener('scroll', onScroll, { passive: true });
     }
 
@@ -194,7 +336,7 @@
     var path = (window.location.pathname.split('/').pop() || 'index.html').toLowerCase();
     var pageKey = (path === 'index.html' || path === '') ? 'home' : path.replace(/\.html$/, '');
     Array.prototype.forEach.call(doc.querySelectorAll('[data-nav-key]'), function (link) {
-      if (link.getAttribute('data-nav-key') === pageKey) link.classList.add('is-active');
+      link.classList.toggle('is-active', link.getAttribute('data-nav-key') === pageKey);
     });
 
     var year = doc.getElementById('year');
@@ -541,9 +683,9 @@
   /* ------------------------------------------------------------
      8. AMBIENT EXPERIENCE
      A pointer-only cursor orb, a low-contrast dot matrix, and a
-     softly filtered looping background track. The browser is asked to
-     start the music automatically; if autoplay is blocked, the first
-     visitor gesture starts it instead. The matrix uses the same pulse.
+     softly filtered looping background track. The first document click
+     satisfies autoplay policy and starts the persistent Web Audio source;
+     the matrix uses the same pulse.
      ------------------------------------------------------------ */
   function initCursor() {
     var finePointer = window.matchMedia && window.matchMedia('(pointer: fine)');
@@ -605,9 +747,13 @@
   }
 
   function initAmbientExperience() {
+    // This manager is created once per document and deliberately lives outside
+    // <main>. PJAX swaps the page shell, but this graph and source keep running.
+    if (window.AgoraAudio) return;
+
     var MUSIC_SRC = '/assets/bgMusic.mpeg';
+    var TARGET_VOLUME = 0.075;
     var audio = {
-      element: null,
       context: null,
       source: null,
       master: null,
@@ -615,15 +761,19 @@
       compressor: null,
       analyser: null,
       data: null,
-      enabled: false,
+      buffer: null,
+      bufferPromise: null,
+      rawDataPromise: null,
+      starting: false,
+      isPlaying: false,
       energy: 0,
-      unavailable: false,
-      gestureArmed: false
+      unavailable: false
     };
     var soundControl = { button: null, label: null };
-    var removeGestureListeners = null;
 
-    function updateSoundButton(button, label) {
+    function updateSoundButton() {
+      var button = soundControl.button;
+      var label = soundControl.label;
       if (!button || !label) return;
       if (audio.unavailable) {
         button.classList.remove('is-on');
@@ -632,49 +782,20 @@
         label.textContent = 'sound unavailable';
         return;
       }
-      var on = audio.enabled;
-      button.classList.toggle('is-on', on);
-      button.setAttribute('aria-pressed', String(on));
-      button.setAttribute('aria-label', on ? 'Turn background music off' : 'Turn background music on');
-      label.textContent = on ? 'sound on' : 'sound off';
+      button.classList.toggle('is-on', audio.isPlaying);
+      button.setAttribute('aria-pressed', String(audio.isPlaying));
+      button.setAttribute('aria-label', audio.isPlaying ? 'Turn background music off' : 'Turn background music on');
+      label.textContent = audio.isPlaying ? 'sound on' : 'sound off';
     }
 
     function markUnavailable() {
       audio.unavailable = true;
-      audio.enabled = false;
-      updateSoundButton(soundControl.button, soundControl.label);
+      audio.starting = false;
+      audio.isPlaying = false;
+      updateSoundButton();
     }
 
-    function createAudioElement() {
-      if (audio.element) return audio.element;
-
-      var element = doc.createElement('audio');
-      var primarySource = doc.createElement('source');
-      primarySource.src = MUSIC_SRC;
-      primarySource.type = 'audio/mpeg';
-      element.appendChild(primarySource);
-      element.preload = 'auto';
-      element.loop = true;
-      element.autoplay = true;
-      element.setAttribute('playsinline', '');
-      element.setAttribute('aria-hidden', 'true');
-      element.tabIndex = -1;
-      element.hidden = true;
-      element.addEventListener('error', markUnavailable);
-      element.addEventListener('ended', function () {
-        // loop is the normal path; this keeps playback continuous in older
-        // engines that do not honor the property consistently.
-        if (audio.enabled) {
-          var restart = element.play();
-          if (restart && restart.catch) restart.catch(function () {});
-        }
-      });
-      doc.body.appendChild(element);
-      audio.element = element;
-      return element;
-    }
-
-    function ensureAudio() {
+    function createAudioGraph() {
       if (audio.context) return true;
       var AudioContext = window.AudioContext || window.webkitAudioContext;
       if (!AudioContext) {
@@ -683,18 +804,16 @@
       }
 
       try {
-        var element = createAudioElement();
         var context = new AudioContext();
-        var source = context.createMediaElementSource(element);
         var master = context.createGain();
         var filter = context.createBiquadFilter();
         var compressor = context.createDynamicsCompressor();
         var analyser = context.createAnalyser();
         var now = context.currentTime;
 
-        // Roll off the brittle top end and keep the file comfortably beneath
-        // speech and interface sounds. The compressor also tames sharp peaks.
-        master.gain.setValueAtTime(0.0001, now);
+        // Set the gain before any node is connected or the source starts. This
+        // prevents a decoded buffer from leaking at full volume for one frame.
+        master.gain.value = 0;
         filter.type = 'lowpass';
         filter.frequency.setValueAtTime(2200, now);
         filter.Q.setValueAtTime(0.25, now);
@@ -706,14 +825,12 @@
         analyser.fftSize = 128;
         analyser.smoothingTimeConstant = 0.9;
 
-        source.connect(filter);
+        master.connect(filter);
         filter.connect(compressor);
-        compressor.connect(master);
-        master.connect(analyser);
+        compressor.connect(analyser);
         analyser.connect(context.destination);
 
         audio.context = context;
-        audio.source = source;
         audio.master = master;
         audio.filter = filter;
         audio.compressor = compressor;
@@ -726,85 +843,112 @@
       }
     }
 
-    function disarmGestureStart() {
-      if (removeGestureListeners) removeGestureListeners();
-      removeGestureListeners = null;
-      audio.gestureArmed = false;
-    }
+    function loadMusicBuffer() {
+      if (audio.buffer) return Promise.resolve(audio.buffer);
+      if (audio.bufferPromise) return audio.bufferPromise;
 
-    function setSound(enabled) {
-      if (!ensureAudio()) return Promise.reject(new Error('Background music is unavailable.'));
-
-      var context = audio.context;
-      var resume = context.state === 'suspended' ? context.resume() : Promise.resolve();
-      return resume.then(function () {
-        var now = context.currentTime;
-        audio.master.gain.cancelScheduledValues(now);
-        audio.master.gain.setTargetAtTime(enabled ? 0.075 : 0.0001, now, enabled ? 2.8 : 0.45);
-
-        if (!enabled) {
-          audio.element.pause();
-          audio.enabled = false;
-          return true;
-        }
-
-        audio.element.loop = true;
-        var playback = audio.element.play();
-        return Promise.resolve(playback).then(function () {
-          audio.enabled = true;
-          return true;
-        });
+      var rawData = audio.rawDataPromise || fetch(MUSIC_SRC).then(function (response) {
+        if (!response.ok) throw new Error('Music request failed (' + response.status + ').');
+        return response.arrayBuffer();
+      });
+      audio.rawDataPromise = rawData;
+      audio.bufferPromise = rawData.then(function (arrayBuffer) {
+        if (!arrayBuffer || !audio.context) throw new Error('Audio buffer is unavailable.');
+        return audio.context.decodeAudioData(arrayBuffer);
+      }).then(function (buffer) {
+        audio.buffer = buffer;
+        return buffer;
       }).catch(function (error) {
-        audio.enabled = false;
+        audio.bufferPromise = null;
+        audio.rawDataPromise = null;
+        markUnavailable();
         throw error;
       });
+
+      return audio.bufferPromise;
     }
 
-    function armGestureStart() {
-      if (audio.gestureArmed || audio.unavailable) return;
-      audio.gestureArmed = true;
+    function startMusic() {
+      if (audio.unavailable) return Promise.reject(new Error('Background music is unavailable.'));
+      if (audio.isPlaying) return Promise.resolve(true);
+      if (audio.starting) return audio.startPromise;
+      if (!createAudioGraph()) return Promise.reject(new Error('Audio is unavailable.'));
 
-      function resumeFromGesture(event) {
-        var target = event.target;
-        var clickedSoundControl = target && target.closest && target.closest('.ambient-toggle');
-        // Let the button's click handler own its first interaction so one tap
-        // cannot enable and immediately toggle the music back off.
-        if (clickedSoundControl) return;
+      audio.starting = true;
+      audio.startPromise = Promise.resolve(audio.context.state === 'suspended'
+        ? audio.context.resume()
+        : true).then(function () {
+        return loadMusicBuffer();
+      }).then(function (buffer) {
+        if (audio.isPlaying) return true;
 
-        disarmGestureStart();
-        setSound(true).then(function () {
-          updateSoundButton(soundControl.button, soundControl.label);
-        }).catch(function () {
-          if (audio.element && audio.element.error) markUnavailable();
-        });
-      }
+        var sourceNode = audio.context.createBufferSource();
+        sourceNode.buffer = buffer;
+        sourceNode.loop = true;
+        sourceNode.connect(audio.master);
 
-      var events = ['pointerdown', 'keydown', 'touchstart'];
-      events.forEach(function (eventName) {
-        doc.addEventListener(eventName, resumeFromGesture, { passive: true });
+        // The master gain was initialized at zero before this source exists.
+        // Start the loop only after the safe graph is fully connected.
+        sourceNode.start(0);
+        audio.source = sourceNode;
+        audio.isPlaying = true;
+        audio.starting = false;
+
+        var now = audio.context.currentTime;
+        audio.master.gain.cancelScheduledValues(now);
+        audio.master.gain.setTargetAtTime(TARGET_VOLUME, now, 2.8);
+        updateSoundButton();
+        return true;
+      }).catch(function (error) {
+        audio.starting = false;
+        if (audio.context && audio.context.state === 'closed') markUnavailable();
+        throw error;
       });
-      removeGestureListeners = function () {
-        events.forEach(function (eventName) {
-          doc.removeEventListener(eventName, resumeFromGesture);
-        });
-      };
+
+      return audio.startPromise;
     }
 
-    function tryStartMusic() {
-      setSound(true).then(function () {
-        disarmGestureStart();
-        updateSoundButton(soundControl.button, soundControl.label);
-      }).catch(function () {
-        if (audio.element && audio.element.error) {
-          markUnavailable();
-        } else {
-          armGestureStart();
+    function stopMusic() {
+      if (!audio.context || !audio.master || !audio.isPlaying) return;
+
+      var now = audio.context.currentTime;
+      var sourceNode = audio.source;
+      audio.isPlaying = false;
+      audio.master.gain.cancelScheduledValues(now);
+      audio.master.gain.setTargetAtTime(0, now, 0.35);
+      audio.source = null;
+      if (sourceNode) {
+        try {
+          sourceNode.stop(now + 1);
+        } catch (error) {
+          // A source can already be ending when the toggle is pressed.
         }
+      }
+      updateSoundButton();
+    }
+
+    function toggleMusic() {
+      if (audio.isPlaying) {
+        stopMusic();
+        return Promise.resolve(false);
+      }
+      return startMusic().then(function () {
+        updateSoundButton();
+        return true;
       });
     }
+
+    // Expose one stable manager for the whole document. It is never recreated
+    // when a page's <main> is replaced by the PJAX router.
+    window.AgoraAudio = {
+      start: startMusic,
+      stop: stopMusic,
+      toggle: toggleMusic,
+      get isPlaying() { return audio.isPlaying; }
+    };
 
     function getEnergy() {
-      if (!audio.enabled || !audio.analyser || !audio.data) {
+      if (!audio.isPlaying || !audio.analyser || !audio.data) {
         audio.energy *= 0.94;
         return audio.energy;
       }
@@ -824,11 +968,10 @@
     function getPulse(timestamp) {
       var clock = audio.context ? audio.context.currentTime : timestamp / 1000;
       var breathe = 0.5 + (0.5 * Math.sin(clock * Math.PI * 0.09));
-      return audio.enabled ? (audio.energy * 0.65) + (breathe * 0.18) : 0;
+      return audio.isPlaying ? (audio.energy * 0.65) + (breathe * 0.18) : 0;
     }
 
     function initSoundControl() {
-      createAudioElement();
       var button = doc.createElement('button');
       var label = doc.createElement('span');
       button.type = 'button';
@@ -843,21 +986,17 @@
       soundControl.label = label;
 
       button.addEventListener('click', function () {
-        if (audio.unavailable) return;
-        var next = !audio.enabled;
-        setSound(next).then(function () {
-          if (next) disarmGestureStart();
-          updateSoundButton(button, label);
-        }).catch(function () {
-          if (audio.element && audio.element.error) {
+        // The capture-phase first-click listener may already be starting the
+        // track. Do not interpret that same first click as an immediate stop.
+        if (!audio.isPlaying) {
+          startMusic().then(updateSoundButton).catch(function () {
             markUnavailable();
-          } else {
-            label.textContent = 'tap to retry';
-          }
-        });
+          });
+          return;
+        }
+        stopMusic();
       });
-
-      updateSoundButton(button, label);
+      updateSoundButton();
     }
 
     function initDotMatrix() {
@@ -934,8 +1073,25 @@
 
     initCursor();
     initSoundControl();
-    tryStartMusic();
     initDotMatrix();
+
+    // Preload bytes without touching the AudioContext. The first click below
+    // resumes/creates the context and starts the already-persistent loop.
+    audio.rawDataPromise = fetch(MUSIC_SRC).then(function (response) {
+      if (!response.ok) throw new Error('Music request failed (' + response.status + ').');
+      return response.arrayBuffer();
+    }).catch(function () {
+      audio.rawDataPromise = null;
+      return null;
+    });
+
+    function firstClickStartsAudio() {
+      document.removeEventListener('click', firstClickStartsAudio, true);
+      startMusic().catch(function () {
+        if (audio.context && audio.context.state === 'closed') markUnavailable();
+      });
+    }
+    document.addEventListener('click', firstClickStartsAudio, true);
   }
 
   var ROTARY_TEAM = [
@@ -974,13 +1130,12 @@
     var bottomSegments = bottomDisc ? bottomDisc.querySelectorAll('[data-rotary-segment]') : [];
     var tagHangers = topDisc ? topDisc.querySelectorAll('[data-rotary-tag]') : [];
     var roleTags = topDisc ? topDisc.querySelectorAll('[data-rotary-role]') : [];
-    var nameTag = bottomDisc ? bottomDisc.querySelector('[data-rotary-name-tag]') : null;
-    var tagName = bottomDisc ? bottomDisc.querySelector('[data-rotary-tag-name]') : null;
+    var nameTags = bottomDisc ? bottomDisc.querySelectorAll('[data-rotary-name-tag]') : [];
     var count = page.querySelector('[data-rotary-count]');
     var total = page.querySelector('[data-rotary-total]');
     var scrollAffordance = page.querySelector('[data-scroll-affordance]');
 
-    if (!topPlate || !bottomPlate || !topSegments.length || !bottomSegments.length || !tagHangers.length) return;
+    if (!topPlate || !bottomPlate || !topSegments.length || !bottomSegments.length || !tagHangers.length || nameTags.length !== bottomSegments.length) return;
 
     var state = {
       memberIndex: 0,
@@ -994,10 +1149,18 @@
       snapRequested: false,
       lastTime: 0,
       raf: 0,
-      transition: 0
+      transition: 0,
+      touchActive: false,
+      touchMoved: false,
+      touchStartY: 0,
+      touchLastY: 0,
+      touchLastTime: 0,
+      touchVelocity: 0
     };
     var SEGMENT = 120;
     var WHEEL_DAMPING = 0.05;
+    var TOUCH_DAMPING = 0.78;
+    var TOUCH_FLING_VELOCITY = 0.72;
     var SNAP_DELAY = 120;
     var SNAP_THRESHOLD = 0.65;
     var teamLength = ROTARY_TEAM.length;
@@ -1033,8 +1196,6 @@
     }
 
     function setMemberText() {
-      var member = ROTARY_TEAM[state.memberIndex];
-
       Array.prototype.forEach.call(topSegments, function (segment, index) {
         setSegmentContent(segment, ROTARY_TEAM[index % teamLength], index, index === state.memberIndex);
       });
@@ -1048,8 +1209,11 @@
       Array.prototype.forEach.call(tagHangers, function (tag, index) {
         tag.classList.toggle('is-active', index === state.memberIndex);
       });
-      if (tagName) tagName.textContent = member.name;
-      if (nameTag) nameTag.setAttribute('aria-label', 'Current member: ' + member.name);
+      Array.prototype.forEach.call(nameTags, function (tag, index) {
+        // Name labels are static DOM content; only their emphasis follows the
+        // settled member so rotation can never rewrite or replace the name.
+        tag.classList.toggle('is-active', index === state.memberIndex);
+      });
       if (count) count.textContent = String(state.memberIndex + 1).padStart(2, '0');
     }
 
@@ -1102,7 +1266,14 @@
       var bottomRotation = -state.rotation;
       topPlate.style.setProperty('--disc-rotation', topRotation + 'deg');
       bottomPlate.style.setProperty('--disc-rotation', bottomRotation + 'deg');
-      if (nameTag) nameTag.style.setProperty('--tag-counter-rotation', state.rotation + 'deg');
+
+      // Each bottom label lives inside its own rotated sector. Counter the
+      // whole bottom-wheel rotation in JS; CSS also subtracts that sector's
+      // fixed base angle, keeping every name perfectly horizontal.
+      Array.prototype.forEach.call(nameTags, function (tag, index) {
+        tag.style.setProperty('--tag-counter-rotation', (-bottomRotation) + 'deg');
+        tag.classList.toggle('is-active', index === state.memberIndex);
+      });
 
       updateSegmentVisuals(topSegments, TOP_SEGMENT_ANGLES, topRotation, 40);
       updateSegmentVisuals(bottomSegments, BOTTOM_SEGMENT_ANGLES, bottomRotation, 220);
@@ -1184,17 +1355,9 @@
       return delta;
     }
 
-    function handleWheel(event) {
-      if (event.cancelable) event.preventDefault();
-      var delta = normalizeWheelDelta(event);
-      if (!delta) return;
-      if (scrollAffordance) scrollAffordance.classList.add('is-hidden');
-
-      // Five percent of the physical wheel delta makes fast trackpads feel
-      // deliberate instead of throwing the 120-degree wheel across the UI.
-      var rotationDelta = clamp(delta * WHEEL_DAMPING, -36, 36);
+    function applyRotationDelta(rotationDelta) {
+      if (!rotationDelta) return;
       state.rotationTarget += rotationDelta;
-      scheduleSnap();
       Array.prototype.forEach.call(tagHangers, function (tag, index) {
         var impulse = rotationDelta * (index === state.memberIndex ? 0.16 : 0.08);
         state.tagVelocities[index] = clamp(state.tagVelocities[index] - impulse, -18, 18);
@@ -1202,17 +1365,106 @@
       queueFrame();
     }
 
+    function hideScrollAffordance() {
+      if (scrollAffordance) scrollAffordance.classList.add('is-hidden');
+    }
+
+    function handleWheel(event) {
+      if (event.cancelable) event.preventDefault();
+      var delta = normalizeWheelDelta(event);
+      if (!delta) return;
+      hideScrollAffordance();
+
+      // Five percent of the physical wheel delta makes fast trackpads feel
+      // deliberate instead of throwing the 120-degree wheel across the UI.
+      var rotationDelta = clamp(delta * WHEEL_DAMPING, -36, 36);
+      applyRotationDelta(rotationDelta);
+      scheduleSnap();
+    }
+
+    function isInteractiveTouch(event) {
+      var target = event.target;
+      return !!(target && target.closest && target.closest('a, button, input, select, textarea, [data-cursor="interactive"]'));
+    }
+
+    function handleTouchStart(event) {
+      if (event.touches.length !== 1 || isInteractiveTouch(event)) {
+        state.touchActive = false;
+        return;
+      }
+
+      var touch = event.touches[0];
+      var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
+      window.clearTimeout(state.snapTimer);
+      state.snapRequested = false;
+      state.touchActive = true;
+      state.touchMoved = false;
+      state.touchStartY = touch.clientY;
+      state.touchLastY = touch.clientY;
+      state.touchLastTime = now;
+      state.touchVelocity = 0;
+    }
+
+    function handleTouchMove(event) {
+      if (!state.touchActive || event.touches.length !== 1) return;
+      if (event.cancelable) event.preventDefault();
+
+      var touch = event.touches[0];
+      var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
+      var elapsed = Math.max(1, now - state.touchLastTime);
+      var verticalDelta = state.touchLastY - touch.clientY;
+      state.touchLastY = touch.clientY;
+      state.touchLastTime = now;
+      state.touchVelocity = verticalDelta / elapsed;
+      if (Math.abs(touch.clientY - state.touchStartY) > 4) {
+        state.touchMoved = true;
+        hideScrollAffordance();
+      }
+
+      // Finger-up is the same direction as scrolling down: it advances the
+      // wheel. The accumulated target is evaluated by the shared 65% snap rule.
+      applyRotationDelta(clamp(verticalDelta * TOUCH_DAMPING, -34, 34));
+    }
+
+    function finishTouch(event) {
+      if (!state.touchActive) return;
+      if (event.cancelable) event.preventDefault();
+
+      if (state.touchMoved) {
+        var displacement = state.rotationTarget - state.anchorRotation;
+        var distance = Math.abs(displacement);
+        var velocity = Math.abs(state.touchVelocity);
+
+        // A short, fast flick gets the same 65% commitment as a long drag.
+        // A slow drag below that threshold is handed back to the current snap.
+        if (velocity >= TOUCH_FLING_VELOCITY && distance < SEGMENT * SNAP_THRESHOLD) {
+          var direction = state.touchVelocity < 0 ? -1 : 1;
+          var remaining = (SEGMENT * SNAP_THRESHOLD) - distance + 0.5;
+          applyRotationDelta(direction * remaining);
+        }
+        scheduleSnap();
+        queueFrame();
+      }
+
+      state.touchActive = false;
+      state.touchMoved = false;
+      state.touchVelocity = 0;
+    }
+
     showMember(0, false);
     render();
-    window.addEventListener('wheel', handleWheel, { passive: false });
+    page.addEventListener('wheel', handleWheel, { passive: false });
+    page.addEventListener('touchstart', handleTouchStart, { passive: false });
+    page.addEventListener('touchmove', handleTouchMove, { passive: false });
+    page.addEventListener('touchend', finishTouch, { passive: false });
+    page.addEventListener('touchcancel', finishTouch, { passive: false });
   }
 
   /* ------------------------------------------------------------
-     Boot
+     Boot and PJAX page hydration
      ------------------------------------------------------------ */
-  function boot() {
+  function bootPage() {
     initImages();
-    initAmbientExperience();
     initCreditsRotary();
     initRouting();
     initMenu();
@@ -1221,6 +1473,14 @@
     initChrome();
     initContactForm();
     initSharedPost();
+  }
+
+  function boot() {
+    // Ambient audio/cursor/dot matrix are initialized once. Everything below
+    // is safe to rerun after the router swaps a page shell.
+    initAmbientExperience();
+    bootPage();
+    scrollToRouteHash(window.location.hash);
   }
 
   if (doc.readyState === 'loading') {

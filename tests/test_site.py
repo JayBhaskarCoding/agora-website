@@ -141,14 +141,54 @@ class LaunchContract(unittest.TestCase):
             self.assertIn(name, html)
         self.assertIn("Original maker of this credits screen", html)
         self.assertIn("makes the platform what it is", html)
+        name_tags = [
+            attrs
+            for tag, attrs in page.tags
+            if tag == "div" and "rotary-name-tag" in attrs.get("class", "")
+        ]
+        self.assertEqual(len(name_tags), 3)
+        self.assertEqual(
+            [attrs.get("data-rotary-name-tag") for attrs in name_tags],
+            ["0", "1", "2"],
+        )
+        self.assertIn("data-rotary-name-tag=\"1\"", html)
+        self.assertIn("data-rotary-name-tag=\"2\"", html)
+        self.assertIn("--tag-counter-rotation", (ROOT / "app.js").read_text())
+        self.assertIn("nameTags.length !== bottomSegments.length", (ROOT / "app.js").read_text())
+        self.assertIn("padding: 8px 16px", self.css)
+        self.assertIn(".rotary-sign,\n.rotary-name-tag", self.css)
+        self.assertIn("@media (max-width: 768px)", self.css)
+        self.assertIn("translate(-65%, -65%)", self.css)
+        self.assertIn("translate(65%, 65%)", self.css)
+        for listener in ["touchstart", "touchmove", "touchend"]:
+            self.assertIn("page.addEventListener('" + listener + "'", (ROOT / "app.js").read_text())
+        self.assertIn("TOUCH_DAMPING", (ROOT / "app.js").read_text())
+        self.assertIn("SNAP_THRESHOLD", (ROOT / "app.js").read_text())
+
+    def test_pjax_and_persistent_audio_contract(self):
+        app = (ROOT / "app.js").read_text()
+        for contract in [
+            "new DOMParser().parseFromString",
+            "history.pushState",
+            "window.addEventListener('popstate'",
+            "currentMain.replaceWith",
+            "bootPage();",
+            "window.AgoraAudio",
+            "master.gain.value = 0",
+            "sourceNode.loop = true",
+            "sourceNode.start(0)",
+            "document.addEventListener('click', firstClickStartsAudio, true)",
+            "isPlaying",
+        ]:
+            self.assertIn(contract, app)
 
     def test_background_music_contract(self):
         js = (ROOT / "app.js").read_text()
         self.assertIn("var MUSIC_SRC = '/assets/bgMusic.mpeg';", js)
-        self.assertIn("element.loop = true;", js)
+        self.assertIn("sourceNode.loop = true;", js)
         self.assertIn("filter.type = 'lowpass';", js)
         self.assertIn("filter.frequency.setValueAtTime(2200", js)
-        self.assertIn("audio.element.play()", js)
+        self.assertIn("sourceNode.start(0)", js)
         music = ROOT / "assets/bgMusic.mpeg"
         self.assertTrue(music.is_file())
         self.assertGreater(music.stat().st_size, 0)

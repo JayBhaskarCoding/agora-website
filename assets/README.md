@@ -26,10 +26,10 @@ updated deliberately.
 ## Background music
 
 `/assets/bgMusic.mpeg` is the looping ambient track used by every page. The
-browser audio element is routed through a gentle low-pass filter, compressor,
-and very low master gain so the track stays soft rather than sharp. Autoplay is
-attempted, but browsers may wait for the visitor's first gesture before allowing
-sound.
+single-page app decodes it into one persistent Web Audio buffer source and routes
+it through a gentle low-pass filter, compressor, and very low master gain so the
+track stays soft rather than sharp. Browsers may wait for the visitor's first
+gesture before allowing sound; that first click starts the persistent source.
 
 The About page displays Jayvardhan Bhaskar's portrait from `/assets/developer.png`
 at 160×160 with `object-fit: cover`, a subtle ring, and a restrained violet glow.

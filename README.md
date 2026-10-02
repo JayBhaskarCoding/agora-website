@@ -98,11 +98,15 @@ nav), `≥769px` desktop nav, `≥1024px` wide layouts.
   from full brightness on the left to roughly 74% visibility on the right.
   Original logo artwork is centralized at `/assets/agora-logo.svg` for
   replacement with the final approved export.
+- Navigation is a lightweight vanilla-JS PJAX flow: internal HTML links are fetched,
+  the target header/main shell is swapped in place, and history back/forward rehydrates
+  the correct page without a full document reload.
 - Ambient interaction uses `/assets/bgMusic.mpeg` as a softly filtered, low-volume
-  looping background track. The page attempts autoplay and falls back to the first
-  user gesture when the browser blocks autoplay; the visible dot-matrix mesh breathes
-  with the track. The custom cursor is limited to fine pointers and is disabled for
-  reduced motion.
+  looping Web Audio buffer. A single AudioBufferSourceNode and gain graph live outside
+  the swapped page shell, so the track continues across PJAX navigation without a
+  reset or volume spike. The first document click satisfies autoplay policy; the
+  visible dot-matrix mesh breathes with the track. The custom cursor is limited to
+  fine pointers and is disabled for reduced motion.
 - `about.html` names Jayvardhan Bhaskar as the app and website developer and shares
   his motivation. The portrait is stored at `/assets/developer.png`; the avatar
   reserves space and shows a fallback if the image cannot load.

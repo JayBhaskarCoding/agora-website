@@ -2483,6 +2483,13 @@ h1, h2, h3 {
   transition: opacity 0.2s ease;
 }
 
+/* Profile labels sit on the rim, so they need to extend beyond the sector
+   clip while their profile content continues to follow the three sectors. */
+.rotary-disc--bottom .rotary-segment {
+  overflow: visible;
+  clip-path: none;
+}
+
 /* Positive top-wheel rotation carries member 1, then member 2, into the
    active 40-degree sector. The lower wheel rotates in the opposite direction. */
 .rotary-disc--top .rotary-segment[data-rotary-segment="0"] {
@@ -2567,7 +2574,7 @@ h1, h2, h3 {
   display: grid;
   justify-items: center;
   width: max-content;
-  opacity: 0.3;
+  opacity: 0.82;
   transform: translate(-50%, 0) rotate(calc(0deg - var(--disc-rotation, 0deg) + var(--tag-swing-angle, 0deg)));
   transform-origin: 50% 0;
   transition: opacity 0.22s ease;
@@ -2601,21 +2608,31 @@ h1, h2, h3 {
   box-shadow: 0 0 12px rgba(139, 92, 246, 0.42);
 }
 
-.rotary-sign {
+.rotary-sign,
+.rotary-name-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 2.5rem;
   min-width: clamp(8rem, calc(var(--rotary-disc-size) * 0.14), 11rem);
-  padding: clamp(0.7rem, calc(var(--rotary-disc-size) * 0.012), 1rem) clamp(1rem, calc(var(--rotary-disc-size) * 0.018), 1.35rem);
-  border: 1px solid rgba(196, 181, 253, 0.72);
+  padding: 8px 16px;
+  border: 1px solid rgba(196, 181, 253, 0.88);
   border-radius: 0.25rem;
-  color: #F3F4F6;
+  color: #FFFFFF;
   background: linear-gradient(105deg, #7C3AED, #8B5CF6 58%, #60A5FA);
-  box-shadow: 0 10px 28px -14px rgba(96, 165, 250, 0.8), 0 0 24px rgba(139, 92, 246, 0.28);
+  box-shadow: 0 10px 28px -14px rgba(96, 165, 250, 0.88), 0 0 24px rgba(139, 92, 246, 0.34);
   font-family: var(--font-mono);
   font-size: clamp(0.67rem, calc(var(--rotary-disc-size) * 0.011), 0.95rem);
+  font-weight: 600;
   letter-spacing: 0.16em;
   line-height: 1;
   text-align: center;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+.rotary-sign {
   transform: scale(var(--tag-scale, 0.76));
   transform-origin: 50% 0;
   transition: transform 0.22s ease;
@@ -2700,30 +2717,23 @@ h1, h2, h3 {
   line-height: 1.55;
 }
 
-/* This is a circumference label, centered on the lower wheel's upper-left
-   rim so it visibly straddles the boundary instead of sitting in a sector. */
+/* Each profile segment owns a static name plate at its local outer rim.
+   The article rotates with the sector; the formula below subtracts that
+   sector's base angle and adds the JS-supplied inverse wheel rotation. */
 .rotary-name-tag {
   position: absolute;
-  top: 17%;
-  left: 17%;
+  top: 50%;
+  left: 96%;
   z-index: 8;
-  display: inline-flex;
-  align-items: center;
-  min-width: min(18rem, calc(var(--rotary-disc-size) * 0.30));
-  padding: clamp(0.75rem, calc(var(--rotary-disc-size) * 0.012), 1rem) clamp(1rem, calc(var(--rotary-disc-size) * 0.018), 1.35rem) clamp(0.75rem, calc(var(--rotary-disc-size) * 0.012), 1rem) clamp(1.25rem, calc(var(--rotary-disc-size) * 0.022), 1.6rem);
-  border: 1px solid rgba(96, 165, 250, 0.7);
-  border-radius: 0.3rem;
-  color: var(--text);
-  background: rgba(19, 20, 29, 0.96);
-  box-shadow: 0 12px 34px -20px rgba(96, 165, 250, 0.9), inset 0 0 20px rgba(139, 92, 246, 0.08);
-  font-size: clamp(0.8rem, calc(var(--rotary-disc-size) * 0.012), 1.05rem);
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.2;
-  white-space: nowrap;
-  transform: translate(-50%, -50%) rotate(var(--tag-counter-rotation, 0deg));
+  opacity: 0.82;
+  transform: translate(-50%, -50%) rotate(calc(0deg - var(--segment-angle, 0deg) + var(--tag-counter-rotation, 0deg)));
   transform-origin: 50% 50%;
+  transition: opacity 0.22s ease;
   will-change: transform;
+}
+
+.rotary-name-tag.is-active {
+  opacity: 1;
 }
 
 .rotary-name-tag::after {
@@ -2864,8 +2874,23 @@ h1, h2, h3 {
   50% { opacity: 1; transform: translateY(0.24rem) rotate(45deg); }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 768px) {
+  /* Mobile safe zone: the wheels remain circular but reveal only shallow
+     corner arcs, leaving a clear, usable band through the middle. */
+  .rotary-disc {
+    --rotary-disc-size: min(108vmin, 520px);
+  }
+
+  .rotary-disc--top {
+    transform: translate(-65%, -65%);
+  }
+
+  .rotary-disc--bottom {
+    transform: translate(65%, 65%);
+  }
+
   .credits-screen-header {
+
     grid-template-columns: 1fr auto;
     height: 58px;
   }
@@ -2874,9 +2899,16 @@ h1, h2, h3 {
     position: absolute;
     left: 50%;
     top: 50%;
-    font-size: clamp(1rem, 5vw, 1.35rem);
-    letter-spacing: 0.28em;
+    max-width: calc(100vw - 8rem);
+    font-size: clamp(0.88rem, 4.4vw, 1.2rem);
+    letter-spacing: 0.18em;
+    text-indent: 0.18em;
     transform: translate(-50%, -50%);
+    white-space: nowrap;
+  }
+
+  .credits-screen-actions > a:first-child {
+    display: none;
   }
 
   .credits-screen-exit {
@@ -2887,72 +2919,112 @@ h1, h2, h3 {
     font-size: 1.1rem;
   }
 
-  .rotary-disc {
-    --rotary-disc-size: min(140vmin, 760px);
-  }
-
   .rotary-segment__content--contribution {
-    top: 50%;
-    left: 60%;
-    width: min(15rem, 44vw);
+    top: 48%;
+    left: 58%;
+    width: min(10.5rem, 32vw);
   }
 
   .rotary-disc__contributions {
-    font-size: clamp(0.82rem, calc(var(--rotary-disc-size) * 0.016), 1rem);
-    line-height: 1.55;
+    font-size: clamp(0.66rem, calc(var(--rotary-disc-size) * 0.014), 0.88rem);
+    line-height: 1.45;
   }
 
   .rotary-segment__content--profile {
-    top: 37%;
-    left: 55%;
-    gap: 0.6rem;
-    width: min(15rem, 43vw);
+    top: 40%;
+    left: 54%;
+    gap: 0.45rem;
+    width: min(10.5rem, 32vw);
   }
 
   .rotary-profile__photo-frame {
-    width: clamp(90px, calc(var(--rotary-disc-size) * 0.17), 130px);
-    height: clamp(90px, calc(var(--rotary-disc-size) * 0.17), 130px);
-    border-width: 3px;
+    width: clamp(70px, calc(var(--rotary-disc-size) * 0.15), 100px);
+    height: clamp(70px, calc(var(--rotary-disc-size) * 0.15), 100px);
+    border-width: 2px;
   }
 
   .rotary-segment__bio {
-    font-size: clamp(0.75rem, calc(var(--rotary-disc-size) * 0.011), 0.95rem);
+    font-size: clamp(0.64rem, calc(var(--rotary-disc-size) * 0.01), 0.82rem);
+    line-height: 1.4;
   }
 
+  /* Keep both wheel tag families identical while making long names fit a
+     narrow portrait viewport. */
+  .rotary-sign,
   .rotary-name-tag {
-    min-width: 9.5rem;
-    padding: 0.62rem 0.7rem 0.62rem 1rem;
-    font-size: 0.68rem;
+    height: 2.15rem;
+    min-width: min(7.2rem, calc(100vw - 1.5rem));
+    max-width: calc(100vw - 1.5rem);
+    padding: 8px 12px;
+    overflow: hidden;
+    font-size: clamp(0.48rem, 2.1vw, 0.58rem);
+    letter-spacing: 0.08em;
+    text-overflow: ellipsis;
+  }
+
+  /* Pull rim labels inward on phones so rotated boxes have a safe margin
+     from both viewport edges. */
+  .rotary-name-tag {
+    left: 84%;
+  }
+
+  .rotary-name-tag::after {
+    right: -1rem;
+    width: 1rem;
   }
 
   .rotary-sign-hanger[data-rotary-tag="0"] {
-    top: 82%;
-    left: 88%;
+    top: 76%;
+    left: 82%;
   }
 
   .rotary-sign-hanger[data-rotary-tag="1"] {
-    top: 67%;
-    left: 3%;
+    top: 63%;
+    left: 12%;
   }
 
   .rotary-sign-hanger[data-rotary-tag="2"] {
-    top: 2%;
-    left: 59%;
-  }
-
-  .rotary-sign {
-    min-width: 6.9rem;
-    padding: 0.62rem 0.7rem;
-    font-size: 0.57rem;
+    top: 8%;
+    left: 54%;
   }
 
   .credits-rotary-status {
-    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    left: 0.75rem;
+    bottom: max(4.35rem, calc(env(safe-area-inset-bottom) + 3.65rem));
+    width: min(13rem, calc(100vw - 5.25rem));
+    min-height: 2.35rem;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.25rem 0.55rem;
+    padding: 0.5rem 0.7rem;
+    transform: none;
   }
 
-  /* Keep the global sound control clear of the rotary status pill on phones. */
+  .credits-rotary-status__hint {
+    grid-column: 1 / -1;
+    font-size: 0.56rem;
+    letter-spacing: 0.1em;
+    text-align: center;
+  }
+
+  .credits-rotary-status__count,
+  .credits-screen-contact {
+    font-size: 0.56rem;
+  }
+
+  /* Keep the sound control in the opposite safe corner, clear of both the
+     status stack and the visible bottom-right wheel arc. */
   .credits-rotary-page .ambient-toggle {
-    bottom: max(4.5rem, calc(env(safe-area-inset-bottom) + 3.5rem));
+    right: auto;
+    left: 0.75rem;
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    min-height: 2.15rem;
+    padding: 0.48rem 0.65rem;
+    font-size: 0.56rem;
+  }
+
+  .credits-scroll-affordance {
+    bottom: max(8.5rem, calc(env(safe-area-inset-bottom) + 7rem));
   }
 }
 
