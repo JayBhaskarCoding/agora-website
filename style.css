@@ -2687,6 +2687,11 @@ h1, h2, h3 {
   .credits-rotary-status {
     bottom: max(0.75rem, env(safe-area-inset-bottom));
   }
+
+  /* Keep the global sound control clear of the rotary status pill on phones. */
+  .credits-rotary-page .ambient-toggle {
+    bottom: max(4.5rem, calc(env(safe-area-inset-bottom) + 3.5rem));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
