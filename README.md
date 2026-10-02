@@ -75,6 +75,10 @@ nav), `≥769px` desktop nav, `≥1024px` wide layouts.
 
 ## Notes
 
+- Brand lockup: the header and footer render the mark **plus** the “Agora”
+  wordmark beside it (`.nav__logo-name` in `style.css`) — one shared lockup on
+  every page. `shared-post.html`'s slim footer uses the `.nav__logo--compact`
+  variant (smaller mark, mono uppercase name) to fit its tiny mono row.
 - UI palette: deep dark surfaces, glass panels, and solid `#8B5CF6` pill-shaped
   primary buttons with dark text for readable contrast. Original logo artwork is
   centralized at `/assets/agora-logo.svg` for replacement with the final approved export.

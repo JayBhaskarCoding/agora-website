@@ -397,6 +397,7 @@ h1, h2, h3 {
 .nav__logo {
   display: inline-flex;
   align-items: center;
+  gap: 0.7rem;
   flex: none;
 }
 
@@ -405,6 +406,45 @@ h1, h2, h3 {
   height: 44px;
   object-fit: contain;
   flex: none;
+}
+
+/* Brand lockup — the wordmark sits beside the mark, in the site type style */
+.nav__logo-name {
+  font-family: var(--font-sans);
+  font-size: 1.18rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  color: var(--text);
+  transition: color 0.25s ease;
+}
+
+.nav__logo:hover .nav__logo-name,
+.nav__logo:focus-visible .nav__logo-name {
+  color: var(--accent);
+}
+
+.nav__logo--footer .nav__logo-name {
+  font-size: 1.25rem;
+}
+
+/* Compact variant — for the tiny mono slim footer */
+.nav__logo--compact {
+  gap: 0.5rem;
+}
+
+.nav__logo--compact .nav__logo-mark {
+  width: 24px;
+  height: 24px;
+}
+
+.nav__logo--compact .nav__logo-name {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 
 .nav__links {
@@ -2208,9 +2248,21 @@ h1, h2, h3 {
     width: min(1120px, 100% - 2rem);
   }
 
+  .nav__logo {
+    gap: 0.55rem;
+  }
+
   .nav__logo-mark {
     width: 38px;
     height: 38px;
+  }
+
+  .nav__logo-name {
+    font-size: 1.08rem;
+  }
+
+  .nav__logo--footer .nav__logo-name {
+    font-size: 1.15rem;
   }
 
   .nav__toggle {
