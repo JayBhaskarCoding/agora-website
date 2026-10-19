@@ -74,8 +74,8 @@
     var links = doc.querySelectorAll('a[data-page]');
     Array.prototype.forEach.call(links, function (link) {
       // Download CTAs are owned by initDynamicDownload: their href points at
-      // the newest release asset (or the GitHub release page as a fallback),
-      // so page routing must never rewrite it back to /download.html.
+      // the newest release asset (or GitHub's permanent latest-release
+      // redirect), so page routing must never rewrite it to /download.html.
       if (isDynamicDownloadLink(link)) return;
       var target = PAGE_MAP[link.getAttribute('data-page')];
       if (target) link.setAttribute('href', target);
@@ -1469,16 +1469,24 @@
      9. DYNAMIC DOWNLOAD LINK
      Every "Get the app" / "Download APK" CTA carries
      .dynamic-download-btn (the primary one on each page also has
-     id="dynamic-download-btn") and ships in the HTML with the
-     GitHub release page as its href:
+     id="dynamic-download-btn") and ships in the HTML with GitHub's
+     permanent latest-release redirect as its href:
 
-       https://github.com/JayBhaskarCoding/agora-android/releases/latest
+       …/agora-android/releases/latest/download/app.apk
 
-     That fallback is what no-JS visitors click, and what stays in
-     place whenever the lookup below fails — a dead network, a
-     GitHub rate limit (60 requests/hour/IP unauthenticated), or a
-     release with no .apk attached. When the lookup succeeds the
-     hrefs are swapped for the newest release's direct .apk asset.
+     GitHub resolves that path server-side to the matching asset of
+     the newest release, so the file downloads with no JavaScript,
+     no API call, and no rate limit — and it never goes stale when a
+     new build ships. It is also what stays in place whenever the
+     lookup below fails (dead network, 403/429 rate limit, non-JSON
+     response, release with no .apk).
+
+     The lookup is therefore an enhancement, not the load-bearing
+     path. It does two things the permanent redirect cannot:
+       · resolve the exact asset when a release names its file
+         something other than app.apk (older builds such as
+         app-release-v1.apk), where the redirect would 404
+       · refresh the version/filename/size facts on the page
 
      Lookup order, cheapest and most reliable first:
        1. sessionStorage   — one call per tab, reused across PJAX swaps
@@ -1489,6 +1497,10 @@
   var RELEASE_PROXY_URL = '/api/latest-release';
   var RELEASE_API_URL = 'https://api.github.com/repos/JayBhaskarCoding/agora-android/releases/latest';
   var RELEASE_PAGE_URL = 'https://github.com/JayBhaskarCoding/agora-android/releases/latest';
+  // Release assets are published as app.apk, which is what makes the
+  // permanent redirect below work. Keep this in sync with the release process.
+  var PREFERRED_APK_NAME = 'app.apk';
+  var RELEASE_DOWNLOAD_URL = RELEASE_PAGE_URL + '/download/' + PREFERRED_APK_NAME;
   var RELEASE_TIMEOUT = 8000;                 // ms before a lookup is abandoned
   var RELEASE_CACHE_KEY = 'agora.latestRelease';
   var RELEASE_CACHE_TTL = 15 * 60 * 1000;     // sessionStorage freshness window
@@ -1524,19 +1536,26 @@
     }
   }
 
-  /** First asset whose name (or download URL) ends in .apk wins. */
+  /**
+   * Choose the asset to install. An exact `app.apk` always wins (that is the
+   * published name, and the one the permanent redirect resolves); otherwise
+   * the first asset whose name or download URL ends in .apk is used, so older
+   * releases named e.g. app-release-v1.apk still resolve.
+   */
   function pickApkAsset(release) {
     var assets = release && Object.prototype.toString.call(release.assets) === '[object Array]'
       ? release.assets
       : [];
+    var firstApk = null;
     for (var i = 0; i < assets.length; i++) {
       var asset = assets[i];
       if (!asset) continue;
       var name = typeof asset.name === 'string' ? asset.name : '';
       var url = typeof asset.browser_download_url === 'string' ? asset.browser_download_url : '';
-      if (/\.apk$/i.test(name) || /\.apk$/i.test(url)) return asset;
+      if (name.toLowerCase() === PREFERRED_APK_NAME) return asset;
+      if (!firstApk && (/\.apk$/i.test(name) || /\.apk$/i.test(url))) firstApk = asset;
     }
-    return null;
+    return firstApk;
   }
 
   function normalizeRelease(payload) {
@@ -1623,11 +1642,12 @@
         return release;
       })
       .catch(function (error) {
-        // Fail graceful: every CTA keeps its GitHub release page fallback,
-        // so the visitor still lands somewhere that can start the download.
+        // Fail graceful: every CTA keeps its authored href — GitHub's
+        // permanent /releases/latest/download/app.apk redirect — so the click
+        // still downloads the newest build with no API involved.
         releaseState.failedAt = Date.now();
         if (window.console && window.console.warn) {
-          window.console.warn('Agora: could not resolve the latest APK; keeping the release-page link.', error);
+          window.console.warn('Agora: release lookup failed; download buttons keep the permanent GitHub redirect.', error);
         }
         return null;
       });
@@ -1659,10 +1679,18 @@
     if (!release || !release.url) return;
 
     try {
+      // When the newest release publishes app.apk, the permanent redirect the
+      // HTML already carries is the better href: it re-resolves at click time,
+      // so a build shipped mid-session is picked up without a cache refresh.
+      // Only override it when the release names its asset something else,
+      // because the redirect would 404 for that file.
+      var keepPermanent = release.fileName.toLowerCase() === PREFERRED_APK_NAME;
       var buttons = doc.querySelectorAll(DOWNLOAD_BUTTON_SELECTOR);
       Array.prototype.forEach.call(buttons, function (button) {
-        button.setAttribute('href', release.url);
-        button.setAttribute('data-apk-url', release.url);
+        var current = button.getAttribute('href');
+        var target = keepPermanent && current === RELEASE_DOWNLOAD_URL ? current : release.url;
+        button.setAttribute('href', target);
+        button.setAttribute('data-apk-url', target);
         if (release.tag) button.setAttribute('data-apk-tag', release.tag);
         // A tooltip is enough to confirm the exact build; the visible label
         // ("Get the app" / "Download APK") is part of the design contract.
@@ -1711,9 +1739,9 @@
       });
     } catch (error) {
       // Upgrading the links is a progressive enhancement: never let it break
-      // page boot. The authored release-page hrefs stay clickable.
+      // page boot. The authored permanent-redirect hrefs stay clickable.
       if (window.console && window.console.warn) {
-        window.console.warn('Agora: dynamic download setup failed; keeping the release-page links.', error);
+        window.console.warn('Agora: dynamic download setup failed; keeping the permanent GitHub redirect links.', error);
       }
     }
   }

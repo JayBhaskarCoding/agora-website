@@ -16,9 +16,13 @@ PENDING_ASSETS = {
     "/assets/yashvardhan-bhaskar.jpg",
 }
 LOGO = "/assets/agora-logo.svg"
-# Download CTAs no longer hard-code a build. They ship with the release page as
-# a safe fallback and app.js swaps in the newest .apk at runtime.
+# Download CTAs never pin a build. They ship with GitHub's permanent
+# latest-release redirect, which resolves server-side to the newest release's
+# app.apk — a real download with no JavaScript and no API quota. app.js only
+# overrides it when a release names its asset something else.
+PREFERRED_APK = "app.apk"
 RELEASES_PAGE = "https://github.com/JayBhaskarCoding/agora-android/releases/latest"
+RELEASE_DOWNLOAD = f"{RELEASES_PAGE}/download/{PREFERRED_APK}"
 RELEASE_API = "https://api.github.com/repos/JayBhaskarCoding/agora-android/releases/latest"
 RELEASE_PROXY = "/api/latest-release"
 DYNAMIC_ATTR = "dynamic-download-btn"
@@ -96,7 +100,9 @@ class LaunchContract(unittest.TestCase):
                     self.assertIn(DYNAMIC_ATTR, classes)
                     self.assertIn("btn--primary", classes)
                     self.assertEqual(
-                        attrs.get("href"), RELEASES_PAGE, "Fallback href must reach the release page"
+                        attrs.get("href"),
+                        RELEASE_DOWNLOAD,
+                        "Authored href must be the permanent direct-download redirect",
                     )
                     self.assertNotIn("data-page", attrs, "Routing must not override the release URL")
                     self.assertNotIn("download", attrs, "GitHub handles the cross-origin attachment")
@@ -115,12 +121,16 @@ class LaunchContract(unittest.TestCase):
         self.assertEqual(dict(counts), {k: v for k, v in DYNAMIC_CTAS.items() if v})
 
     def test_no_hardcoded_release_assets(self):
-        """No file may pin a specific build — that is what the lookup is for."""
+        """No file may pin a tag/build. The only allowed .apk href is GitHub's
+        unpinned latest-release redirect, which tracks new builds by itself."""
+        pinned = re.compile(r'href="[^"]*/releases/download/[^"]*"')
+        apk_href = re.compile(r'href="([^"]*\.apk)"')
         for name in self.pages:
             html = (ROOT / name).read_text()
             with self.subTest(page=name):
-                self.assertNotIn("/releases/download/", html)
-                self.assertNotRegex(html, r'href="[^"]*\.apk"')
+                self.assertIsNone(pinned.search(html), "A /releases/download/<tag>/ href pins a build")
+                for href in apk_href.findall(html):
+                    self.assertEqual(href, RELEASE_DOWNLOAD)
                 self.assertNotIn("app-beta-v2.0", html)
                 self.assertNotIn("38 MB", html, "Stale size copy must go")
         app = (ROOT / "app.js").read_text()
@@ -133,7 +143,11 @@ class LaunchContract(unittest.TestCase):
         for contract in [
             RELEASE_API,                                     # GitHub latest-release endpoint
             "'%s'" % RELEASE_PROXY,                          # same-origin Pages Function first
-            "'%s'" % RELEASES_PAGE,                          # fallback href constant
+            "'%s'" % RELEASES_PAGE,                          # release page base URL
+            "var PREFERRED_APK_NAME = '%s';" % PREFERRED_APK,  # published asset name
+            "RELEASE_PAGE_URL + '/download/' + PREFERRED_APK_NAME",  # permanent redirect
+            "name.toLowerCase() === PREFERRED_APK_NAME",     # exact app.apk wins
+            "release.fileName.toLowerCase() === PREFERRED_APK_NAME",  # keep permanent href
             "#dynamic-download-btn, .dynamic-download-btn",  # button selector
             "browser_download_url",
             r"/\.apk$/i",
@@ -165,6 +179,9 @@ class LaunchContract(unittest.TestCase):
             "cache.put",
             "application/json",
             "GITHUB_TOKEN",
+            "const PREFERRED_APK_NAME = '%s';" % PREFERRED_APK,
+            "asset.name.toLowerCase() === PREFERRED_APK_NAME",
+            "fallback: PERMANENT_DOWNLOAD_URL",  # failures hand back a download, not a page
         ]:
             self.assertIn(contract, source)
 

@@ -71,16 +71,20 @@ The preserved layout has **6 placements**, filled by **3 files**:
 
 - Replace/approve the SVG logo and upload all three captures above.
 - Once captures are approved, replace the homepage's screenshot-preparation copy.
-- **Download links need no manual update.** Every download CTA on
-  `download.html`, `shared-post.html`, `index.html`, and `about.html` resolves the
-  newest `.apk` from the
-  [latest GitHub release](https://github.com/JayBhaskarCoding/agora-android/releases/latest)
-  at runtime (`initDynamicDownload()` in `app.js`, proxied through
-  `functions/api/latest-release.js`). Publish a release with an `.apk` asset and
-  the buttons, version tag, filename, and file-size copy follow on the next load.
-  Until a lookup succeeds — or if it never does — the buttons fall back to the
-  release page above, so there is no dead link either way.
-  The version/size text in the markup is a no-JS fallback: refresh it only when
-  you want the static copy to match a new build. See **Dynamic download links**
-  in the root README for the full contract.
+- **Download links need no manual update — but the APK must be named `app.apk`.**
+  Every download CTA on `download.html`, `shared-post.html`, `index.html`, and
+  `about.html` uses GitHub's permanent latest-release redirect
+  (`…/agora-android/releases/latest/download/app.apk`), which GitHub resolves
+  server-side to the `app.apk` of whichever release is newest at click time.
+  Upload the release asset under any other name and that URL 404s, so keep the
+  `app.apk` convention (it is `PREFERRED_APK_NAME` in `app.js` and
+  `functions/api/latest-release.js` if it ever needs to move).
+  Publish a release and the buttons, version tag, filename, and file-size copy all
+  follow on the next load — `initDynamicDownload()` in `app.js` resolves the exact
+  asset (covering releases that used a different filename) and rewrites the
+  `[data-download-tag|file|size]` hooks.
+  The download works with JavaScript disabled and with the GitHub API
+  rate-limited; the version/size text in the markup is only a no-JS fallback, so
+  refresh it when you want the static copy to match a new build. See **Dynamic
+  download links** in the root README for the full contract.
 - The feedback form and shared-post backend remain demos; see the root README.

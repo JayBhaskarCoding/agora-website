@@ -23,6 +23,11 @@ const OWNER = 'JayBhaskarCoding';
 const REPO = 'agora-android';
 const GITHUB_RELEASE_URL = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
 const RELEASES_PAGE_URL = `https://github.com/${OWNER}/${REPO}/releases/latest`;
+// Release assets are published as app.apk. GitHub resolves the path below to
+// that asset of the newest release with no API call, which is what the buttons
+// carry in the HTML — so it is the right thing to hand back on failure too.
+const PREFERRED_APK_NAME = 'app.apk';
+const PERMANENT_DOWNLOAD_URL = `${RELEASES_PAGE_URL}/download/${PREFERRED_APK_NAME}`;
 
 // Edge cache lifetime. A new build ships far less often than this, and the
 // browser adds its own sessionStorage cache on top.
@@ -47,18 +52,34 @@ function json(body, status = 200, cacheable = false) {
 }
 
 function failure(message, status = 502) {
-  return json({ ok: false, error: message, fallback: RELEASES_PAGE_URL }, status);
+  // `fallback` is a directly downloadable URL, not a page to browse: the client
+  // leaves the buttons on it, and the click still starts the download.
+  return json({
+    ok: false,
+    error: message,
+    fallback: PERMANENT_DOWNLOAD_URL,
+    releasePage: RELEASES_PAGE_URL
+  }, status);
 }
 
-/** First asset whose name (or download URL) ends in .apk wins. */
+/**
+ * Choose the asset to install. An exact `app.apk` always wins (that is the
+ * published name, and the one the permanent redirect resolves); otherwise the
+ * first .apk asset is used, so older releases named e.g. app-release-v1.apk
+ * still resolve.
+ */
 function pickApkAsset(release) {
   const assets = release && Array.isArray(release.assets) ? release.assets : [];
-  return assets.find((asset) => {
+  const isApk = (asset) => {
     if (!asset || typeof asset !== 'object') return false;
     const name = typeof asset.name === 'string' ? asset.name : '';
     const url = typeof asset.browser_download_url === 'string' ? asset.browser_download_url : '';
     return /\.apk$/i.test(name) || /\.apk$/i.test(url);
-  }) || null;
+  };
+  const preferred = assets.find(
+    (asset) => asset && typeof asset.name === 'string' && asset.name.toLowerCase() === PREFERRED_APK_NAME
+  );
+  return preferred || assets.find(isApk) || null;
 }
 
 function normalizeRelease(release) {
@@ -73,7 +94,8 @@ function normalizeRelease(release) {
     tag: typeof release.tag_name === 'string' ? release.tag_name : '',
     name: typeof release.name === 'string' ? release.name : '',
     publishedAt: typeof release.published_at === 'string' ? release.published_at : '',
-    htmlUrl: typeof release.html_url === 'string' && release.html_url ? release.html_url : RELEASES_PAGE_URL
+    htmlUrl: typeof release.html_url === 'string' && release.html_url ? release.html_url : RELEASES_PAGE_URL,
+    permanentUrl: PERMANENT_DOWNLOAD_URL
   };
 }
 
