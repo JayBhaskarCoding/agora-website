@@ -21,8 +21,8 @@ Shared assets:
 | File               | Purpose                                            |
 | ------------------ | -------------------------------------------------- |
 | `style.css`        | Mobile-first design system for all pages           |
-| `app.js`           | Routing, mobile menu, smooth scroll, reveals, feedback form, shared-post preview |
-| `app-beta-v2.0.apk`   | Legacy local APK; download buttons now use the GitHub release |
+| `app.js`           | Routing, mobile menu, smooth scroll, reveals, feedback form, shared-post preview, dynamic download links |
+| `functions/api/latest-release.js` | Cloudflare Pages Function that resolves the newest `.apk` from the Android repo's latest GitHub release |
 | `assets/agora-logo.svg`      | Logo / tab icon                                    |
 | `assets/`          | App screenshots shown in the phone frames — see `assets/README.md` for the exact filenames to replace |
 
@@ -57,6 +57,9 @@ custom domain, share e.g. `https://your-domain/shared-post.html?post=<id>`.
 - `functions/api/contact.js` — Cloudflare Pages Function used by the About-page
   feedback form. It validates JSON or FormData, escapes the submitted values,
   and sends the message through Resend to `mail@agora.in.net`.
+- `functions/api/latest-release.js` — Cloudflare Pages Function that proxies
+  GitHub's `releases/latest` endpoint for the download buttons. See
+  **Dynamic download links** below.
 - Set `RESEND_API_KEY` as a Cloudflare Pages environment variable (and as a
   local secret when using `wrangler pages dev`). Never put the key in `app.js`
   or any browser-delivered file. The browser posts to `/api/contact`, shows
@@ -65,6 +68,59 @@ custom domain, share e.g. `https://your-domain/shared-post.html?post=<id>`.
 
   A hidden honeypot field absorbs bots, and `SUBMIT_TIMEOUT` (12s) keeps a
   slow API request from hanging the button.
+
+## Dynamic download links
+
+Every download CTA resolves to the newest `.apk` in
+[`JayBhaskarCoding/agora-android`](https://github.com/JayBhaskarCoding/agora-android)
+at runtime, so shipping a build means publishing a GitHub release — nothing else.
+
+**Markup contract.** A download CTA carries `.dynamic-download-btn` (the primary
+one on each page also has `id="dynamic-download-btn"`) and its authored `href` is
+the release page, never a pinned asset:
+
+```html
+<a id="dynamic-download-btn"
+   class="btn btn--primary btn--get-app btn--lg dynamic-download-btn"
+   href="https://github.com/JayBhaskarCoding/agora-android/releases/latest">
+  Get the app
+</a>
+```
+
+These anchors deliberately have **no** `data-page` attribute: `syncPageLinks()`
+rewrites `a[data-page]` hrefs on every PJAX boot and would otherwise clobber the
+resolved asset URL (it also skips `.dynamic-download-btn` explicitly).
+
+**Lookup order** (`initDynamicDownload()`, run from `bootPage()` on first load and
+after every route swap):
+
+1. `sessionStorage` (`agora.latestRelease`, 15 min TTL) — one lookup per tab, so
+   PJAX navigation re-applies the URL with no network traffic.
+2. `GET /api/latest-release` — the same-origin Pages Function, edge-cached for
+   5 min. This keeps visitors off GitHub's unauthenticated 60 requests/hour/IP
+   budget. Set an optional `GITHUB_TOKEN` Pages secret to raise it to 5,000/hour.
+3. `GET https://api.github.com/repos/JayBhaskarCoding/agora-android/releases/latest`
+   — direct, for hosts without Pages Functions (including `npm run dev`).
+
+The first asset whose `name` or `browser_download_url` ends in `.apk` wins; only
+`https:` URLs are accepted, so a malformed payload can never produce a
+`javascript:` href. Each request has an 8s `AbortController` timeout.
+
+**Failure is silent and safe.** Network errors, 403/429 rate limits, a non-JSON
+response (what a static host returns for `/api/latest-release`), a release with
+no `.apk`, or a missing `fetch` all leave the authored release-page href in place
+and log one `console.warn`. A failed lookup is remembered for 5 min so clicking
+around the site does not keep re-hitting a rate-limited API.
+
+**Release facts** on `download.html` (tag, filename, size) and the size chips on
+`index.html` / `shared-post.html` are authored with today's real values as the
+no-JS fallback and refreshed in place via `[data-download-tag]`,
+`[data-download-file]`, and `[data-download-size]` hooks. Resolved buttons also
+gain `.is-release-linked` and a `title` naming the exact build.
+
+Local dev note: `python3 -m http.server` has no Functions runtime, so
+`/api/latest-release` 404s with HTML and step 3 handles it. Use
+`wrangler pages dev` to exercise the proxy itself.
 
 ## Asset paths
 
@@ -120,9 +176,16 @@ Old generated screenshot stand-ins have been removed; their frames remain and
 show a pending message until real captures are uploaded. Do not add device frames.
 
 All contact links use `mail@agora.in.net`. Exploratory CTAs say **Get the app**;
-only the direct release action on `download.html` uses **Download APK**. Main-page navigation leads to the
-download page, while direct APK links use the [v2.0-beta GitHub release](https://github.com/JayBhaskarCoding/agora-android/releases/download/v2.0-beta/app-beta-v2.0.apk).
-This update does not certify a final release.
+only the direct release action on `download.html` uses **Download APK**.
+
+No page hard-codes a build any more. Every download CTA (header nav, mobile menu,
+hero, closing panel, the download card, and the shared-post card) carries
+`.dynamic-download-btn` and ships with the
+[latest release page](https://github.com/JayBhaskarCoding/agora-android/releases/latest)
+as its `href`. `initDynamicDownload()` in `app.js` resolves the newest `.apk`
+asset at runtime and swaps it in — see **Dynamic download links** below.
+Publishing a new GitHub release is the whole update process: no website edit,
+no version bump, no stale size copy.
 
 ```bash
 npm test             # dependency-free HTML/asset/theme contract tests

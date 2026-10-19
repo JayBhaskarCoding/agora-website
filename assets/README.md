@@ -71,10 +71,16 @@ The preserved layout has **6 placements**, filled by **3 files**:
 
 - Replace/approve the SVG logo and upload all three captures above.
 - Once captures are approved, replace the homepage's screenshot-preparation copy.
-- Direct downloads use the [v2.0-beta GitHub release](https://github.com/JayBhaskarCoding/agora-android/releases/download/v2.0-beta/app-beta-v2.0.apk).
-  The local `app-beta-v2.0.apk` is no longer linked from the website.
-  This is a beta, not a newly signed or verified official release.
-  Upload the final release and update both direct links in `download.html` and
-  `shared-post.html`, plus version, minimum Android version, and file-size copy
-  after checking the release manifest. No APK was modified by the theme update.
+- **Download links need no manual update.** Every download CTA on
+  `download.html`, `shared-post.html`, `index.html`, and `about.html` resolves the
+  newest `.apk` from the
+  [latest GitHub release](https://github.com/JayBhaskarCoding/agora-android/releases/latest)
+  at runtime (`initDynamicDownload()` in `app.js`, proxied through
+  `functions/api/latest-release.js`). Publish a release with an `.apk` asset and
+  the buttons, version tag, filename, and file-size copy follow on the next load.
+  Until a lookup succeeds — or if it never does — the buttons fall back to the
+  release page above, so there is no dead link either way.
+  The version/size text in the markup is a no-JS fallback: refresh it only when
+  you want the static copy to match a new build. See **Dynamic download links**
+  in the root README for the full contract.
 - The feedback form and shared-post backend remain demos; see the root README.

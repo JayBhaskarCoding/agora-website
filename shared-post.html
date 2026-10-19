@@ -39,7 +39,7 @@
       <div class="nav__actions">
         <a class="nav__link" href="/index.html#why-agora">Why Agora</a>
         <a class="nav__link" href="/credits.html">Credits</a>
-        <a class="btn btn--primary btn--get-app btn--sm nav__cta" href="/download.html">Get the app</a>
+        <a class="btn btn--primary btn--get-app btn--sm nav__cta dynamic-download-btn" href="https://github.com/JayBhaskarCoding/agora-android/releases/latest">Get the app</a>
       </div>
     </div>
   </header>
@@ -65,7 +65,7 @@
         </p>
 
         <div class="btn-row">
-          <a class="btn btn--primary btn--get-app btn--lg btn--block" href="https://github.com/JayBhaskarCoding/agora-android/releases/download/v2.0-beta/app-beta-v2.0.apk">
+          <a id="dynamic-download-btn" class="btn btn--primary btn--get-app btn--lg btn--block dynamic-download-btn" href="https://github.com/JayBhaskarCoding/agora-android/releases/latest">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
             </svg>
@@ -166,7 +166,7 @@
             </div>
             <h3>Download</h3>
             <p>
-              Tap <code>Get the app</code> above. The file (≈38&nbsp;MB)
+              Tap <code>Get the app</code> above. The file (<span data-download-size>≈6&nbsp;MB</span>)
               saves to your <strong>Downloads</strong> folder — no app store,
               no account needed.
             </p>

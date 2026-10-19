@@ -16,9 +16,20 @@ PENDING_ASSETS = {
     "/assets/yashvardhan-bhaskar.jpg",
 }
 LOGO = "/assets/agora-logo.svg"
-APK_URL = (
-    "https://github.com/JayBhaskarCoding/agora-android/releases/download/"
-    "v2.0-beta/app-beta-v2.0.apk"
+# Download CTAs no longer hard-code a build. They ship with the release page as
+# a safe fallback and app.js swaps in the newest .apk at runtime.
+RELEASES_PAGE = "https://github.com/JayBhaskarCoding/agora-android/releases/latest"
+RELEASE_API = "https://api.github.com/repos/JayBhaskarCoding/agora-android/releases/latest"
+RELEASE_PROXY = "/api/latest-release"
+DYNAMIC_ATTR = "dynamic-download-btn"
+DYNAMIC_CTAS = Counter(
+    {
+        "index.html": 4,      # nav CTA, mobile menu, hero, closing panel
+        "about.html": 3,      # nav CTA, mobile menu, #get-app panel
+        "download.html": 3,   # nav CTA, mobile menu, Download APK
+        "shared-post.html": 2,  # nav CTA, shared-card block button
+        "credits.html": 0,
+    }
 )
 
 
@@ -65,23 +76,108 @@ class LaunchContract(unittest.TestCase):
                 self.assertEqual(icons[0]["type"], "image/svg+xml")
 
     def test_download_ctas(self):
-        downloads = []
+        """Every download CTA is dynamic: the HTML carries the release page as a
+        safe fallback and app.js swaps in the newest .apk at runtime."""
+        counts = Counter()
         for name, page in self.pages.items():
+            primary_ids = sum(
+                1 for tag, attrs in page.tags if tag == "a" and attrs.get("id") == DYNAMIC_ATTR
+            )
             for attrs, text in page.anchors:
                 label = " ".join(text.split())
-                if "btn--primary" in attrs.get("class", ""):
-                    expected = "Download APK" if name == "download.html" and attrs.get("href") == APK_URL else "Get the app"
-                    self.assertEqual(label, expected)
-                    self.assertEqual("btn--get-app" in attrs.get("class", "").split(), label == "Get the app")
-                    self.assertIn(attrs.get("href"), ["/download.html", APK_URL])
-                if attrs.get("href", "").endswith(".apk"):
-                    downloads.append(name)
-                    self.assertEqual(attrs["href"], APK_URL)
+                classes = attrs.get("class", "").split()
+                is_cta = "btn--get-app" in classes or label == "Download APK"
+                with self.subTest(page=name, label=label):
+                    if not is_cta:
+                        # Plain page links ("Download" in nav/footer) stay internal.
+                        self.assertNotIn(DYNAMIC_ATTR, classes)
+                        continue
+                    counts[name] += 1
+                    self.assertIn(DYNAMIC_ATTR, classes)
+                    self.assertIn("btn--primary", classes)
+                    self.assertEqual(
+                        attrs.get("href"), RELEASES_PAGE, "Fallback href must reach the release page"
+                    )
                     self.assertNotIn("data-page", attrs, "Routing must not override the release URL")
                     self.assertNotIn("download", attrs, "GitHub handles the cross-origin attachment")
+                    self.assertNotIn("target", attrs)
+                    if label == "Download APK":
+                        self.assertEqual(name, "download.html")
+                    else:
+                        self.assertEqual(label, "Get the app")
+            self.assertEqual(
+                primary_ids,
+                1 if DYNAMIC_CTAS[name] else 0,
+                "Exactly one primary id=\"dynamic-download-btn\" per page with CTAs",
+            )
             if name != "download.html":
                 self.assertNotIn("download apk", (ROOT / name).read_text().lower())
-        self.assertCountEqual(downloads, ["download.html", "shared-post.html"])
+        self.assertEqual(dict(counts), {k: v for k, v in DYNAMIC_CTAS.items() if v})
+
+    def test_no_hardcoded_release_assets(self):
+        """No file may pin a specific build — that is what the lookup is for."""
+        for name in self.pages:
+            html = (ROOT / name).read_text()
+            with self.subTest(page=name):
+                self.assertNotIn("/releases/download/", html)
+                self.assertNotRegex(html, r'href="[^"]*\.apk"')
+                self.assertNotIn("app-beta-v2.0", html)
+                self.assertNotIn("38 MB", html, "Stale size copy must go")
+        app = (ROOT / "app.js").read_text()
+        self.assertNotIn("/releases/download/", app, "The asset URL must come from the API")
+        self.assertNotIn("app-beta-v2.0", app)
+
+    def test_dynamic_download_wiring(self):
+        """The lookup, its fallback chain, and the edge proxy all exist."""
+        app = (ROOT / "app.js").read_text()
+        for contract in [
+            RELEASE_API,                                     # GitHub latest-release endpoint
+            "'%s'" % RELEASE_PROXY,                          # same-origin Pages Function first
+            "'%s'" % RELEASES_PAGE,                          # fallback href constant
+            "#dynamic-download-btn, .dynamic-download-btn",  # button selector
+            "browser_download_url",
+            r"/\.apk$/i",
+            "fetchReleaseJson(RELEASE_PROXY_URL)",
+            "fetchReleaseJson(RELEASE_API_URL)",             # direct GitHub fallback
+            "initDynamicDownload();",                        # reruns on every PJAX swap
+            "if (isDynamicDownloadLink(link)) return;",      # routing must not clobber hrefs
+            "agora.latestRelease",                           # sessionStorage cache key
+            "sessionStorage",
+            "credentials: 'omit'",
+            "AbortController",
+            "console.warn",
+            "doc.addEventListener('DOMContentLoaded', boot)",
+        ]:
+            self.assertIn(contract, app)
+        self.assertIn("try {", app)
+        self.assertIn("catch", app)
+
+        proxy = ROOT / "functions" / "api" / "latest-release.js"
+        self.assertTrue(proxy.is_file(), "The proxy keeps visitors off GitHub's 60/hour limit")
+        source = proxy.read_text()
+        for contract in [
+            "export async function onRequestGet",
+            "api.github.com/repos/",
+            "releases/latest",
+            "browser_download_url",
+            r"/\.apk$/i",
+            "caches.default",
+            "cache.put",
+            "application/json",
+            "GITHUB_TOKEN",
+        ]:
+            self.assertIn(contract, source)
+
+    def test_release_metadata_hooks(self):
+        """Static release facts remain as no-JS fallbacks but expose refresh hooks."""
+        download = (ROOT / "download.html").read_text()
+        for hook in ["data-download-tag", "data-download-file", "data-download-size"]:
+            self.assertIn(hook, download)
+        for name in ["index.html", "shared-post.html"]:
+            self.assertIn("data-download-size", (ROOT / name).read_text())
+        app = (ROOT / "app.js").read_text()
+        for hook in ["'data-download-tag'", "'data-download-file'", "'data-download-size'"]:
+            self.assertIn(hook, app)
 
     def test_contact_links(self):
         for page in self.pages.values():

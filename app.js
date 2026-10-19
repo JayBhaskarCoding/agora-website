@@ -16,6 +16,7 @@
      6. Feedback form     — validation + same-origin API submit
      7. Shared-post       — URL param parsing + post preview stub
      8. Ambient layer      — custom cursor, soundscape, synced dot matrix
+     9. Dynamic download  — newest GitHub release APK for every CTA
    ============================================================ */
 
 (function agoraApp() {
@@ -72,6 +73,10 @@
   function syncPageLinks() {
     var links = doc.querySelectorAll('a[data-page]');
     Array.prototype.forEach.call(links, function (link) {
+      // Download CTAs are owned by initDynamicDownload: their href points at
+      // the newest release asset (or the GitHub release page as a fallback),
+      // so page routing must never rewrite it back to /download.html.
+      if (isDynamicDownloadLink(link)) return;
       var target = PAGE_MAP[link.getAttribute('data-page')];
       if (target) link.setAttribute('href', target);
     });
@@ -1461,12 +1466,268 @@
   }
 
   /* ------------------------------------------------------------
+     9. DYNAMIC DOWNLOAD LINK
+     Every "Get the app" / "Download APK" CTA carries
+     .dynamic-download-btn (the primary one on each page also has
+     id="dynamic-download-btn") and ships in the HTML with the
+     GitHub release page as its href:
+
+       https://github.com/JayBhaskarCoding/agora-android/releases/latest
+
+     That fallback is what no-JS visitors click, and what stays in
+     place whenever the lookup below fails — a dead network, a
+     GitHub rate limit (60 requests/hour/IP unauthenticated), or a
+     release with no .apk attached. When the lookup succeeds the
+     hrefs are swapped for the newest release's direct .apk asset.
+
+     Lookup order, cheapest and most reliable first:
+       1. sessionStorage   — one call per tab, reused across PJAX swaps
+       2. /api/latest-release — same-origin Pages Function, edge cached
+       3. api.github.com   — direct, in case the Function is unavailable
+     ------------------------------------------------------------ */
+  var DOWNLOAD_BUTTON_SELECTOR = '#dynamic-download-btn, .dynamic-download-btn';
+  var RELEASE_PROXY_URL = '/api/latest-release';
+  var RELEASE_API_URL = 'https://api.github.com/repos/JayBhaskarCoding/agora-android/releases/latest';
+  var RELEASE_PAGE_URL = 'https://github.com/JayBhaskarCoding/agora-android/releases/latest';
+  var RELEASE_TIMEOUT = 8000;                 // ms before a lookup is abandoned
+  var RELEASE_CACHE_KEY = 'agora.latestRelease';
+  var RELEASE_CACHE_TTL = 15 * 60 * 1000;     // sessionStorage freshness window
+  var RELEASE_RETRY_COOLDOWN = 5 * 60 * 1000; // pause after a failed lookup
+
+  var releaseState = { data: null, request: null, failedAt: 0 };
+
+  function isDynamicDownloadLink(element) {
+    if (!element || !element.classList || !element.getAttribute) return false;
+    return element.classList.contains('dynamic-download-btn')
+      || element.id === 'dynamic-download-btn'
+      || element.hasAttribute('data-dynamic-download');
+  }
+
+  function readReleaseCache() {
+    try {
+      var raw = window.sessionStorage.getItem(RELEASE_CACHE_KEY);
+      if (!raw) return null;
+      var cached = JSON.parse(raw);
+      if (!cached || typeof cached.url !== 'string' || !cached.url) return null;
+      if (Date.now() - (Number(cached.cachedAt) || 0) > RELEASE_CACHE_TTL) return null;
+      return cached;
+    } catch (error) {
+      return null;   // private browsing / disabled storage: just re-fetch
+    }
+  }
+
+  function writeReleaseCache(release) {
+    try {
+      window.sessionStorage.setItem(RELEASE_CACHE_KEY, JSON.stringify(release));
+    } catch (error) {
+      // Quota or permission errors are not worth surfacing to the visitor.
+    }
+  }
+
+  /** First asset whose name (or download URL) ends in .apk wins. */
+  function pickApkAsset(release) {
+    var assets = release && Object.prototype.toString.call(release.assets) === '[object Array]'
+      ? release.assets
+      : [];
+    for (var i = 0; i < assets.length; i++) {
+      var asset = assets[i];
+      if (!asset) continue;
+      var name = typeof asset.name === 'string' ? asset.name : '';
+      var url = typeof asset.browser_download_url === 'string' ? asset.browser_download_url : '';
+      if (/\.apk$/i.test(name) || /\.apk$/i.test(url)) return asset;
+    }
+    return null;
+  }
+
+  function normalizeRelease(payload) {
+    // The proxy answers { ok, release }; the GitHub API answers the release itself.
+    var release = payload && payload.release && payload.release.assets ? payload.release : payload;
+    if (!release || typeof release !== 'object') return null;
+
+    var asset = pickApkAsset(release);
+    var url = asset && typeof asset.browser_download_url === 'string' ? asset.browser_download_url.trim() : '';
+    // Anything that is not an https asset URL is treated as "no APK found".
+    if (!/^https:\/\/[^\s]+\.apk$/i.test(url)) return null;
+
+    var fileName = asset && typeof asset.name === 'string' && asset.name
+      ? asset.name
+      : decodeURIComponent(url.split('/').pop() || 'agora.apk');
+
+    return {
+      url: url,
+      fileName: fileName,
+      size: Number(asset && asset.size) || 0,
+      tag: typeof release.tag_name === 'string' ? release.tag_name : '',
+      name: typeof release.name === 'string' ? release.name : '',
+      publishedAt: typeof release.published_at === 'string' ? release.published_at : '',
+      htmlUrl: typeof release.html_url === 'string' && release.html_url ? release.html_url : RELEASE_PAGE_URL
+    };
+  }
+
+  function fetchReleaseJson(url) {
+    // Reject rather than throw: a synchronous exception here would escape the
+    // promise chain below and take the rest of bootPage() down with it.
+    if (typeof fetch !== 'function') return Promise.reject(new Error('fetch is unavailable.'));
+
+    var controller = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = controller ? window.setTimeout(function () { controller.abort(); }, RELEASE_TIMEOUT) : null;
+
+    return fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/vnd.github+json, application/json;q=0.9' },
+      signal: controller ? controller.signal : undefined,
+      // Cross-origin to GitHub: never send cookies, never let a CDN serve a
+      // stale body, and let a 403/404/429 surface as an error we can catch.
+      credentials: 'omit',
+      cache: 'no-store'
+    }).then(function (response) {
+      if (!response.ok) throw new Error('Release lookup failed for ' + url + ' (' + response.status + ').');
+      var type = response.headers && response.headers.get ? (response.headers.get('content-type') || '') : '';
+      // A static host answering /api/latest-release with its 404 HTML page
+      // must not be mistaken for release data.
+      if (type.toLowerCase().indexOf('json') === -1) throw new Error('Release lookup returned a non-JSON response.');
+      return response.json();
+    }).then(normalizeRelease).finally(function () {
+      if (timer) window.clearTimeout(timer);
+    });
+  }
+
+  function loadLatestRelease() {
+    if (releaseState.data) return Promise.resolve(releaseState.data);
+    if (releaseState.request) return releaseState.request;
+
+    var cached = readReleaseCache();
+    if (cached) {
+      releaseState.data = cached;
+      return Promise.resolve(cached);
+    }
+
+    // A failure is remembered briefly. PJAX route swaps re-run bootPage, and
+    // re-hitting an API that just rate-limited us on every click only makes
+    // the cooldown longer — the fallback hrefs are perfectly usable meanwhile.
+    if (releaseState.failedAt && Date.now() - releaseState.failedAt < RELEASE_RETRY_COOLDOWN) {
+      return Promise.resolve(null);
+    }
+
+    var request = fetchReleaseJson(RELEASE_PROXY_URL)
+      .catch(function () {
+        // Proxy missing (local dev server), rate limited, or offline: try GitHub.
+        return fetchReleaseJson(RELEASE_API_URL);
+      })
+      .then(function (release) {
+        if (!release) throw new Error('The latest release has no downloadable .apk asset.');
+        release.cachedAt = Date.now();
+        releaseState.data = release;
+        releaseState.failedAt = 0;
+        writeReleaseCache(release);
+        return release;
+      })
+      .catch(function (error) {
+        // Fail graceful: every CTA keeps its GitHub release page fallback,
+        // so the visitor still lands somewhere that can start the download.
+        releaseState.failedAt = Date.now();
+        if (window.console && window.console.warn) {
+          window.console.warn('Agora: could not resolve the latest APK; keeping the release-page link.', error);
+        }
+        return null;
+      });
+
+    releaseState.request = request;
+    // Clear the in-flight guard once settled so a later visit can retry.
+    request.then(function () { releaseState.request = null; }, function () { releaseState.request = null; });
+    return request;
+  }
+
+  function formatReleaseSize(bytes) {
+    var size = Number(bytes) || 0;
+    if (size <= 0) return '';
+    var mb = size / (1024 * 1024);
+    if (mb < 1) return '≈' + Math.max(1, Math.round(size / 1024)) + ' KB';
+    return '≈' + (mb >= 10 ? String(Math.round(mb)) : String(Math.round(mb * 10) / 10)) + ' MB';
+  }
+
+  function describeRelease(release) {
+    var parts = [];
+    if (release.tag) parts.push(release.tag);
+    if (release.fileName) parts.push(release.fileName);
+    var size = formatReleaseSize(release.size);
+    if (size) parts.push(size);
+    return 'Download Agora for Android — ' + (parts.join(' · ') || 'latest release') + '.';
+  }
+
+  function applyReleaseToPage(release) {
+    if (!release || !release.url) return;
+
+    try {
+      var buttons = doc.querySelectorAll(DOWNLOAD_BUTTON_SELECTOR);
+      Array.prototype.forEach.call(buttons, function (button) {
+        button.setAttribute('href', release.url);
+        button.setAttribute('data-apk-url', release.url);
+        if (release.tag) button.setAttribute('data-apk-tag', release.tag);
+        // A tooltip is enough to confirm the exact build; the visible label
+        // ("Get the app" / "Download APK") is part of the design contract.
+        button.setAttribute('title', describeRelease(release));
+        button.classList.add('is-release-linked');
+      });
+
+      // Version facts on download.html (and the size chip on home) are authored
+      // as static fallbacks; each is refreshed only if a hook exists.
+      var facts = {
+        'data-download-tag': release.tag || release.name || '',
+        'data-download-file': release.fileName || '',
+        'data-download-size': formatReleaseSize(release.size)
+      };
+      Object.keys(facts).forEach(function (attribute) {
+        if (!facts[attribute]) return;
+        Array.prototype.forEach.call(doc.querySelectorAll('[' + attribute + ']'), function (node) {
+          node.textContent = facts[attribute];
+        });
+      });
+
+      doc.documentElement.classList.add('has-release-link');
+    } catch (error) {
+      if (window.console && window.console.warn) {
+        window.console.warn('Agora: could not update the download buttons.', error);
+      }
+    }
+  }
+
+  function initDynamicDownload() {
+    try {
+      if (!doc.querySelector(DOWNLOAD_BUTTON_SELECTOR)) return;
+
+      // PJAX swaps the header/main and re-runs bootPage, so re-apply from the
+      // in-memory or sessionStorage cache first — no extra network round trip.
+      if (!releaseState.data) releaseState.data = readReleaseCache();
+      if (releaseState.data) {
+        applyReleaseToPage(releaseState.data);
+        return;
+      }
+
+      loadLatestRelease().then(function (release) {
+        // A route swap may have replaced the buttons while the fetch was in
+        // flight; applyReleaseToPage queries the live DOM, so this is safe.
+        if (release) applyReleaseToPage(release);
+      });
+    } catch (error) {
+      // Upgrading the links is a progressive enhancement: never let it break
+      // page boot. The authored release-page hrefs stay clickable.
+      if (window.console && window.console.warn) {
+        window.console.warn('Agora: dynamic download setup failed; keeping the release-page links.', error);
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------
      Boot and PJAX page hydration
      ------------------------------------------------------------ */
   function bootPage() {
     initImages();
     initCreditsRotary();
     initRouting();
+    // After initRouting: syncPageLinks rewrites a[data-page] hrefs, and the
+    // download CTAs must keep the release URL that wins this ordering.
+    initDynamicDownload();
     initMenu();
     initSmoothScroll();
     initReveal();
