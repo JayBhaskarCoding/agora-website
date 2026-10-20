@@ -607,7 +607,7 @@
   var POST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._=-]{2,127}$/;
   var POST_ID_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   // Must stay equal to target.package_name in .well-known/assetlinks.json.
-  var ANDROID_PACKAGE = 'net.in.agora';
+  var ANDROID_PACKAGE = 'net.agora.app';
   /* The App Links host the APK verifies against. Pinned rather than derived
      from location.host on purpose: an intent built on a *.pages.dev preview or
      on localhost could never hand off to the app, because the manifest only
@@ -685,7 +685,7 @@
 
   function buildAppIntentUrl(postId) {
     /* If the app is installed, Android hands this post straight to
-       net.in.agora. If it is not, Chrome for Android follows
+       net.agora.app. If it is not, Chrome for Android follows
        S.browser_fallback_url to the download page instead of showing an
        error -- which is the whole reason this is an intent:// URL rather than
        a plain https link.
