@@ -39,20 +39,29 @@ const EDGE_TTL_SECONDS = 300;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const LANDING_PAGE = '/shared-post.html';
+
+/* This site is reachable from several domains that all point at the same Pages
+   project (they are listed in the README under "Every domain, one canonical
+   URL"). So a request's own origin is NOT a safe basis for the social tags: one
+   post shared from two of those hosts would publish two different og:url values,
+   and chat apps key their preview cache on og:url -- the same post would render
+   as two unrelated cards in one thread. Every absolute URL this Function emits
+   is therefore pinned to the canonical host. */
+const CANONICAL_ORIGIN = 'https://agora.in.net';
 // Square branded still, used when the author has no avatar. Chat apps do not
 // render SVG og:image reliably, so this is a JPG rather than the site logo.
 const FALLBACK_OG_IMAGE = '/assets/agora-public.jpg';
 const GENERIC_AUTHOR = 'A member of the square';
 
-// The h1 reads "It looks like <span data-first-name>someone</span> shared an
-// Agora post with you", so the fallback is lowercase to stay grammatical
+// The h1 reads "It looks like <span data-first-name>someone</span> shared a
+// post with you", so the fallback is lowercase to stay grammatical
 // mid-sentence. It matches the authored markup exactly, which means an
 // unenriched page and an enriched page with no first name look identical.
 const FIRST_NAME_FALLBACK = 'someone';
 
 // profiles.first_name is `text default 'User'` in the schema, so every member
 // who never chose a name carries the literal word "User". Injecting that would
-// announce "It looks like User shared an Agora post with you", so the
+// announce "It looks like User shared a post with you", so the
 // placeholder is treated as no first name at all. The display name beside the
 // avatar is left as the app shows it -- this guard is for the sentence only.
 const PLACEHOLDER_FIRST_NAME = 'user';
@@ -119,9 +128,9 @@ function cleanImageUrl(value) {
   }
 }
 
-function absoluteUrl(request, path) {
+function canonicalUrl(path) {
   try {
-    return new URL(path, request.url).toString();
+    return new URL(path, CANONICAL_ORIGIN).toString();
   } catch (error) {
     return path;
   }
@@ -318,7 +327,7 @@ async function loadLandingPage(context) {
   }
 }
 
-function describePost(request, postId, author) {
+function describePost(postId, author) {
   const subject = author ? author.name : 'Someone';
   const byline = author ? (author.handle || author.name) : GENERIC_AUTHOR;
   return {
@@ -327,8 +336,10 @@ function describePost(request, postId, author) {
     // carries the same restraint as the page.
     description: `${byline} shared a post on Agora — the new town square for free ` +
       'speech. Open it in the app to read the post and its thread.',
-    image: author && author.avatarUrl ? author.avatarUrl : absoluteUrl(request, FALLBACK_OG_IMAGE),
-    url: absoluteUrl(request, `/post/${postId}`)
+    image: author && author.avatarUrl ? author.avatarUrl : canonicalUrl(FALLBACK_OG_IMAGE),
+    // Always /post/, never /p/: the alias and the long route must publish the
+    // same og:url or one post makes two preview cards.
+    url: canonicalUrl(`/post/${postId}`)
   };
 }
 
@@ -381,7 +392,7 @@ async function buildResponse(context, postId) {
   }
 
   const author = result.author || null;
-  const social = describePost(context.request, postId, author);
+  const social = describePost(postId, author);
 
   let enriched = injectAuthor(html, author);
   enriched = setTitle(enriched, social.title);
