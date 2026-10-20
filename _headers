@@ -1,0 +1,17 @@
+# Cloudflare Pages / Netlify response headers.
+#
+# Android's Digital Asset Links verifier fetches
+#   https://agora.in.net/.well-known/assetlinks.json
+# and requires HTTP 200, Content-Type: application/json, and NO redirect.
+# A wrong content type fails verification just as hard as a 404 does, and the
+# Play Console reports both as a generic "not associated" error — so the type
+# is pinned explicitly rather than left to extension sniffing.
+#
+# max-age is deliberately short: rotating a signing key (or adding the Play App
+# Signing certificate) should propagate within the hour, not sit in an edge
+# cache for a day.
+
+/.well-known/assetlinks.json
+  Content-Type: application/json
+  X-Content-Type-Options: nosniff
+  Cache-Control: public, max-age=3600

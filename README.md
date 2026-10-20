@@ -50,6 +50,78 @@ The repository root **is** the static site. Point any static host
 keep `_redirects` / `robots.txt` in place. To test a shared link on a
 custom domain, share e.g. `https://your-domain/shared-post.html?post=<id>`.
 
+## Android App Links (`assetlinks.json`)
+
+`/.well-known/assetlinks.json` is what lets `net.in.agora` auto-verify deep
+links for `https://agora.in.net`. It lives at **`.well-known/assetlinks.json`
+in the repository root** — not under `public/`.
+
+That placement is the whole ballgame. The repository root *is* the published
+site (see [Deploy](#deploy)), so a copy under `public/` is served at
+`/public/.well-known/assetlinks.json` while the canonical URL falls through the
+`/*` catch-all in `_redirects` and answers **200 with `index.html`**. Android
+then receives HTML where it expects JSON, verification fails, and the Play
+Console reports only a generic "not associated" error with nothing pointing at
+the real cause. `AssetLinksContract` in `tests/test_site.py` fails if the file
+moves or if `public/` comes back.
+
+The file carries two SHA-256 certificate fingerprints — release and debug — so
+a debug build verifies against the same domain without anyone editing the site:
+
+```
+28:46:3B:…:AE:E1:44   release
+8C:F7:C9:…:9B:1E:58:4F   debug
+```
+
+`package_name` is the site domain reversed (`net.in.agora` ↔ `agora.in.net`);
+`test_package_name_matches_the_site_domain` pins that relationship so a
+transposed `applicationId` cannot ship silently.
+
+`_headers` pins `Content-Type: application/json` and `nosniff` for the path,
+because a wrong content type fails verification exactly as hard as a 404 does.
+`Cache-Control` is one hour so a rotated signing key propagates quickly instead
+of sitting in an edge cache.
+
+### Rotating or adding a fingerprint
+
+Regenerate from a keystore with:
+
+```sh
+keytool -list -v -keystore release.keystore -alias <alias> \
+  | grep -A1 'SHA256:'
+```
+
+Then paste the value in **uppercase with colon separators** — the format Google
+expects, and the format the tests enforce.
+
+**If the app is enrolled in Play App Signing**, the certificate that matters is
+the *app signing* key held by Google, not the local upload keystore. Read it
+from Play Console → **Setup → App integrity → App signing key certificate**.
+Publishing only the upload-key fingerprint is the single most common reason
+auto-verification fails for an app that otherwise looks correctly configured.
+
+### Verifying after deploy
+
+```sh
+curl -sS -D- https://agora.in.net/.well-known/assetlinks.json | head -20
+```
+
+Expect `HTTP/2 200`, `content-type: application/json`, and the JSON body — not
+HTML, and not a redirect. Google's
+[Statement List Generator and Checker](https://developers.google.com/digital-asset-links/tools/generator)
+will confirm the association end to end. On-device, re-trigger verification with:
+
+```sh
+adb shell pm verify-app-links --re-verify net.in.agora
+adb shell pm get-app-links net.in.agora     # want: verified
+```
+
+Note that Cloudflare Pages serves dot-prefixed directories from Git deploys,
+which is what makes the root `.well-known/` work. If a future deploy target ever
+skips hidden directories, the fix is a `_redirects` **200 rewrite** (never a
+301/302 — Google rejects redirects on this path) from the canonical URL to a
+non-dot copy, keeping a single source of truth.
+
 ## Wiring up the backend
 
 - `initSharedPost()` — `fetchPost(id)` is a stub returning a simulated

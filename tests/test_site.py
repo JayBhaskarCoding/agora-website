@@ -1,6 +1,7 @@
 """Dependency-free launch structure checks. Run with npm test."""
 from collections import Counter
 from html.parser import HTMLParser
+import json
 from pathlib import Path
 import re
 import unittest
@@ -719,6 +720,107 @@ class ThemeContrast(unittest.TestCase):
                 ratio, 3.0,
                 f"{name}: select chevron #{match.group(1)} on --field-bg "
                 f"= {ratio:.2f}:1, needs 3:1")
+
+
+# Android Digital Asset Links. Google's verifier fetches exactly
+# https://<domain>/.well-known/assetlinks.json and requires HTTP 200 with
+# Content-Type: application/json and no redirect; anything else is reported in
+# the Play Console as a generic "not associated" error with no detail, so the
+# file's location and shape are worth pinning hard.
+ASSETLINKS_PATH = ".well-known/assetlinks.json"
+ASSETLINKS_URL_PATH = "/.well-known/assetlinks.json"
+ANDROID_PACKAGE = "net.in.agora"
+SITE_DOMAIN = "agora.in.net"
+SHA256_FINGERPRINT = re.compile(r"^[0-9A-F]{2}(?::[0-9A-F]{2}){31}$")
+
+
+class AssetLinksContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.path = ROOT / ASSETLINKS_PATH
+        cls.raw = cls.path.read_text() if cls.path.exists() else ""
+        cls.statements = json.loads(cls.raw) if cls.raw else []
+        cls.redirects = (ROOT / "_redirects").read_text()
+        cls.headers_path = ROOT / "_headers"
+        cls.headers = cls.headers_path.read_text() if cls.headers_path.exists() else ""
+
+    def test_file_lives_at_the_publish_root(self):
+        """The repository root IS the static site (see README "Deploy"), so the
+        statement list must sit at root/.well-known/. A copy under public/ is
+        served at /public/.well-known/... and the canonical URL then falls
+        through the /* catch-all, which answers 200 with index.html -- HTML
+        where Android expects JSON, failing verification silently."""
+        self.assertTrue(self.path.is_file(),
+                        f"{ASSETLINKS_PATH} must exist at the publish root")
+        self.assertFalse((ROOT / "public" / ".well-known").exists(),
+                         "a stale copy under public/ is unreachable at the canonical URL")
+        self.assertFalse((ROOT / "public").exists(),
+                         "public/ is dead Vite scaffold; the site publishes from the root")
+
+    def test_statement_list_schema(self):
+        self.assertIsInstance(self.statements, list, "assetlinks.json must be a JSON array")
+        self.assertEqual(len(self.statements), 1)
+        statement = self.statements[0]
+        self.assertEqual(statement["relation"],
+                         ["delegate_permission/common.handle_all_urls"])
+        target = statement["target"]
+        self.assertEqual(target["namespace"], "android_app")
+        self.assertEqual(target["package_name"], ANDROID_PACKAGE)
+        self.assertIn("sha256_cert_fingerprints", target)
+
+    def test_package_name_matches_the_site_domain(self):
+        """Catches a transposed or typo'd applicationId: the package is the
+        site domain reversed, and that domain is the one used for contact
+        links throughout the repo."""
+        self.assertEqual(".".join(reversed(ANDROID_PACKAGE.split("."))), SITE_DOMAIN)
+        self.assertIn(f"mail@{SITE_DOMAIN}", (ROOT / "app.js").read_text())
+
+    def test_release_and_debug_fingerprints_are_both_present(self):
+        fingerprints = self.statements[0]["target"]["sha256_cert_fingerprints"]
+        self.assertEqual(len(fingerprints), 2,
+                         "expected the release and the debug certificate")
+        for fp in fingerprints:
+            self.assertRegex(fp, SHA256_FINGERPRINT,
+                             f"{fp} is not 32 uppercase colon-separated hex pairs")
+        self.assertEqual(len(set(fingerprints)), 2, "fingerprints must not repeat")
+
+    def test_no_placeholder_package_survives(self):
+        """com.example.agora was scaffold filler; if it ships, the real app
+        never verifies and nothing in the Play Console says why."""
+        offenders = []
+        for path in ROOT.rglob("*"):
+            if not path.is_file() or ".git" in path.parts:
+                continue
+            if path.suffix not in {".json", ".html", ".js", ".md", ".xml", ".txt", ".ts"}:
+                continue
+            try:
+                if "com.example.agora" in path.read_text():
+                    offenders.append(str(path.relative_to(ROOT)))
+            except (UnicodeDecodeError, OSError):
+                continue
+        self.assertEqual(offenders, [], f"placeholder package name still present in {offenders}")
+
+    def test_response_headers_are_pinned(self):
+        """A wrong Content-Type fails verification exactly as hard as a 404."""
+        self.assertTrue(self.headers_path.is_file(), "_headers is missing")
+        block = re.search(re.escape(ASSETLINKS_URL_PATH) + r"\n((?:[ \t]+[^\n]+\n?)+)",
+                          self.headers)
+        self.assertIsNotNone(block, f"_headers has no rule for {ASSETLINKS_URL_PATH}")
+        headers = block.group(1).lower()
+        self.assertIn("content-type: application/json", headers)
+        self.assertIn("x-content-type-options: nosniff", headers)
+
+    def test_redirects_do_not_shadow_the_statement_list(self):
+        """Real files win over _redirects on Pages, but a rewrite aimed at this
+        path would take precedence and hand Android the SPA shell instead."""
+        self.assertNotIn(".well-known", self.redirects,
+                         "_redirects must not rewrite the assetlinks path")
+        # The SPA catch-all must still exist and stay last.
+        rules = [ln.strip() for ln in self.redirects.splitlines()
+                 if ln.strip() and not ln.strip().startswith("#")]
+        self.assertTrue(rules, "_redirects has no rules")
+        self.assertTrue(rules[-1].startswith("/*"),
+                        "the /* SPA catch-all must remain the final rule")
 
 
 if __name__ == "__main__":
