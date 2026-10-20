@@ -1,6 +1,7 @@
 """Dependency-free launch structure checks. Run with npm test."""
 from collections import Counter
 from html.parser import HTMLParser
+import html as html_module
 import json
 from pathlib import Path
 import re
@@ -799,7 +800,7 @@ class ThemeContrast(unittest.TestCase):
 # file's location and shape are worth pinning hard.
 ASSETLINKS_PATH = ".well-known/assetlinks.json"
 ASSETLINKS_URL_PATH = "/.well-known/assetlinks.json"
-ANDROID_PACKAGE = "net.in.agora"
+ANDROID_PACKAGE = "net.agora.app"
 SITE_DOMAIN = "agora.in.net"
 SHA256_FINGERPRINT = re.compile(r"^[0-9A-F]{2}(?::[0-9A-F]{2}){31}$")
 
@@ -838,12 +839,28 @@ class AssetLinksContract(unittest.TestCase):
         self.assertEqual(target["package_name"], ANDROID_PACKAGE)
         self.assertIn("sha256_cert_fingerprints", target)
 
-    def test_package_name_matches_the_site_domain(self):
-        """Catches a transposed or typo'd applicationId: the package is the
-        site domain reversed, and that domain is the one used for contact
-        links throughout the repo."""
-        self.assertEqual(".".join(reversed(ANDROID_PACKAGE.split("."))), SITE_DOMAIN)
-        self.assertIn(f"mail@{SITE_DOMAIN}", (ROOT / "app.js").read_text())
+    def test_package_name_is_one_agreed_identifier_everywhere(self):
+        """The package is a chosen applicationId, NOT the site domain reversed
+        (`net.agora.app` reverses to `app.agora.net`), so the old reversal
+        heuristic cannot catch a typo any more. What still has to hold is that
+        every place the site names the package names the SAME one, and that it
+        is a well-formed identifier rather than scaffold filler."""
+        parts = ANDROID_PACKAGE.split(".")
+        self.assertGreaterEqual(len(parts), 3, "an applicationId needs at least three segments")
+        for part in parts:
+            self.assertRegex(part, r"^[a-z][a-z0-9_]*$", f"{part!r} is not a valid package segment")
+        self.assertNotIn("example", parts, "com.example.* is reserved scaffold filler")
+        # assetlinks.json is what Android verifies against; app.js is what the
+        # intent:// URI names. If they disagree the button targets an app the
+        # statement never authorised, and it fails silently on the exact
+        # devices it was built for.
+        self.assertEqual(self.statements[0]["target"]["package_name"], ANDROID_PACKAGE)
+        app = (ROOT / "app.js").read_text()
+        self.assertIn(f"var ANDROID_PACKAGE = '{ANDROID_PACKAGE}';", app,
+                      "app.js must build the intent for the same package")
+        self.assertIn(f"mail@{SITE_DOMAIN}", app,
+                      "and the contact domain is still the canonical one")
+        self.assertEqual(SITE_DOMAIN, "agora.in.net")
 
     def test_release_and_debug_fingerprints_are_both_present(self):
         fingerprints = self.statements[0]["target"]["sha256_cert_fingerprints"]
@@ -1627,8 +1644,39 @@ class SharedPostCard(unittest.TestCase):
         self.assertIn("`/post/${postId}`", body,
                       "og:url must name the canonical route, not the request path")
         self.assertNotIn("`/p/", body)
-        self.assertNotIn("request.url`", body.replace("new URL(path, request.url)", ""),
-                         "og:url must be built from the id, never echoed back")
+
+    def test_every_absolute_url_is_pinned_to_the_canonical_host(self):
+        """agora.in.net, auth-agora.info and auth-agora.online all serve this
+        same Pages project. Deriving og:url from the request therefore lets one
+        post publish three different canonical URLs depending on which host the
+        share link used -- and since chat apps key their preview cache on
+        og:url, the same post renders as unrelated cards in one thread. So the
+        Function must pin its own origin, not echo the request's."""
+        self.assertEqual(self.constant("CANONICAL_ORIGIN"), f"https://{SITE_DOMAIN}")
+        body = self.helper_body("canonicalUrl")
+        self.assertIn("CANONICAL_ORIGIN", body,
+                      "the helper must resolve against the pinned origin")
+        self.assertNotIn("request", body, "and must not consult the request at all")
+        described = self.helper_body("describePost")
+        self.assertIn("canonicalUrl(", described,
+                      "og:url and the fallback og:image both go through the pin")
+        # Sharing a body with one canonicalUrl() call is not enough: a bare
+        # FALLBACK_OG_IMAGE is root-relative, and a scraper resolves og:image
+        # against nothing, so the preview silently loses its image.
+        self.assertIn("canonicalUrl(FALLBACK_OG_IMAGE)", described,
+                      "og:image must be absolute too")
+        self.assertEqual(described.count("canonicalUrl("), 2,
+                         "both emitted URLs go through the pin, and nothing else "
+                         "in describePost should")
+        self.assertNotRegex(described, r"(?<!canonicalUrl\()FALLBACK_OG_IMAGE",
+                            "the fallback image must never be emitted bare")
+        self.assertNotIn("absoluteUrl", self.fn,
+                         "the request-origin helper is gone: leaving it in place "
+                         "invites the next tag to be built from the wrong host")
+        self.assertNotRegex(described, r"\brequest\b",
+                            "describePost no longer needs the request")
+        # The alias must not become a second canonical URL either.
+        self.assertIn("url: canonicalUrl(`/post/${postId}`)", described)
 
     def test_the_og_fallback_image_exists(self):
         fallback = self.constant("FALLBACK_OG_IMAGE")
@@ -1700,3 +1748,145 @@ class SharedPostCard(unittest.TestCase):
                 self.assertIn(element, branch,
                               f"{element} must be settled, or a bad link can leave "
                               "the previous render on screen")
+
+def visible_text(html):
+    """What a visitor can actually read: no tags, no attributes, no comments,
+    no script or style bodies. Attributes are dropped on purpose -- the download
+    button's href is allowed to name github.com (that is the mechanism), while
+    the copy beside it is not."""
+    text = re.sub(r"<!--[\s\S]*?-->", " ", html)
+    text = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.I)
+    text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
+    text = re.sub(r"<[^>]*>", " ", text)
+    # A visitor reads "&", not "&amp;" -- decode so assertions match the copy
+    # as rendered rather than as escaped.
+    return html_module.unescape(text)
+
+
+SERVED_SUFFIXES = {".html", ".js", ".css", ".json", ".svg"}
+
+
+class ReleaseStatusCopy(unittest.TestCase):
+    """v1.0 shipped. The site must read as a released product, and must not
+    name the place the APK is fetched from -- while still fetching it from
+    there, because that is the resilient path the download depends on."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.raw = {p.name: p.read_text() for p in ROOT.glob("*.html")}
+        cls.download = cls.raw["download.html"]
+        cls.app = (ROOT / "app.js").read_text()
+        cls.readme = (ROOT / "README.md").read_text()
+
+    # --- GitHub is infrastructure, not copy ------------------------------
+    def test_no_page_names_github_in_visible_copy(self):
+        for name, html in self.raw.items():
+            with self.subTest(page=name):
+                text = visible_text(html)
+                self.assertNotIn("github", text.lower(),
+                                 "visitors should not be told where the APK is "
+                                 "hosted; the file should just download")
+
+    def test_the_download_mechanism_survived_the_copy_change(self):
+        """The counter-guard: "remove references to GitHub" must not be
+        over-applied into removing the download itself. Exactly one element
+        still carries GitHub's permanent release redirect, because that URL
+        resolves to the newest release with no API call and no rate limit."""
+        page = Page(ROOT / "download.html")
+        carriers = [a for t, a in page.tags
+                    if "releases/latest/download/app.apk" in (a.get("href") or "")]
+        self.assertEqual(len(carriers), 1,
+                         "one button downloads the file; if this is 0 the copy "
+                         "sweep broke the download, if it is >1 every CTA "
+                         "downloads instead of navigating")
+        self.assertIn("dynamic-download-btn", carriers[0].get("class", ""))
+        self.assertEqual(carriers[0].get("id"), "dynamic-download-btn")
+        # The lookup chain still runs, so the button tracks the newest release.
+        self.assertIn("api.github.com/repos/JayBhaskarCoding/agora-android/releases/latest", self.app)
+        self.assertIn("/api/latest-release", self.app,
+                      "the server-side proxy is still first in the chain")
+
+    # --- released, not pre-launch ----------------------------------------
+    def test_the_android_app_reads_as_shipped_not_pre_launch(self):
+        stale = ["android beta", "ahead of launch", "prepared for launch",
+                 "device capture coming soon", "no waitlist", "try the current agora"]
+        for name, html in self.raw.items():
+            text = visible_text(html).lower()
+            for phrase in stale:
+                with self.subTest(page=name, phrase=phrase):
+                    self.assertNotIn(phrase, text,
+                                     "v1.0 is released; this reads as pre-launch")
+
+    def test_ios_and_desktop_are_still_honestly_marked_as_future(self):
+        """The sweep must not delete a statement that is still true: there is
+        no iOS or desktop client, and saying otherwise would be worse than the
+        pre-launch wording it replaced."""
+        for name in ("index.html", "download.html", "about.html"):
+            with self.subTest(page=name):
+                text = visible_text(self.raw[name])
+                self.assertRegex(text, r"iOS\s*&\s*desktop\s*—\s*coming soon",
+                                 "the footer must still say iOS/desktop are not out")
+
+    def test_the_release_is_announced_where_a_visitor_decides(self):
+        text = visible_text(self.download)
+        self.assertIn("Now available on Android", text,
+                      "the download page eyebrow is the first thing read")
+        self.assertRegex(text, r"Agora is out for Android",
+                         "and the lead must say the app exists")
+        self.assertIn("out now", visible_text(self.raw["index.html"]),
+                      "the footer status line should agree")
+
+    def test_no_page_claims_ios_or_desktop_is_available(self):
+        """The footers honestly say iOS and desktop are still coming. A body
+        sentence claiming otherwise would contradict that inside the same
+        viewport -- and would simply be false, which is worse than the
+        pre-launch wording this sweep removed. So every sentence that names
+        either platform has to frame it as future."""
+        future = re.compile(r"coming soon|workbench|not yet|planned|on the way|in progress",
+                            re.I)
+        seen = 0
+        for name, html in self.raw.items():
+            for sentence in re.split(r"(?<=[.!?])\s+", visible_text(html)):
+                sentence = " ".join(sentence.split())
+                if not re.search(r"\biOS\b|\bdesktop\b", sentence):
+                    continue
+                seen += 1
+                with self.subTest(page=name, sentence=sentence[:80]):
+                    self.assertTrue(future.search(sentence),
+                                    "names iOS/desktop without marking it as future")
+        self.assertGreaterEqual(seen, 4,
+                                "the three footers and the download caveat should "
+                                "still be there; 0 means the splitter broke")
+
+    # --- one identity, everywhere ----------------------------------------
+    def test_no_superseded_identity_survives_in_served_files(self):
+        """`net.in.agora` was the earlier pin and `auth-agora.*` are alias
+        domains that all serve this same project. Neither may be emitted by
+        anything the site serves: a stale package in the intent URI fails
+        silently, and a stale host in a social tag splits one post into two
+        preview cards."""
+        offenders = []
+        for path in ROOT.rglob("*"):
+            if not path.is_file() or ".git" in path.parts or "node_modules" in path.parts:
+                continue
+            if path.suffix not in SERVED_SUFFIXES and path.name not in {"_redirects", "_headers"}:
+                continue
+            try:
+                body = path.read_text()
+            except (UnicodeDecodeError, OSError):
+                continue
+            for stale in ("net.in.agora", "auth-agora", "com.example.agora"):
+                if stale in body:
+                    offenders.append(f"{path.relative_to(ROOT)}: {stale}")
+        self.assertEqual(offenders, [], "superseded identity still served")
+
+    def test_the_readme_verifies_the_package_that_actually_ships(self):
+        """The README's adb commands are how this gets debugged on a device.
+        Pointing them at a retired package makes the verification steps
+        silently check nothing."""
+        self.assertNotIn("net.in.agora", self.readme)
+        self.assertIn(f"verify-app-links --re-verify {ANDROID_PACKAGE}", self.readme)
+        self.assertIn(f"get-app-links {ANDROID_PACKAGE}", self.readme)
+        self.assertIn(f"package={ANDROID_PACKAGE}", self.readme,
+                      "the documented intent:// example must name the live package")
+

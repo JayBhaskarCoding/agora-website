@@ -62,7 +62,7 @@ everywhere, including on hosts with no redirect engine.
 
 ## Android App Links (`assetlinks.json`)
 
-`/.well-known/assetlinks.json` is what lets `net.in.agora` auto-verify deep
+`/.well-known/assetlinks.json` is what lets `net.agora.app` auto-verify deep
 links for `https://agora.in.net`. It lives at **`.well-known/assetlinks.json`
 in the repository root** — not under `public/`.
 
@@ -83,9 +83,23 @@ a debug build verifies against the same domain without anyone editing the site:
 8C:F7:C9:…:9B:1E:58:4F   debug
 ```
 
-`package_name` is the site domain reversed (`net.in.agora` ↔ `agora.in.net`);
-`test_package_name_matches_the_site_domain` pins that relationship so a
-transposed `applicationId` cannot ship silently.
+`package_name` is **`net.agora.app`** — a chosen `applicationId`, *not* the site
+domain reversed (that would be the earlier pin, which reverses to
+`agora.in.net`). The reversal heuristic was a useful typo-catcher while it held,
+and it no longer does, so
+`test_package_name_is_one_agreed_identifier_everywhere` replaced it: it checks
+the identifier is well formed and, more importantly, that `assetlinks.json` and
+`app.js`'s `ANDROID_PACKAGE` name the **same** package. That agreement is the
+invariant that actually matters — if they drift, the intent:// button targets an
+app the statement never authorised, and it fails silently on exactly the devices
+it was built for.
+
+> **The app side is not there yet.** As of the `v1.0-Release` tag the APK still
+> ships the scaffold placeholder `applicationId`, and its manifest auto-verifies
+> against an alias domain with `pathPrefix="/post/"`. Until the app declares
+> `net.agora.app` and `agora.in.net`, Android cannot verify this statement and
+> the intent button falls back to the download page. Nothing on the site can
+> compensate for that; see [What the app still owes](#what-the-app-still-owes).
 
 `_headers` pins `Content-Type: application/json` and `nosniff` for the path,
 because a wrong content type fails verification exactly as hard as a 404 does.
@@ -122,8 +136,8 @@ HTML, and not a redirect. Google's
 will confirm the association end to end. On-device, re-trigger verification with:
 
 ```sh
-adb shell pm verify-app-links --re-verify net.in.agora
-adb shell pm get-app-links net.in.agora     # want: verified
+adb shell pm verify-app-links --re-verify net.agora.app
+adb shell pm get-app-links net.agora.app    # want: verified
 ```
 
 Note that Cloudflare Pages serves dot-prefixed directories from Git deploys,
@@ -364,7 +378,7 @@ effectively invisible on a phone. There is exactly one such button on the page �
 On Chromium/Android it becomes an `intent://` URL for the same https path:
 
 ```
-intent://agora.in.net/post/<id>#Intent;scheme=https;package=net.in.agora;S.browser_fallback_url=https%3A%2F%2Fagora.in.net%2Fdownload.html;end;
+intent://agora.in.net/post/<id>#Intent;scheme=https;package=net.agora.app;S.browser_fallback_url=https%3A%2F%2Fagora.in.net%2Fdownload.html;end;
 ```
 
 Android routes it to the verified app; if the app is absent it opens
@@ -412,6 +426,44 @@ the package one above.
 would take it raw: `resolvePostId`'s charset permits `=`, which is a delimiter
 inside an intent URI. For a UUID the encoding is a no-op, so the emitted string
 is byte-identical either way.
+
+### Every domain, one canonical URL
+
+`agora.in.net`, `auth-agora.info` and `auth-agora.online` are all owned and all
+point at this same Cloudflare Pages project. That is convenient for visitors and
+a trap for social tags: `og:url` used to be built from the *request's* origin, so
+one post shared from two of those hosts published two different canonical URLs —
+and because chat apps key their preview cache on `og:url`, the same post rendered
+as two unrelated cards in a single thread.
+
+`CANONICAL_ORIGIN` in `functions/post/[id].js` is now the only basis for any
+absolute URL the Function emits (`og:url`, `og:image`, `twitter:*`), so all three
+domains publish identical tags, and `/p/<id>` and `/post/<id>` agree on top of
+that. `test_every_absolute_url_is_pinned_to_the_canonical_host` also asserts the
+request-origin helper is *gone* rather than merely unused — leaving it in place
+invites the next tag to be built from the wrong host.
+
+The alias domains are deliberately not named in any served file, so
+`test_no_superseded_identity_survives_in_served_files` fails if one is ever
+emitted into a URL. This section is the only place they are written down.
+
+### What the app still owes
+
+The site is now correct for the released product's intended identity; the APK is
+not yet. Four changes in the app repo make deep links actually work. Until they
+land, share links still open this page (all three domains serve it), but they
+never hand off to the app:
+
+| Where | Now | Needs to be |
+| --- | --- | --- |
+| `app/build.gradle.kts` | scaffold placeholder `namespace` / `applicationId` | `net.agora.app` |
+| `AndroidManifest.xml` | `autoVerify` filter on an alias domain, `pathPrefix="/post/"` | `android:host="agora.in.net"`; consider adding `/p/` |
+| `FeedScreen.kt` share intent | builds the share URL from an alias domain | `https://agora.in.net/post/${post.id}` |
+| `DeepLinkRouter.kt` | matches only the alias host | match `agora.in.net`, and keep matching the old host so links already in the wild still open |
+
+Changing `applicationId` makes the app a **different identity**, so existing
+installs will not update in place — they reinstall. The release currently shows
+two downloads, which makes now the cheapest moment this will ever be.
 
 ### Verifying after deploy
 
