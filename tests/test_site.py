@@ -409,8 +409,11 @@ class LaunchContract(unittest.TestCase):
 
     def test_primary_button_label_color(self):
         # Get the app, Download APK, and Send message all use this shared rule.
+        # The label is a token now so the light theme can flip it to white ink;
+        # the dark value is pinned below to keep the shipped rendering exact.
         primary = re.search(r"\.btn--primary \{([^}]+)\}", self.css)[1]
-        self.assertIn("color: #110819", primary)
+        self.assertIn("color: var(--on-accent)", primary)
+        self.assertIn("--on-accent: #110819;", self.css)
         self.assertIn("background: var(--accent)", primary)
         self.assertNotRegex(self.css, r"\.btn--get-app \{[^}]*color:")
         for page in self.pages.values():
@@ -430,6 +433,255 @@ class LaunchContract(unittest.TestCase):
         self.assertEqual(self.css.count("{"), self.css.count("}"))
         for old_accent in ["#a5f3fc", "#22d3ee", "--emerald", "#fda4af"]:
             self.assertNotIn(old_accent, self.css)
+
+    def test_light_theme_contract(self):
+        """Light mode follows the OS; dark stays the default fallback.
+
+        Three things are load-bearing here:
+          1. the light palette exists ONLY inside prefers-color-scheme, so an
+             engine that ignores the query still gets the dark theme;
+          2. the phone mockup and the mask carrier are deliberately NOT
+             re-skinned (hardware around dark screenshots / alpha, not colour);
+          3. nothing outside the token blocks holds a raw colour, so the switch
+             is a variable swap and cannot leave a stranded dark literal.
+        """
+        self.assertIn("color-scheme: dark;", self.css)
+
+        light = re.search(r"@media \(prefers-color-scheme: light\) \{(.*?)\n\}",
+                          self.css, re.S)
+        self.assertIsNotNone(light, "no prefers-color-scheme: light block")
+        light_block = light.group(1)
+        self.assertIn("color-scheme: light;", light_block)
+
+        # A contrast-audited slice of the light palette (WCAG AA on every
+        # surface it is paired with; see the audit notes in style.css 1h).
+        for token in ["--bg: #F7F9FC;", "--bg-soft: #FAFAFC;", "--surface: #FFFFFF;",
+                      "--text: #1A1E23;", "--text-dim: #4B5563;",
+                      "--text-faint: #5A6472;", "--accent: #6D28D9;",
+                      "--accent-deep: #5B21B6;", "--blue: #1D4ED8;",
+                      "--refuse: #BE123C;", "--build: #047857;",
+                      "--overlay-rgb: 15, 23, 42;", "--on-accent: #FFFFFF;"]:
+            self.assertIn(token, light_block)
+
+        # The glass inversion: white-based translucency becomes dark-based.
+        self.assertIn("--overlay-rgb: 255, 255, 255;", self.css)
+        self.assertNotIn("--device-hi:", light_block)
+        self.assertNotIn("--device-screen:", light_block)
+        self.assertNotIn("--mask-solid:", light_block)
+
+        # Every colour outside the two token blocks must be a variable.
+        body = re.sub(r"/\*.*?\*/", " ", self.css, flags=re.S)
+        body = re.sub(r"(?m)^\s*:root\s*\{.*?^\s*\}", " ", body, flags=re.S)
+        self.assertNotRegex(body, r"#[0-9a-fA-F]{3,8}\b")
+        self.assertNotRegex(body, r"rgba?\(\s*\d")
+        # A colour can also hide inside a data URI as %23-encoded hex, where
+        # no `#` scan will find it. The select chevron is exactly that case, so
+        # the whole URL is a token and each theme supplies its own.
+        self.assertNotRegex(body, r"%23[0-9a-fA-F]{3,8}")
+        self.assertIn("--select-chevron: url(", self.css)
+        self.assertIn("background-image: var(--select-chevron)", self.css)
+
+    def test_device_subtree_does_not_flip(self):
+        """The phone screen stays dark in both themes, so anything painted
+        inside it must not follow the palette -- otherwise the pending-state
+        caption renders dark-on-dark once the OS asks for light mode."""
+        light = re.search(r"@media \(prefers-color-scheme: light\) \{(.*?)\n\}",
+                          self.css, re.S).group(1)
+        for token in ["--device-screen", "--device-ink", "--device-ink-dim",
+                      "--device-accent-soft", "--device-hi", "--device-ring-rgb",
+                      "--mask-solid"]:
+            self.assertIn(token + ":", self.css)
+            self.assertNotIn(token + ":", light,
+                             f"{token} must not be redefined for the light theme")
+
+        pending = re.search(r"\.phone__pending \{([^}]+)\}", self.css)[1]
+        self.assertIn("color: var(--device-ink)", pending)
+        small = re.search(r"\.phone__pending small \{([^}]+)\}", self.css)[1]
+        self.assertIn("color: var(--device-ink-dim)", small)
+
+    def test_ambient_canvas_follows_theme(self):
+        """The dot matrix is painted on a <canvas>, so CSS cannot reach it.
+
+        It has to read the brand channels back out of the stylesheet and
+        re-read them when the OS flips scheme, otherwise it keeps painting
+        dark-theme dots onto a light page.
+        """
+        js = (ROOT / "app.js").read_text()
+        self.assertIn("getPropertyValue('--blue-rgb')", js)
+        self.assertIn("getPropertyValue('--accent-rgb')", js)
+        self.assertIn("palette.blue : palette.accent", js)
+        self.assertIn("(prefers-color-scheme: light)", js)
+        # The draw loop must not inline the palette; the literals may only
+        # survive as the named fallbacks used when the tokens are unreadable.
+        self.assertNotRegex(js, r"\?\s*'96,165,250'\s*:\s*'139,92,246'")
+        self.assertIn("FALLBACK_BLUE", js)
+        self.assertIn("FALLBACK_ACCENT", js)
+
+    def test_theme_color_meta_follows_scheme(self):
+        """Browser chrome must not stay dark when the page goes light."""
+        for name, page in self.pages.items():
+            metas = [attrs for tag, attrs in page.tags
+                     if tag == "meta" and attrs.get("name") == "theme-color"]
+            self.assertTrue(metas, f"{name}: no theme-color meta")
+            by_media = {m.get("media"): m.get("content") for m in metas}
+            # Unqualified tag stays as the fallback for engines that ignore
+            # `media` on theme-color, so chrome is never left undefined.
+            self.assertIn(None, by_media, f"{name}: missing unqualified fallback")
+            self.assertEqual("#0A0B0E", by_media[None], name)
+            self.assertEqual("#0A0B0E", by_media.get("(prefers-color-scheme: dark)"), name)
+            self.assertEqual("#F7F9FC", by_media.get("(prefers-color-scheme: light)"), name)
+
+
+# --------------------------------------------------------------------------
+# WCAG 2.1 relative-luminance contrast. Kept inline so the suite stays
+# dependency-free; the light theme is only "finished" if it is legible, and
+# legibility is a number rather than an opinion.
+# --------------------------------------------------------------------------
+def _lum(rgb):
+    def channel(v):
+        v /= 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b = (channel(c) for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _ratio(a, b):
+    la, lb = _lum(a), _lum(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def _hex(value):
+    value = value.strip().lstrip("#")
+    return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
+
+
+class ThemeContrast(unittest.TestCase):
+    """Every text/background pairing both themes actually render is measured.
+
+    The LIGHT theme is held to WCAG AA without exception -- it is new work and
+    must not ship unreadable text. The DARK theme is held to its *shipped
+    baseline*: three pairings sit marginally under AA because --accent and the
+    brand gradient stops are pinned verbatim by test_theme_contract and predate
+    this work (the token refactor was verified to leave every dark value
+    byte-identical). Those are baseline-locked so the palette cannot regress
+    unnoticed, rather than being "fixed" by silently redesigning the dark brand.
+
+    Surfaces are limited to the ones the stylesheet really paints: --surface-2
+    and --surface-3 exist in the token ramp but appear in no background
+    declaration, so grading text against them would invent pairings that never
+    render and hide the real ones.
+    """
+
+    SURFACES = ["--bg", "--bg-soft", "--surface", "--field-bg"]
+    TEXT = ["--text", "--text-dim", "--text-faint", "--text-bright"]
+    ACCENTS = ["--accent", "--blue", "--lavender", "--violet-soft",
+               "--refuse", "--build"]
+
+    # (foreground token, background) -> measured ratio in the shipped dark theme.
+    DARK_BASELINE = {
+        ("--accent", "--surface"): 4.33,
+        ("--on-gradient", "#8B5CF6"): 4.23,
+        ("--on-gradient", "#60A5FA"): 2.54,
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        raw = (ROOT / "style.css").read_text()
+        cls.css = re.sub(r"/\*.*?\*/", " ", raw, flags=re.S)
+        cls.dark = cls._root(cls.css, light=False)
+        light_only = cls._root(cls.css, light=True)
+        if not light_only:
+            raise unittest.SkipTest(
+                "no @media (prefers-color-scheme: light) :root block to audit")
+        # The light theme inherits every dark token it does not redefine.
+        cls.light = {**cls.dark, **light_only}
+
+    @staticmethod
+    def _root(css, light):
+        if light:
+            block = re.search(
+                r"@media \(prefers-color-scheme: light\)\s*\{\s*:root\s*\{(.*?)\n\s*\}\s*\n\}",
+                css, re.S).group(1)
+        else:
+            block = re.search(r"(?m)^:root\s*\{(.*?)^\}", css, re.S).group(1)
+        tokens = {}
+        for decl in block.split(";"):
+            decl = " ".join(decl.split())
+            if decl.startswith("--") and ":" in decl:
+                key, value = decl.split(":", 1)
+                tokens[key.strip()] = value.strip()
+        return tokens
+
+    def _value(self, theme, token):
+        """Resolve a token to a colour, following var() indirection."""
+        value = theme[token]
+        for _ in range(8):
+            inner = re.search(r"var\((--[a-z0-9-]+)\)", value)
+            if not inner:
+                break
+            value = value.replace(inner.group(0), theme.get(inner.group(1), ""))
+        return value.strip()
+
+    def _used_as_text(self, token):
+        return re.search(rf"(?<![-\w])color:\s*var\(\s*{re.escape(token)}\s*\)",
+                         self.css) is not None
+
+    def _floor(self, theme_name, pair, default):
+        """AA for the light theme; the shipped baseline for known dark pairs."""
+        if theme_name == "light":
+            return default
+        return self.DARK_BASELINE.get(pair, default)
+
+    def test_text_tokens_clear_their_threshold(self):
+        for name, theme in (("dark", self.dark), ("light", self.light)):
+            for ink in self.TEXT + self.ACCENTS:
+                # 3:1 (WCAG 1.4.11) when the token is never used as a `color:`,
+                # 4.5:1 otherwise. Derived from the stylesheet, not assumed.
+                default = 4.5 if (ink in self.TEXT or self._used_as_text(ink)) else 3.0
+                for surface in self.SURFACES:
+                    fg, bg = self._value(theme, ink), self._value(theme, surface)
+                    if not re.match(r"^#[0-9a-fA-F]{6}$", fg) or not re.match(r"^#[0-9a-fA-F]{6}$", bg):
+                        continue
+                    ratio = _ratio(_hex(fg), _hex(bg))
+                    need = self._floor(name, (ink, surface), default)
+                    self.assertGreaterEqual(
+                        ratio, need - 0.01,
+                        f"{name} theme: {ink} ({fg}) on {surface} ({bg}) "
+                        f"= {ratio:.2f}:1, needs {need:.2f}:1")
+
+    def test_ink_on_accent_fills(self):
+        for name, theme in (("dark", self.dark), ("light", self.light)):
+            ink = _hex(self._value(theme, "--on-accent"))
+            fill = self._value(theme, "--accent")
+            need = self._floor(name, ("--on-accent", fill), 4.5)
+            self.assertGreaterEqual(_ratio(ink, _hex(fill)), need - 0.01,
+                                    f"{name}: --on-accent on --accent")
+
+            # Ink must clear its threshold at EVERY gradient stop, not just the
+            # first: the lightest stop is the one that usually fails.
+            stops = re.findall(r"#[0-9a-fA-F]{6}",
+                               self._value(theme, "--brand-gradient-ink"))
+            self.assertTrue(stops, "brand gradient has no colour stops")
+            on_gradient = _hex(self._value(theme, "--on-gradient"))
+            for stop in stops:
+                need = self._floor(name, ("--on-gradient", stop), 4.5)
+                self.assertGreaterEqual(
+                    _ratio(on_gradient, _hex(stop)), need - 0.01,
+                    f"{name}: --on-gradient on gradient stop {stop}")
+
+    def test_select_chevron_clears_non_text_minimum(self):
+        """The chevron is an inline SVG, so its stroke cannot hold var() and the
+        whole data URI is the token. The dark theme's #9aa8bf measures 2.44:1 on
+        white, which is why the light theme supplies a darker one."""
+        for name, theme in (("dark", self.dark), ("light", self.light)):
+            match = re.search(r"%23([0-9a-fA-F]{6})", theme["--select-chevron"])
+            self.assertIsNotNone(match, f"{name}: chevron has no encoded colour")
+            field = _hex(self._value(theme, "--field-bg"))
+            ratio = _ratio(_hex(match.group(1)), field)
+            self.assertGreaterEqual(
+                ratio, 3.0,
+                f"{name}: select chevron #{match.group(1)} on --field-bg "
+                f"= {ratio:.2f}:1, needs 3:1")
 
 
 if __name__ == "__main__":

@@ -173,6 +173,76 @@ assets; use the local server instead.
 Mobile-first base styles, then: `≤480px` phone, `≤768px` tablet (hamburger
 nav), `≥769px` desktop nav, `≥1024px` wide layouts.
 
+## Theming (`style.css`)
+
+The site follows the **operating system's** colour scheme. There is no toggle:
+dark is the default fallback and light engages only inside
+`@media (prefers-color-scheme: light)`, so an engine that ignores the query
+still gets the dark theme unchanged.
+
+### How a theme switch is one variable swap
+
+Section 1 of `style.css` is a token layer, and it is split into **channels**
+and **semantics**:
+
+- **Channels** (`--accent-rgb`, `--overlay-rgb`, `--glow-rgb`, …) hold bare
+  `r, g, b` triples. Every translucent tint in the file is written as
+  `rgba(var(--x-rgb), <alpha>)`, so redefining a channel once re-colours all of
+  its alpha variants.
+- **Semantics** (`--bg`, `--surface`, `--text`, `--accent`, `--glass`, …) hold
+  the colours components actually name.
+
+The light theme therefore redefines ~56 tokens and **zero components**. Three
+channels do the heavy lifting:
+
+| Channel | Dark | Light | What it drives |
+| --- | --- | --- | --- |
+| `--overlay-rgb` | `255, 255, 255` | `15, 23, 42` | The glass inversion — every hairline, sheen, grid texture, glass panel and the credits-screen floating tags flip from white-based to dark-based translucency in one declaration. |
+| `--glow-rgb` / `--glow-blue-rgb` | bright violet / blue | deep violet / blue | Neon bloom becomes a diffused drop-shadow. The alpha values stay as authored; only the colour depth changes. |
+| `--bg-rgb`, `--surface-rgb`, `--text-rgb` | near-black / near-white | off-white / dark slate | Page, cards and typography. |
+
+Section 23 holds the only per-site light overrides — the handful of effects
+whose dark-tuned alpha (0.8–0.95 bloom) would read as a bruise on white. It
+sits at the end of the file because those rules must win the cascade against
+the components they tune.
+
+### Deliberately not themed
+
+- **`--device-*`** — the phone frame is hardware around dark app screenshots,
+  so a pale bezel would read as broken rather than designed. Text painted
+  *inside* the screen (`--device-ink`, `--device-accent-soft`) is pinned to the
+  dark values for the same reason; letting it follow `--text-dim` would render
+  the pending-state caption dark-on-dark.
+- **`--mask-solid: #000`** — that black is an *alpha carrier* for `mask-image`,
+  not a colour. It must stay opaque in every theme.
+- **`--select-chevron`** — the dropdown arrow is an inline SVG, and a data URI
+  cannot contain `var()`, so the whole URL is the token and each theme supplies
+  its own. Note that a `%23`-encoded colour inside a URL hides from any
+  "no hardcoded hex" scan; `test_light_theme_contract` guards that loophole.
+
+### Canvas and browser chrome
+
+The ambient dot matrix is painted on a `<canvas>`, which CSS cannot reach, so
+`app.js` reads `--blue-rgb` / `--accent-rgb` back out of the stylesheet via
+`getComputedStyle` and re-reads them on a `prefers-color-scheme` change. If the
+tokens are unreadable it falls back to named literals rather than painting
+`rgba(,0.05)`. Each page also carries three `theme-color` metas: an
+unqualified fallback plus one per scheme.
+
+### Contrast
+
+`ThemeContrast` in `tests/test_site.py` measures WCAG 2.1 relative luminance
+for every text/background pairing both themes render, and grades each token by
+how it is *used* — 4.5:1 where it appears as a `color:`, 3:1 (WCAG 1.4.11)
+where it only draws outlines, borders and icons. The light theme is held to AA
+without exception; the dark theme is held to its shipped baseline, because
+`--accent: #8B5CF6` and the brand gradient stops are pinned by
+`test_theme_contract` and three dark pairings sit marginally under AA
+(`--accent` on `--surface` at 4.33:1, white ink on the `#8B5CF6` and `#60A5FA`
+gradient stops at 4.23:1 and 2.54:1). Baseline-locking means the dark palette
+cannot regress unnoticed without redesigning a shipped brand colour as a side
+effect of a theming change.
+
 ## Notes
 
 - The feedback form on `about.html` uses the same-origin `/api/contact`

@@ -6,7 +6,11 @@
   <title>Agora — The internet, with room to think.</title>
   <meta name="description" content="Agora is the new town square for free speech: a human-first public square with zero ads, absolute chronology, and strict moderation of harm. Download the Android app." />
   <meta name="robots" content="index, follow" />
+  <!-- Browser chrome colour. The unqualified tag is the fallback for engines
+       that ignore `media`; the two scoped tags let the OS pick the right one. -->
   <meta name="theme-color" content="#0A0B0E" />
+  <meta name="theme-color" content="#0A0B0E" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#F7F9FC" media="(prefers-color-scheme: light)" />
 
   <!-- Open Graph / Twitter -->
   <meta property="og:type" content="website" />

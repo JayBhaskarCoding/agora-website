@@ -1013,6 +1013,28 @@
       canvas.setAttribute('aria-hidden', 'true');
       doc.body.insertBefore(canvas, doc.body.firstChild);
 
+      // The dots use the same brand channels the stylesheet exposes, read back
+      // from CSS so the canvas follows the active theme instead of painting
+      // dark-mode colours onto a light page. The literals are only a fallback
+      // for the (unexpected) case of the custom properties being unreadable.
+      var FALLBACK_BLUE = '96,165,250';
+      var FALLBACK_ACCENT = '139,92,246';
+
+      function readPalette() {
+        try {
+          var styles = window.getComputedStyle(doc.documentElement);
+          // Computed custom properties come back with the source spacing, e.g.
+          // "109, 40, 217"; the canvas wants a bare "r,g,b" triple.
+          var blue = (styles.getPropertyValue('--blue-rgb') || '').replace(/\s+/g, '');
+          var accent = (styles.getPropertyValue('--accent-rgb') || '').replace(/\s+/g, '');
+          return { blue: blue || FALLBACK_BLUE, accent: accent || FALLBACK_ACCENT };
+        } catch (error) {
+          return { blue: FALLBACK_BLUE, accent: FALLBACK_ACCENT };
+        }
+      }
+
+      var palette = readPalette();
+
       var width = 0;
       var height = 0;
       var density = 36;
@@ -1060,7 +1082,7 @@
           var y = (dot.row * density) + driftY - density;
           var radius = 0.7 + (wave * 0.55) + (pulse * 0.7);
           var alpha = 0.045 + (wave * 0.028) + (pulse * 0.06);
-          var color = (dot.column + dot.row) % 4 === 0 ? '96,165,250' : '139,92,246';
+          var color = (dot.column + dot.row) % 4 === 0 ? palette.blue : palette.accent;
 
           context.beginPath();
           context.fillStyle = 'rgba(' + color + ',' + alpha + ')';
@@ -1073,6 +1095,26 @@
 
       resize();
       window.addEventListener('resize', resize, { passive: true });
+
+      // Follow the OS if the scheme flips mid-session. A paused canvas (the
+      // reduced-motion path draws a single frame and never loops) will not
+      // repaint by itself, so nudge one frame through in that case.
+      function onSchemeChange() {
+        palette = readPalette();
+        if (reduceMotion()) {
+          draw(window.performance && window.performance.now ? window.performance.now() : 0);
+        }
+      }
+
+      if (typeof window.matchMedia === 'function') {
+        var schemeQuery = window.matchMedia('(prefers-color-scheme: light)');
+        if (typeof schemeQuery.addEventListener === 'function') {
+          schemeQuery.addEventListener('change', onSchemeChange);
+        } else if (typeof schemeQuery.addListener === 'function') {
+          schemeQuery.addListener(onSchemeChange); // Safari < 14
+        }
+      }
+
       draw(0);
     }
 

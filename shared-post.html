@@ -6,7 +6,11 @@
   <title>Someone shared an Agora post with you</title>
   <meta name="description" content="It looks like someone shared an Agora post with you, but you don't have the app installed yet. Download Agora for Android — free, no ads, no tracking." />
   <meta name="robots" content="noindex, follow" />
+  <!-- Browser chrome colour. The unqualified tag is the fallback for engines
+       that ignore `media`; the two scoped tags let the OS pick the right one. -->
   <meta name="theme-color" content="#0A0B0E" />
+  <meta name="theme-color" content="#0A0B0E" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#F7F9FC" media="(prefers-color-scheme: light)" />
 
   <!-- Open Graph / Twitter (used when the link lands in chat apps) -->
   <meta property="og:type" content="website" />
