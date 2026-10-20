@@ -143,9 +143,16 @@ non-dot copy, keeping a single source of truth.
 
 ## Dynamic download links
 
-Every download CTA downloads the newest `.apk` from
+**Exactly one element on the whole site downloads the APK**: the *Download APK*
+button on `download.html`. Every other *Get the app* CTA — the header button, the
+mobile-menu button, the home hero, the home closing panel, the About panel and
+the shared-post card — is ordinary navigation to `/download.html`, so the install
+decision happens on the one page that carries the version, size and requirements
+next to it. Those links are PJAX-routed like any other internal link.
+
+That one button downloads the newest `.apk` from
 [`JayBhaskarCoding/agora-android`](https://github.com/JayBhaskarCoding/agora-android)
-— **without JavaScript and without touching the GitHub API**. Shipping a build
+**without JavaScript and without touching the GitHub API**. Shipping a build
 means publishing a GitHub release; the website needs no edit at all.
 
 ### The load-bearing URL
@@ -168,27 +175,49 @@ disabled, in a rate-limit outage, or on a host with no serverless functions.
 
 ### Markup contract
 
-A download CTA carries `.dynamic-download-btn` (the primary one on each page also
-has `id="dynamic-download-btn"`) and its authored `href` is the redirect above —
-never a tag-pinned `/releases/download/<tag>/…` URL:
+Two kinds of CTA, and the difference is load-bearing.
+
+**The one download button** (`download.html` only) carries
+`.dynamic-download-btn` and `id="dynamic-download-btn"`, and its authored `href`
+is the redirect above — never a tag-pinned `/releases/download/<tag>/…` URL:
 
 ```html
 <a id="dynamic-download-btn"
-   class="btn btn--primary btn--get-app btn--lg dynamic-download-btn"
+   class="btn btn--primary btn--lg btn--block dynamic-download-btn"
    href="https://github.com/JayBhaskarCoding/agora-android/releases/latest/download/app.apk">
+  Download APK
+</a>
+```
+
+It deliberately has **no** `data-page` attribute: `syncPageLinks()` rewrites
+`a[data-page]` hrefs on every PJAX boot and would otherwise clobber the download
+URL (it also skips `.dynamic-download-btn` explicitly).
+
+**Every other CTA** is a plain internal link using the repo's normal routing
+convention, so it works with JS off and is swapped in place by PJAX when JS is
+on. These must *not* carry the dynamic marker, or `applyReleaseToPage()` would
+turn them back into a direct download:
+
+```html
+<a class="btn btn--primary btn--get-app btn--lg"
+   href="/download.html" data-page="download">
   Get the app
 </a>
 ```
 
-These anchors deliberately have **no** `data-page` attribute: `syncPageLinks()`
-rewrites `a[data-page]` hrefs on every PJAX boot and would otherwise clobber the
-download URL (it also skips `.dynamic-download-btn` explicitly).
+`test_download_ctas` and `test_only_the_download_page_exposes_the_asset` enforce
+both halves: exactly one element site-wide may carry the release href or the
+marker, and every other CTA must resolve to `/download.html`.
 
 ### What the API lookup adds
 
 `initDynamicDownload()` (run from `bootPage()` on first load and after every
 route swap) is an *enhancement*, never the thing standing between a visitor and
-the file. It does two jobs the redirect cannot:
+the file. It bails out unless the page has a download button **or** a
+`[data-download-*]` facts hook — which matters now, because `index.html` and
+`shared-post.html` display the size but no longer carry a button. Keying off the
+facts too is what keeps those chips live instead of frozen at their authored
+fallback. It does two jobs the redirect cannot:
 
 1. **Resolve a differently named asset.** If a release ships `app-release-v1.apk`
    instead of `app.apk`, the redirect would 404 — the lookup finds the real asset

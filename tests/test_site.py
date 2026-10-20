@@ -17,21 +17,39 @@ PENDING_ASSETS = {
     "/assets/yashvardhan-bhaskar.jpg",
 }
 LOGO = "/assets/agora-logo.svg"
-# Download CTAs never pin a build. They ship with GitHub's permanent
+# Exactly ONE element site-wide downloads the APK: the "Download APK" button on
+# download.html. It never pins a build — it ships with GitHub's permanent
 # latest-release redirect, which resolves server-side to the newest release's
-# app.apk — a real download with no JavaScript and no API quota. app.js only
+# app.apk, a real download with no JavaScript and no API quota. app.js only
 # overrides it when a release names its asset something else.
+#
+# Every other "Get the app" CTA is plain page navigation to the download page,
+# so the install decision happens on the one page carrying version, size and
+# requirements. Authored with the repo's own routing convention so the no-JS
+# path works and PJAX treats it like any internal link.
 PREFERRED_APK = "app.apk"
 RELEASES_PAGE = "https://github.com/JayBhaskarCoding/agora-android/releases/latest"
 RELEASE_DOWNLOAD = f"{RELEASES_PAGE}/download/{PREFERRED_APK}"
 RELEASE_API = "https://api.github.com/repos/JayBhaskarCoding/agora-android/releases/latest"
 RELEASE_PROXY = "/api/latest-release"
 DYNAMIC_ATTR = "dynamic-download-btn"
+DOWNLOAD_PAGE = "/download.html"
+# Pages carrying the one direct-download button.
 DYNAMIC_CTAS = Counter(
     {
-        "index.html": 4,      # nav CTA, mobile menu, hero, closing panel
-        "about.html": 3,      # nav CTA, mobile menu, #get-app panel
-        "download.html": 3,   # nav CTA, mobile menu, Download APK
+        "index.html": 0,
+        "about.html": 0,
+        "download.html": 1,   # the "Download APK" button only
+        "shared-post.html": 0,
+        "credits.html": 0,
+    }
+)
+# Pages carrying "Get the app" CTAs that navigate to the download page instead.
+PAGE_CTAS = Counter(
+    {
+        "index.html": 4,        # nav CTA, mobile menu, hero, closing panel
+        "about.html": 3,        # nav CTA, mobile menu, #get-app panel
+        "download.html": 2,     # nav CTA, mobile menu
         "shared-post.html": 2,  # nav CTA, shared-card block button
         "credits.html": 0,
     }
@@ -81,9 +99,17 @@ class LaunchContract(unittest.TestCase):
                 self.assertEqual(icons[0]["type"], "image/svg+xml")
 
     def test_download_ctas(self):
-        """Every download CTA is dynamic: the HTML carries the release page as a
-        safe fallback and app.js swaps in the newest .apk at runtime."""
-        counts = Counter()
+        """One button downloads the file; every other CTA navigates to the page.
+
+        The "Download APK" button on download.html is the only element carrying
+        GitHub's permanent release redirect and the dynamic marker. All other
+        "Get the app" CTAs are ordinary internal links to /download.html, so
+        they must NOT carry the marker -- or app.js would rewrite them back into
+        a direct download -- and SHOULD carry data-page so the router resolves
+        them like any other internal link (and PJAX swaps them in place).
+        """
+        downloading = Counter()
+        navigating = Counter()
         for name, page in self.pages.items():
             primary_ids = sum(
                 1 for tag, attrs in page.tags if tag == "a" and attrs.get("id") == DYNAMIC_ATTR
@@ -97,29 +123,67 @@ class LaunchContract(unittest.TestCase):
                         # Plain page links ("Download" in nav/footer) stay internal.
                         self.assertNotIn(DYNAMIC_ATTR, classes)
                         continue
-                    counts[name] += 1
-                    self.assertIn(DYNAMIC_ATTR, classes)
+
                     self.assertIn("btn--primary", classes)
-                    self.assertEqual(
-                        attrs.get("href"),
-                        RELEASE_DOWNLOAD,
-                        "Authored href must be the permanent direct-download redirect",
-                    )
-                    self.assertNotIn("data-page", attrs, "Routing must not override the release URL")
-                    self.assertNotIn("download", attrs, "GitHub handles the cross-origin attachment")
-                    self.assertNotIn("target", attrs)
                     if label == "Download APK":
-                        self.assertEqual(name, "download.html")
+                        downloading[name] += 1
+                        self.assertEqual(
+                            name, "download.html",
+                            "only the download page may offer the file directly")
+                        self.assertIn(DYNAMIC_ATTR, classes)
+                        self.assertEqual(
+                            attrs.get("href"), RELEASE_DOWNLOAD,
+                            "Authored href must be the permanent direct-download redirect")
+                        self.assertNotIn("data-page", attrs,
+                                         "Routing must not rewrite the release URL")
+                        self.assertNotIn("download", attrs,
+                                         "GitHub handles the cross-origin attachment")
+                        self.assertNotIn("target", attrs)
                     else:
                         self.assertEqual(label, "Get the app")
+                        navigating[name] += 1
+                        self.assertEqual(
+                            attrs.get("href"), DOWNLOAD_PAGE,
+                            "every other CTA must navigate to the download page")
+                        self.assertEqual(attrs.get("data-page"), "download")
+                        self.assertNotIn(
+                            DYNAMIC_ATTR, classes,
+                            "a navigating CTA must not be rewritable into a download")
+                        self.assertNotIn("id", attrs,
+                                         "the primary download id belongs to one element")
+
             self.assertEqual(
                 primary_ids,
                 1 if DYNAMIC_CTAS[name] else 0,
-                "Exactly one primary id=\"dynamic-download-btn\" per page with CTAs",
+                "Exactly one primary id=\"dynamic-download-btn\", and only where a file downloads",
             )
             if name != "download.html":
                 self.assertNotIn("download apk", (ROOT / name).read_text().lower())
-        self.assertEqual(dict(counts), {k: v for k, v in DYNAMIC_CTAS.items() if v})
+
+        self.assertEqual(dict(downloading), {k: v for k, v in DYNAMIC_CTAS.items() if v})
+        self.assertEqual(dict(navigating), {k: v for k, v in PAGE_CTAS.items() if v})
+        self.assertEqual(sum(downloading.values()), 1,
+                         "exactly one element site-wide may download the APK")
+        self.assertEqual(sum(navigating.values()), sum(PAGE_CTAS.values()))
+
+    def test_only_the_download_page_exposes_the_asset(self):
+        """No page other than download.html may mention the release asset, so a
+        visitor cannot end up downloading from somewhere the version, size and
+        requirements are not on screen."""
+        for name in self.pages:
+            html = (ROOT / name).read_text()
+            with self.subTest(page=name):
+                if name == "download.html":
+                    self.assertEqual(html.count(RELEASE_DOWNLOAD), 1)
+                    self.assertEqual(html.count(DYNAMIC_ATTR), 2,
+                                     "the id and the class on that one button")
+                else:
+                    self.assertNotIn(RELEASE_DOWNLOAD, html)
+                    self.assertNotIn(DYNAMIC_ATTR, html)
+                    self.assertNotIn("releases/latest/download", html)
+        # app.js still resolves the asset, but only for that one selector.
+        app = (ROOT / "app.js").read_text()
+        self.assertIn("#dynamic-download-btn, .dynamic-download-btn", app)
 
     def test_no_hardcoded_release_assets(self):
         """No file may pin a tag/build. The only allowed .apk href is GitHub's
@@ -155,6 +219,8 @@ class LaunchContract(unittest.TestCase):
             "fetchReleaseJson(RELEASE_PROXY_URL)",
             "fetchReleaseJson(RELEASE_API_URL)",             # direct GitHub fallback
             "initDynamicDownload();",                        # reruns on every PJAX swap
+            "RELEASE_FACTS_SELECTOR",                        # facts refresh without a button
+            "!doc.querySelector(RELEASE_FACTS_SELECTOR)) return;",
             "if (isDynamicDownloadLink(link)) return;",      # routing must not clobber hrefs
             "agora.latestRelease",                           # sessionStorage cache key
             "sessionStorage",
@@ -196,6 +262,10 @@ class LaunchContract(unittest.TestCase):
         app = (ROOT / "app.js").read_text()
         for hook in ["'data-download-tag'", "'data-download-file'", "'data-download-size'"]:
             self.assertIn(hook, app)
+        # index.html and shared-post.html show the size but no longer carry a
+        # download button, so the lookup has to key off the facts themselves or
+        # those chips would freeze at their authored fallback forever.
+        self.assertIn("[data-download-tag], [data-download-file], [data-download-size]", app)
 
     def test_contact_links(self):
         for page in self.pages.values():

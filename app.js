@@ -73,9 +73,10 @@
   function syncPageLinks() {
     var links = doc.querySelectorAll('a[data-page]');
     Array.prototype.forEach.call(links, function (link) {
-      // Download CTAs are owned by initDynamicDownload: their href points at
-      // the newest release asset (or GitHub's permanent latest-release
+      // The download page's APK button is owned by initDynamicDownload: its
+      // href is the newest release asset (or GitHub's permanent latest-release
       // redirect), so page routing must never rewrite it to /download.html.
+      // Every other CTA is a plain page link and SHOULD be resolved here.
       if (isDynamicDownloadLink(link)) return;
       var target = PAGE_MAP[link.getAttribute('data-page')];
       if (target) link.setAttribute('href', target);
@@ -1509,10 +1510,17 @@
 
   /* ------------------------------------------------------------
      9. DYNAMIC DOWNLOAD LINK
-     Every "Get the app" / "Download APK" CTA carries
-     .dynamic-download-btn (the primary one on each page also has
-     id="dynamic-download-btn") and ships in the HTML with GitHub's
-     permanent latest-release redirect as its href:
+     Exactly ONE element on the whole site downloads the APK: the
+     "Download APK" button on download.html, marked
+     .dynamic-download-btn / id="dynamic-download-btn". Every other
+     "Get the app" CTA is ordinary page navigation to
+     /download.html, authored href="/download.html"
+     data-page="download", so the install decision happens on the one
+     page that can carry the version, size and requirements next to
+     it. Those links are also PJAX-routed like any internal link.
+
+     That single button ships in the HTML with GitHub's permanent
+     latest-release redirect as its href:
 
        …/agora-android/releases/latest/download/app.apk
 
@@ -1528,7 +1536,8 @@
        · resolve the exact asset when a release names its file
          something other than app.apk (older builds such as
          app-release-v1.apk), where the redirect would 404
-       · refresh the version/filename/size facts on the page
+       · refresh the version/filename/size facts, which appear on
+         download.html and also on the home and shared-post pages
 
      Lookup order, cheapest and most reliable first:
        1. sessionStorage   — one call per tab, reused across PJAX swaps
@@ -1536,6 +1545,10 @@
        3. api.github.com   — direct, in case the Function is unavailable
      ------------------------------------------------------------ */
   var DOWNLOAD_BUTTON_SELECTOR = '#dynamic-download-btn, .dynamic-download-btn';
+  // Version facts are shown on pages that no longer carry a download button
+  // (the home closing panel and the shared-post card both quote the size), so
+  // the lookup has to run for these too, not only for the button.
+  var RELEASE_FACTS_SELECTOR = '[data-download-tag], [data-download-file], [data-download-size]';
   var RELEASE_PROXY_URL = '/api/latest-release';
   var RELEASE_API_URL = 'https://api.github.com/repos/JayBhaskarCoding/agora-android/releases/latest';
   var RELEASE_PAGE_URL = 'https://github.com/JayBhaskarCoding/agora-android/releases/latest';
@@ -1764,7 +1777,8 @@
 
   function initDynamicDownload() {
     try {
-      if (!doc.querySelector(DOWNLOAD_BUTTON_SELECTOR)) return;
+      if (!doc.querySelector(DOWNLOAD_BUTTON_SELECTOR)
+        && !doc.querySelector(RELEASE_FACTS_SELECTOR)) return;
 
       // PJAX swaps the header/main and re-runs bootPage, so re-apply from the
       // in-memory or sessionStorage cache first — no extra network round trip.
