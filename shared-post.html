@@ -81,15 +81,21 @@
       </section>
 
       <!-- ============ SHARED POST PREVIEW ============
-           Filled in by app.js (initSharedPost): it reads the post id from
-           the PATH — /post/<id> and /p/<id>, the routes `_redirects`
-           rewrites here with a 200, which leaves location.search empty —
-           and falls back to ?post= / ?post_id= / ?id= for legacy links.
-           The backend fetch is stubbed until the API exists. -->
+           /post/<id> is served by functions/post/[id].js, which resolves the
+           author in Supabase and writes the card below into this HTML before
+           it is sent — the same lookup is what puts the author into the og:*
+           tags a chat app scrapes without ever running a script.
+
+           app.js (initSharedPost) then reads the post id from the PATH
+           (/post/<id>, /p/<id> — the routes `_redirects` rewrites here with a
+           200, which leaves location.search empty) with ?post= / ?post_id= /
+           ?id= as a fallback, and owns the chip, the "no id" / "invalid id"
+           states, the avatar's load-or-fallback swap, and the Android intent
+           link. It never fetches the post itself. -->
       <section class="post-preview" id="post-preview" data-reveal data-reveal-delay="120" aria-live="polite">
         <div class="post-preview__bar">
           <span class="post-preview__label">Shared post</span>
-          <span class="chip chip--idle" data-post-id>reading link…</span>
+          <span class="chip chip--idle" data-post-id>shared link</span>
         </div>
 
         <div class="post-preview__body">
@@ -103,32 +109,45 @@
             the app — links look like <code>…/post/xxxxxxxx</code>.
           </p>
 
-          <!-- Loading state: id found, (simulated) fetch in flight -->
-          <div id="preview-loading" hidden>
-            <div class="post-preview__head">
-              <div>
-                <p class="post-preview__author">fetching author…</p>
-                <p class="post-preview__time"><span data-preview-status>fetching preview…</span></p>
-              </div>
-            </div>
-            <div class="skeleton skeleton--w1"></div>
-            <div class="skeleton skeleton--w2"></div>
-            <div class="skeleton skeleton--w3"></div>
-          </div>
+          <!-- Gone state: Supabase answered and there is no such post, so its
+               author deleted it. Kept distinct from "no id" above — different
+               cause, different advice — and from the generic member below,
+               which means "we could not look it up", not "it is gone". -->
+          <p class="post-preview__empty" id="preview-unavailable" hidden>
+            <span data-unavailable-message>That post is no longer available.</span>
+            Its author may have deleted it. The square is still open —
+            <a href="/download.html" data-page="download">get the app</a> and
+            come and see what you missed.
+          </p>
 
-          <!-- Result state: simulated payload rendered -->
-          <div id="preview-result" hidden>
+          <!-- Author card, rendered SERVER-SIDE by functions/post/[id].js so
+               the avatar and name are in the first paint and survive with
+               JavaScript off. The authored default below is the honest
+               fallback for every path the Function does not serve (/p/<id>,
+               ?post=, local dev): a real member posted something, we simply
+               did not resolve who.
+
+               Deliberately absent: the post text, its images, and its
+               like/reply counts. This page is the install prompt, not the
+               reader. -->
+          <div id="preview-result">
             <div class="post-preview__head">
-              <div>
-                <p class="post-preview__author" data-author>—</p>
-                <p class="post-preview__time"><span data-created>—</span></p>
+              <span class="post-preview__avatar" data-avatar-frame>
+                <span class="post-preview__monogram" data-monogram aria-hidden="true">A</span>
+                <img class="post-preview__avatar-img" data-avatar alt="" width="56" height="56"
+                     decoding="async" referrerpolicy="no-referrer" hidden />
+              </span>
+              <div class="post-preview__who">
+                <p class="post-preview__author" data-author>A member of the square</p>
+                <p class="post-preview__handle" data-handle hidden></p>
+                <p class="post-preview__posted">posted this on Agora.</p>
               </div>
             </div>
             <p class="post-preview__foot">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
               </svg>
-              <span data-preview-note>This is a placeholder preview. The full post — author, body, and thread — lives inside the app. Install Agora to read it.</span>
+              <span>Download the app to open it — the post, its thread and every reply live inside Agora.</span>
             </p>
           </div>
 

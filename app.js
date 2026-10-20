@@ -558,13 +558,19 @@
      connected, so the page is already structured for it:
 
        1. PARSE  — resolve the post id from the URL (see below)
-       2. FETCH  — GET /api/v1/posts/:id  (stubbed below)
-       3. RENDER — author, body, and thread stats inside
-                    #post-preview
+       2. RENDER — the author card, already in the HTML
+       3. OFFER  — the Android intent link, where it resolves
 
-     Until then, step 2 resolves with a simulated payload after
-     a short delay and the preview renders in a placeholder
-     state — exactly what a visitor would see pre-launch.
+     Step 2 is server-side. functions/post/[id].js looks the post
+     up in Supabase and writes the author into shared-post.html
+     before it is sent, which is what puts the avatar in the first
+     paint, keeps the card correct with JavaScript off, and — the
+     reason it cannot be done here — fills the og:* tags that a
+     chat app scrapes without ever running a script.
+
+     So this function never fetches the post. It reacts to what the
+     server rendered, and only decides the states the server cannot
+     see: no id, an unreadable id, and the intent link.
 
      ---- WHY THE ID COMES FROM THE PATH, NOT THE QUERY ----
      Share links are pretty: /post/<id>, plus the short /p/<id>.
@@ -679,16 +685,38 @@
       ';S.browser_fallback_url=' + encodeURIComponent(fallback) + ';end';
   }
 
+  /* The avatar is a third-party URL — Supabase Storage, or a Google CDN for
+     members who signed in with Google — so it can be slow, blocked by a
+     network, or deleted after the page was cached. The frame always paints the
+     member's initial underneath, and the image is only trusted once it has
+     really loaded; a failure leaves the initial in place instead of a
+     broken-image glyph. */
+  function initAvatarFallback(scope) {
+    var frame = scope.querySelector('[data-avatar-frame]');
+    var image = scope.querySelector('[data-avatar]');
+    if (!frame || !image || !image.getAttribute('src')) return;
+
+    function settle(loaded) {
+      image.hidden = !loaded;
+      frame.classList.toggle('has-avatar', loaded);
+    }
+
+    if (image.complete && image.naturalWidth > 0) {
+      settle(true);
+      return;
+    }
+    image.addEventListener('load', function () { settle(true); });
+    image.addEventListener('error', function () { settle(false); });
+  }
+
   function initSharedPost() {
     var preview = doc.getElementById('post-preview');
     if (!preview) return;
 
     var chip = preview.querySelector('[data-post-id]');
-    var status = preview.querySelector('[data-preview-status]');
-    var body = preview.querySelector('[data-preview-body]');
     var emptyState = doc.getElementById('preview-empty');
     var emptyMessage = emptyState ? emptyState.querySelector('[data-empty-message]') : null;
-    var loadingState = doc.getElementById('preview-loading');
+    var unavailableState = doc.getElementById('preview-unavailable');
     var resultState = doc.getElementById('preview-result');
     var actionsState = doc.getElementById('preview-actions');
     var openInApp = actionsState ? actionsState.querySelector('[data-open-in-app]') : null;
@@ -704,8 +732,8 @@
         emptyMessage.textContent = missing ? EMPTY_MISSING_MESSAGE : EMPTY_MALFORMED_MESSAGE;
       }
       if (emptyState) emptyState.hidden = false;
-      if (loadingState) loadingState.hidden = true;
       if (resultState) resultState.hidden = true;
+      if (unavailableState) unavailableState.hidden = true;
       if (actionsState) actionsState.hidden = true;
       if (chip) {
         // textContent only, never innerHTML: the id is attacker-controlled
@@ -719,14 +747,17 @@
 
     var postId = resolved.id;
 
+    // The author card is left exactly as the server rendered it: on /post/<id>
+    // that is the real member, on a deleted post it is the "no longer
+    // available" note, and on any path the Function does not serve it is the
+    // honest generic fallback. Only the id-dependent states are ours to set.
     if (emptyState) emptyState.hidden = true;
-    if (loadingState) loadingState.hidden = false; // show the skeleton while "fetching"
     if (chip) {
       chip.textContent = 'post #' + shortenPostId(postId);
       chip.classList.remove('chip--idle');   // resolved: leave the idle styling behind
       chip.setAttribute('title', 'Post ' + postId + ' — id read from the link ' + resolved.source);
     }
-    if (status) status.textContent = 'fetching preview…';
+    initAvatarFallback(preview);
 
     /* Offer the app itself, but only where intent:// actually resolves. */
     if (actionsState && openInApp && supportsIntentUrls()) {
@@ -734,70 +765,6 @@
       actionsState.hidden = false;
     }
 
-    /* --- 2. FETCH (stub) ------------------------------------ */
-    function fetchPost(id) {
-      /*
-      Real implementation once the API is live — the stub below
-      mirrors its signature and payload shape:
-
-        var res = await fetch(
-          'https://api.agora.example/api/v1/posts/' + encodeURIComponent(id)
-        );
-        if (!res.ok) throw new Error('Post ' + id + ' not found (' + res.status + ')');
-        return res.json();
-
-      Expected payload:
-        {
-          "id":        "a8f3c2",
-          "author":    { "name": "…", "handle": "@…" },
-          "body":      "The shared post text…",
-          "createdAt": "2026-09-28T10:24:00Z",
-          "replies":   12,
-          "reposts":   3
-        }
-      */
-      return new Promise(function (resolve) {
-        window.setTimeout(function () {
-          resolve({
-            id: id,
-            author: { name: 'A member of the square', handle: '@member' },
-            body: null,          // content is rendered inside the app
-            createdAt: null,
-            replies: 0,
-            reposts: 0
-          });
-        }, 1200);
-      });
-    }
-
-    /* --- 3. RENDER ------------------------------------------- */
-    function renderPreview(post) {
-      if (!resultState || !loadingState) return;
-
-      loadingState.hidden = true;
-      resultState.hidden = false;
-
-      var author = resultState.querySelector('[data-author]');
-      var time = resultState.querySelector('[data-created]');
-      var note = resultState.querySelector('[data-preview-note]');
-
-      if (author && post.author) {
-        author.textContent = post.author.name + '  ' + post.author.handle;
-      }
-      if (time) {
-        time.textContent = post.createdAt ? 'just now' : 'time arrives with the app';
-      }
-      if (note) {
-        note.textContent = post.body
-          ? post.body
-          : 'This is a placeholder preview. The full post — author, body, and thread — ' +
-            'lives inside the app. Install Agora to read it.';
-      }
-      if (status) status.textContent = 'preview ready';
-    }
-
-    if (status) status.textContent = 'fetching preview…';
-    fetchPost(postId).then(renderPreview);
   }
 
   /* Reveal device captures and profile portraits only once loaded.

@@ -178,17 +178,102 @@ link in production, while passing every local test (where the visitor types
 `app.js` and compiles them, so the tests assert what the route *means* rather
 than merely that a regex exists.
 
-### Three UI states, not two
+### Four states, decided by two different layers
 
-| State | Trigger | Chip | Copy |
-| ----- | ------- | ---- | ---- |
-| preview | a valid id resolved | `post #0c298d8b` | skeleton → placeholder preview |
-| missing | no id anywhere | `no post id in link` | "This link doesn't include a post id." |
-| invalid | an id that fails validation | the truncated offender | "That link's post id doesn't look valid." |
+| State | Decided by | Trigger | Copy |
+| ----- | ---------- | ------- | ---- |
+| author | the Function | the post exists and a profile was found | that member's avatar, name and handle |
+| generic | the markup | the Function did not run, or found no profile | "A member of the square" |
+| gone | the Function | Supabase answered and there is no such post | "That post is no longer available." |
+| missing | `app.js` | no id anywhere in the URL | "This link doesn't include a post id." |
+| invalid | `app.js` | an id that fails validation | "That link's post id doesn't look valid." |
 
-A valid `/post/<uuid>` must never reach either error state — that was the bug.
-Telling someone their id is *missing* when the URL plainly carries one sends
-them back to the app to re-share a link that was never broken.
+A valid `/post/<uuid>` must never reach either client-side error state — that
+was the bug. Telling someone their id is *missing* when the URL plainly carries
+one sends them back to the app to re-share a link that was never broken.
+
+Note the split: **the server owns the card, the client owns the id.** `app.js`
+never writes `[data-author]` — if it did, it would overwrite the real member
+with the generic fallback on every deep link, because it has no data to put
+there. `test_app_js_never_renders_the_author` holds that line.
+
+### The author card is server-rendered, on purpose
+
+A chat app scrapes a shared URL the moment it is pasted, long before anyone
+taps it, and it never runs JavaScript. So the `og:*` / `twitter:*` tags have to
+be correct in the very first response — a client-side fetch can never produce a
+per-post link preview.
+
+Since that lookup has to happen before the HTML is returned anyway,
+`functions/post/[id].js` renders the author card into the same HTML:
+
+- the avatar and name are in the **first paint**, with no flash of a generic
+  name while a request is in flight;
+- the card still reads correctly with **JavaScript off**;
+- there is no `</script>`-escaped JSON blob to get wrong, because nothing is
+  serialised — the values are written straight into element text and attributes.
+
+The card is authored **visible**. The generic member is a truthful card for
+every path the Function does not serve (`/p/<id>`, `?post=`, local dev), so a
+visitor without scripts gets an answer instead of a hole.
+
+### What the preview shows, and what it never shows
+
+Who posted, and that a real post exists. Never the post text, its images, or
+its like/reply counts — the page proves a person posted something and sends the
+visitor to the app to read it.
+
+That boundary is enforced as data, not as a comment. The Function reads two
+allow-listed column sets:
+
+```js
+const POST_COLUMNS    = 'id,user_id,created_at';
+const PROFILE_COLUMNS = 'handle,first_name,last_name,avatar_url';
+```
+
+`profiles` is world-readable under RLS, which means anyone holding the anon key
+— and it ships inside every APK — can already read `email`, `dob`, `gender` and
+the per-device push credentials. None of that is needed to draw an avatar, so
+none of it is requested: `test_only_allow_listed_columns_are_ever_selected`
+walks every `select=` the Function builds and fails if a forbidden column
+appears in one.
+
+Two traps worth knowing before touching this code:
+
+- **`posts.user_id` carries TWO foreign keys to `profiles`** (`fk_posts_user_id`
+  and `posts_user_id_fkey`), and PostgREST refuses an ambiguous embed with
+  *"more than one relationship was found"*. The embed therefore names the
+  constraint — `profiles!fk_posts_user_id(...)` — and because that hint goes
+  stale if the constraint is ever renamed, the plain query remains as a
+  fallback, with the profile then read separately.
+- **Storage has no SELECT policy on `storage.objects`.** Anonymous avatar reads
+  work only while the `avatars` bucket stays public, so the avatar is treated as
+  best-effort: the frame always paints the member's initial underneath, and
+  `initAvatarFallback()` swaps the image in only once it has really loaded
+  (`complete` *and* `naturalWidth > 0` — a broken image reports `complete` too).
+  A failed avatar degrades to the initial, never to a broken-image glyph.
+
+### Failure is a fallback, never an error
+
+This response blocks first paint, so it is on a tight leash and every unhappy
+path hands back the static page:
+
+| Situation | Behaviour |
+| --------- | --------- |
+| no `SUPABASE_URL` / `SUPABASE_ANON_KEY` | `context.next()` — static page, untouched |
+| id is not a UUID | `context.next()`, and Supabase is never queried |
+| timeout (1500 ms), 5xx, non-JSON body, thrown error | `context.next()` |
+| `ASSETS` missing or 404 | `context.next()` |
+| post not found | the "no longer available" card, `200` |
+
+A shared link must never 500 because a preview lookup was slow.
+`test_no_failure_path_can_return_an_error_page` counts the real `return
+context.next()` statements and asserts the handler *ends* with one, so an
+unexpected throw cannot become a 5xx either.
+
+Responses are cached at the edge for 300 s but sent to the browser with
+`max-age=0`, so a scraper hitting within seconds of the share gets the enriched
+card while a visitor refreshing after a deletion sees it go away.
 
 A full UUID is 36 characters and would blow out the mono chip, so the chip
 shows the leading group and keeps the whole value in its `title`. The id is
@@ -232,13 +317,44 @@ curl -sS -o /dev/null -w '%{http_code} %{url_effective}\n' \
 instead of rewriting. Then open the link in a browser and confirm the chip
 reads `post #<first 8 chars>` with no error copy.
 
+The card and its link preview are separate checks — the page can be served
+correctly while the Function stays unconfigured:
+
+```sh
+# The author, not the generic fallback:
+curl -sS https://agora.in.net/post/<uuid> | grep -o 'data-author>[^<]*'
+# The per-post social tags a chat app scrapes:
+curl -sS https://agora.in.net/post/<uuid> | grep -oE '<meta property="og:(title|image)"[^>]*>'
+```
+
+A generic `A member of the square` plus the site's static `og:title` means the
+Function ran but found no credentials — check `SUPABASE_URL` and
+`SUPABASE_ANON_KEY` in the Pages project. Paste the link into a chat app to
+confirm the card renders the avatar; that is the behaviour the whole Function
+exists for.
+
 ## Wiring up the backend
 
-- `initSharedPost()` — `fetchPost(id)` is a stub returning a simulated
-  payload after a delay. Replace with `GET /api/v1/posts/:id` when the API is
-  live. The id arrives already resolved and validated by
-  `resolvePostId(window.location)`; still pass it through
-  `encodeURIComponent` when you build the real request.
+- `functions/post/[id].js` — Cloudflare Pages Function that owns `/post/<id>`,
+  resolves the author in Supabase and renders the card plus the `og:*` tags into
+  `shared-post.html`. See **Shared post deep links** above. It needs two
+  environment variables, and treats their absence as "serve the static page":
+
+  | Variable | Value |
+  | -------- | ----- |
+  | `SUPABASE_URL` | `https://<project-ref>.supabase.co` |
+  | `SUPABASE_ANON_KEY` | the project's **anon / publishable** key |
+
+  Set both in *Cloudflare Pages → Settings → Environment variables*, and as
+  local secrets when using `wrangler pages dev`. The anon key is a public
+  client identifier — it already ships inside every APK — but it still belongs
+  in the environment rather than in the repo, so the project can be rotated
+  without a commit. **Never** set `SUPABASE_SERVICE_ROLE_KEY` here: this
+  Function reads only what RLS already publishes.
+
+  `initSharedPost()` in `app.js` no longer fetches anything. It resolves the
+  id, sets the chip, decides the missing/invalid states, wires the avatar's
+  load-or-fallback swap, and reveals the `intent://` row.
 - `functions/api/contact.js` — Cloudflare Pages Function used by the About-page
   feedback form. It validates JSON or FormData, escapes the submitted values,
   and sends the message through Resend to `mail@agora.in.net`.

@@ -1080,8 +1080,12 @@ class SharedPostRouting(unittest.TestCase):
         self.assertIn("data-empty-message", self.html,
                       "app.js needs a hook to swap the first sentence")
         branch = self.section("if (resolved.status !== 'ok')", "var postId = resolved.id;")
-        for element in ("emptyState", "loadingState", "resultState", "actionsState"):
+        # Every state the page can be in has to be settled here, or an error
+        # link can leave a previous render on screen behind it.
+        for element in ("emptyState", "resultState", "unavailableState", "actionsState"):
             self.assertIn(element, branch, f"{element} must be settled in the error branch")
+        self.assertNotIn("loadingState", self.app,
+                         "the simulated fetch is gone; nothing should still drive a skeleton")
 
     def test_empty_state_advertises_the_clean_link_shape(self):
         self.assertIn("\u2026/post/xxxxxxxx", self.html)
@@ -1142,3 +1146,363 @@ class SharedPostRouting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+FUNCTION_PATH = ROOT / "functions" / "post" / "[id].js"
+
+
+class SharedPostCard(unittest.TestCase):
+    """The shared-post page must say WHO posted, rendered on the server.
+
+    A chat app scrapes a pasted link the moment it is sent and never runs
+    JavaScript, so anything that has to appear in the link preview must be in
+    the very first response. That is why the author card is rendered by
+    functions/post/[id].js rather than fetched by app.js: the same Supabase
+    lookup that fills og:title also writes the card into the HTML, so first
+    paint, no-JS visitors and scrapers all see the same author.
+
+    What the page must never show is the post itself. It is the install prompt,
+    not the reader. The allow-lists below are that contract, restated as data:
+    widening a query has to mean editing a test.
+    """
+
+    POST_COLUMNS = {"id", "user_id", "created_at"}
+    PROFILE_COLUMNS = {"handle", "first_name", "last_name", "avatar_url"}
+    # `profiles` is world-readable under RLS, so anyone holding the anon key --
+    # which ships inside every APK -- can already read these. None of it is
+    # needed to draw an avatar, so none of it may be requested here.
+    FORBIDDEN_COLUMNS = {
+        "email", "dob", "gender", "fcm_token", "current_device_id",
+        "active_session_id", "password_changed_at",
+        # Product boundary rather than a privacy one: no body, no media, no counts.
+        "content", "image_urls", "media_urls", "likes", "comments",
+    }
+    HOOKS = ("data-author", "data-handle", "data-monogram", "data-avatar",
+             "data-avatar-frame")
+    RETIRED_HOOKS = ("data-created", "data-preview-body", "data-preview-status",
+                     "data-preview-note")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fn = FUNCTION_PATH.read_text()
+        cls.html = (ROOT / "shared-post.html").read_text()
+        cls.css = (ROOT / "style.css").read_text()
+        cls.app = (ROOT / "app.js").read_text()
+        cls.page = Page(ROOT / "shared-post.html")
+        cls.redirects = [
+            line.split()
+            for line in (ROOT / "_redirects").read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+    # --- helpers -------------------------------------------------------
+    def elements_with(self, attribute):
+        return [(tag, attrs) for tag, attrs in self.page.tags if attribute in attrs]
+
+    def element_with_id(self, element_id):
+        found = [(tag, attrs) for tag, attrs in self.page.tags
+                 if attrs.get("id") == element_id]
+        self.assertEqual(len(found), 1, f"expected exactly one #{element_id}")
+        return found[0]
+
+    def constant(self, name):
+        match = re.search(r"^const %s = '([^']*)';$" % name, self.fn, re.MULTILINE)
+        self.assertIsNotNone(match, f"functions/post/[id].js no longer defines {name}")
+        return match.group(1)
+
+    def number_constant(self, name):
+        match = re.search(r"^const %s = (\d+);$" % name, self.fn, re.MULTILINE)
+        self.assertIsNotNone(match, f"functions/post/[id].js no longer defines {name}")
+        return int(match.group(1))
+
+    def helper_body(self, name):
+        match = re.search(r"^(?:async )?function %s\([\s\S]*?\n\}$" % name, self.fn, re.MULTILINE)
+        self.assertIsNotNone(match, f"functions/post/[id].js no longer defines {name}()")
+        return match.group(0)
+
+    # --- the authored markup -------------------------------------------
+    def test_the_author_card_is_visible_without_javascript(self):
+        # Authored visible on purpose: the generic member IS a truthful card for
+        # every path the Function does not serve (/p/<id>, ?post=, local dev),
+        # so a visitor with scripts off still gets an answer rather than a hole.
+        _tag, attrs = self.element_with_id("preview-result")
+        self.assertNotIn("hidden", attrs,
+                         "#preview-result must be server-rendered into view, not "
+                         "revealed by a script")
+
+    def test_the_gone_state_is_authored_hidden(self):
+        _tag, attrs = self.element_with_id("preview-unavailable")
+        self.assertIn("hidden", attrs,
+                      "the deleted-post note only appears when Supabase says so")
+
+    def test_the_simulated_fetch_state_is_retired(self):
+        self.assertEqual(self.elements_with("data-preview-status"), [])
+        for page in ROOT.glob("*.html"):
+            with self.subTest(page=page.name):
+                self.assertNotIn("preview-loading", page.read_text(),
+                                 "the fake 1200 ms fetch is gone; nothing should "
+                                 "still render a loading state")
+        self.assertNotIn(".skeleton", self.css,
+                         "the shimmer primitive died with the fake fetch")
+        self.assertNotIn("shimmer", self.css)
+
+    def test_every_injection_hook_the_function_writes_exists_exactly_once(self):
+        for hook in self.HOOKS:
+            with self.subTest(hook=hook):
+                self.assertEqual(len(self.elements_with(hook)), 1,
+                                 f"{hook} must appear once: the Function injects "
+                                 "by hook, and a duplicate would get only the first")
+
+    def test_the_avatar_degrades_to_a_monogram(self):
+        images = self.elements_with("data-avatar")
+        self.assertEqual(len(images), 1)
+        tag, attrs = images[0]
+        self.assertEqual(tag, "img")
+        # Authored hidden: the server unhides it only with a real https src, so
+        # a missing avatar shows the initial instead of a broken-image glyph.
+        self.assertIn("hidden", attrs)
+        self.assertEqual(attrs.get("alt"), "",
+                         "decorative: the member's name is right beside it")
+        self.assertEqual(attrs.get("referrerpolicy"), "no-referrer",
+                         "a third-party avatar must not learn who shared the link")
+        self.assertIn("width", attrs)
+        self.assertIn("height", attrs,
+                      "intrinsic size, so the card cannot jump when it loads")
+        self.assertNotIn("src", attrs,
+                         "src is written by the Function only, once it has a real "
+                         "https avatar; authoring one would paint a stranger")
+        frames = self.elements_with("data-avatar-frame")
+        self.assertEqual(len(frames), 1)
+        monograms = self.elements_with("data-monogram")
+        self.assertEqual(len(monograms), 1)
+        self.assertEqual(monograms[0][1].get("aria-hidden"), "true",
+                         "the initial is a stand-in for the picture, not content")
+
+    def test_no_post_content_hook_survives(self):
+        for hook in self.RETIRED_HOOKS:
+            with self.subTest(hook=hook):
+                self.assertEqual(self.elements_with(hook), [],
+                                 f"{hook} belonged to the simulated payload")
+                self.assertNotIn(f"[{hook}]", self.app,
+                                 "app.js must not query a hook the card no longer has")
+
+    def test_the_page_never_offers_a_reading_time_or_counts(self):
+        preview = self.html.split('id="post-preview"', 1)[1]
+        for word in ("likes", "replies", "reposts", "views"):
+            with self.subTest(word=word):
+                self.assertNotRegex(preview, re.compile(r">\s*[^<]*\b%s\b" % word, re.I),
+                                    "the page proves a person posted; it does not "
+                                    "publish engagement numbers")
+
+    # --- the Function's privacy boundary --------------------------------
+    def test_the_column_allow_lists_are_exact(self):
+        self.assertEqual(set(self.constant("POST_COLUMNS").split(",")), self.POST_COLUMNS)
+        self.assertEqual(set(self.constant("PROFILE_COLUMNS").split(",")), self.PROFILE_COLUMNS)
+
+    def test_only_allow_listed_columns_are_ever_selected(self):
+        # Every select list is assembled from the two constants, so the only way
+        # to widen what leaves the database is to widen the allow-list -- which
+        # the test above fails on. Asserting the OPERATION avoids the trap of
+        # grepping the whole file, where the Function's own explanatory comment
+        # legitimately names the columns it refuses to read.
+        found = list(re.finditer(r"select=", self.fn))
+        self.assertEqual(len(found), 3, "expected the embedded, plain and profile queries")
+        for match in found:
+            window = self.fn[match.start():match.start() + 220]
+            with self.subTest(window=window[:60]):
+                self.assertIn("encodeURIComponent(", window,
+                              "a select list must be URL-encoded before it is sent")
+                self.assertRegex(window, r"POST_COLUMNS|PROFILE_COLUMNS",
+                                 "a select list must come from the allow-list constants")
+                for column in self.FORBIDDEN_COLUMNS:
+                    self.assertNotRegex(window, re.compile(r"\b%s\b" % column),
+                                        f"{column} must never be requested")
+
+    def test_the_ambiguous_foreign_key_is_named_explicitly(self):
+        # posts.user_id carries TWO foreign keys to profiles, and PostgREST
+        # refuses an ambiguous embed. The hint has to keep matching the real
+        # constraint name, or every preview silently loses its author.
+        self.assertEqual(self.constant("PROFILE_FK_HINT"), "fk_posts_user_id")
+        self.assertIn("profiles!${PROFILE_FK_HINT}", self.fn)
+        # ...and because a renamed constraint would break it, the plain query
+        # has to remain as a fallback rather than the only path.
+        self.assertIn("catch (embedError)", self.fn)
+
+    # --- the Function's injection safety --------------------------------
+    def test_every_value_written_into_the_html_is_escaped(self):
+        for name in ("setMeta", "setTitle", "setText", "setAvatarImage"):
+            with self.subTest(helper=name):
+                self.assertIn("escapeHtml(", self.helper_body(name),
+                              f"{name} writes database text into HTML; it must escape")
+
+    def test_escaping_covers_the_attribute_breaking_characters(self):
+        body = self.helper_body("escapeHtml")
+        for char, entity in (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"),
+                             ('"', "&quot;"), ("'", "&#39;")):
+            with self.subTest(char=char):
+                self.assertIn(entity, body,
+                              f"{char} must become {entity}: display names land in "
+                              "element text, in attributes and in og: tags")
+        # & first, or every later entity gets double-escaped.
+        self.assertLess(body.index("&amp;"), body.index("&lt;"))
+
+    def test_avatars_must_be_absolute_https_urls(self):
+        body = self.helper_body("cleanImageUrl")
+        self.assertIn("https:", body, "an http:// or javascript: avatar is refused")
+        self.assertIn("2048", body, "an unbounded URL is a smuggled payload")
+
+    def test_a_non_uuid_id_never_reaches_the_database(self):
+        pattern = re.search(r"^const UUID_PATTERN = /([^;\n]+)/i;$", self.fn, re.MULTILINE)
+        self.assertIsNotNone(pattern, "the id guard vanished")
+        compiled = re.compile(pattern.group(1), re.IGNORECASE)
+        self.assertTrue(compiled.pattern.startswith("^") and compiled.pattern.endswith("$"),
+                        "the guard must be anchored, or a suffix of a UUID passes")
+        self.assertTrue(compiled.match("a3a7d592-6a5e-4108-b102-3c5a9c2d40a0"))
+        for bad in ("a3a7d592-6a5e-4108-b102-3c5a9c2d40a0 OR 1=1", "a8f3c2",
+                    "../../etc/passwd", ""):
+            with self.subTest(bad=bad):
+                self.assertIsNone(compiled.match(bad))
+        # ...and the guard has to hand back the static page, not an error.
+        guard = self.fn.split("UUID_PATTERN.test", 1)[1][:220]
+        self.assertIn("context.next()", guard)
+
+    # --- the Function's failure behaviour -------------------------------
+    def handler_body(self, name):
+        match = re.search(r"export async function %s\(context\) \{([\s\S]*?)\n\}$" % name,
+                          self.fn, re.MULTILINE)
+        self.assertIsNotNone(match, f"functions/post/[id].js no longer exports {name}")
+        return match.group(1)
+
+    def test_no_failure_path_can_return_an_error_page(self):
+        # A shared link that 500s is worse than a generic card. Every unhappy
+        # outcome has to fall through to the static asset instead.
+        #
+        # Counted as real statements, not as the bare string: the header comment
+        # also names context.next(), so counting that would let a fallback be
+        # deleted while the total still looked right.
+        statements = re.findall(r"^\s*.*return context\.next\(\);", self.fn, re.MULTILINE)
+        statements = [line for line in statements if not line.strip().startswith("//")]
+        self.assertEqual(len(statements), 2,
+                         "expected next() for a non-UUID id and as the handler's "
+                         f"final fall-through, got {statements}")
+
+        handler = self.handler_body("onRequestGet")
+        self.assertTrue(handler.rstrip().endswith("return context.next();"),
+                        "the handler must END by falling through to the static "
+                        "page, so an unexpected throw cannot become a 500")
+        self.assertIn("try {", handler)
+        self.assertIn("catch (error)", handler,
+                      "buildResponse is awaited inside a try: a rendering bug "
+                      "must degrade, not break the link")
+        self.assertIn("console.error", handler)
+        self.assertNotRegex(self.fn, r"status:\s*5\d\d")
+        self.assertNotIn("onRequestPost", self.fn)
+
+        head = self.handler_body("onRequestHead")
+        self.assertIn("await onRequestGet(context)", head,
+                      "HEAD must produce the same tags as GET, body aside")
+        self.assertIn("new Response(null", head)
+
+    def test_the_lookup_is_time_boxed_so_first_paint_cannot_hang(self):
+        timeout = self.number_constant("SUPABASE_TIMEOUT_MS")
+        self.assertLessEqual(timeout, 2000,
+                             "this response blocks first paint; a slow Supabase "
+                             "must cost the avatar, not the page")
+        self.assertGreater(timeout, 0)
+        body = self.helper_body("fetchPostAuthor")
+        self.assertIn("AbortController", body)
+        # Assert the live statement inside a real finally block: a bare
+        # "clearTimeout" substring still passes when the call is disabled.
+        settled = re.search(r"\} finally \{([\s\S]*?)\n  \}", body)
+        self.assertIsNotNone(settled, "the abort timer must be cleared on every path")
+        self.assertIn("if (timer) clearTimeout(timer);", settled.group(1),
+                      "guarded only by whether a timer was created")
+        self.assertIn("'unconfigured'", body,
+                      "no credentials means serve the static page, not an error")
+
+    def test_the_response_is_edge_cached_but_browser_revalidated(self):
+        ttl = self.number_constant("EDGE_TTL_SECONDS")
+        self.assertEqual(ttl, 300)
+        self.assertIn("max-age=0", self.fn,
+                      "a browser must re-ask, so a deleted post disappears")
+        self.assertIn("s-maxage=${EDGE_TTL_SECONDS}", self.fn,
+                      "the edge may hold it: scrapers hit this within seconds")
+        self.assertIn("stale-while-revalidate", self.fn)
+
+    def test_head_requests_are_answered_rather_than_rejected(self):
+        self.assertIn("export async function onRequestHead", self.fn,
+                      "a scraper probing HEAD must not get a 405")
+
+    def test_the_landing_page_matches_the_rewrite_destination(self):
+        self.assertEqual(self.constant("LANDING_PAGE"), "/shared-post.html")
+        destinations = {rule[0]: rule[1] for rule in self.redirects}
+        self.assertEqual(destinations["/post/:id"], self.constant("LANDING_PAGE"),
+                         "the Function has to fetch the same file _redirects serves")
+
+    def test_the_og_fallback_image_exists(self):
+        fallback = self.constant("FALLBACK_OG_IMAGE")
+        self.assertTrue(fallback.startswith("/assets/"))
+        self.assertTrue((ROOT / fallback.lstrip("/")).is_file(),
+                        f"{fallback} is promised as og:image but is not in the repo")
+        self.assertTrue(fallback.endswith(".jpg"),
+                        "chat apps do not render an SVG og:image reliably")
+
+    # --- what app.js is still allowed to do -----------------------------
+    def test_app_js_never_renders_the_author(self):
+        # The server owns the card. A client-side write would clobber the real
+        # author with the generic fallback on every deep link.
+        self.assertNotIn("data-author", self.app)
+        self.assertNotIn("data-handle", self.app)
+        self.assertNotIn("data-monogram", self.app)
+        self.assertNotIn("api.agora.example", self.app, "the stub API host is gone")
+        self.assertNotIn("renderPreview", self.app)
+        self.assertNotIn("fetchPost", self.app)
+
+    def test_app_js_only_trusts_an_avatar_that_really_painted(self):
+        match = re.search(r"^  function initAvatarFallback\([\s\S]*?\n  \}$",
+                          self.app, re.MULTILINE)
+        self.assertIsNotNone(match, "the avatar load/error handler vanished")
+        body = match.group(0)
+        self.assertIn("addEventListener('load'", body)
+        self.assertIn("addEventListener('error'", body)
+        self.assertIn("naturalWidth", body,
+                      "complete alone is not enough: a broken image reports it too")
+        self.assertIn("getAttribute('src')", body,
+                      "with no src there is nothing to settle and the initial stands")
+        self.assertIn("initAvatarFallback(preview)", self.app,
+                      "the handler has to be wired into the shared-post boot")
+
+    def test_the_avatar_card_is_styled_and_cannot_escape_its_circle(self):
+        for selector in (".post-preview__avatar", ".post-preview__avatar-img",
+                         ".post-preview__monogram", ".post-preview__who",
+                         ".post-preview__handle", ".post-preview__posted"):
+            with self.subTest(selector=selector):
+                self.assertIn(selector + " {", self.css,
+                              f"{selector} is authored in shared-post.html but unstyled")
+        frame = self.css.split(".post-preview__avatar {", 1)[1].split("}", 1)[0]
+        self.assertIn("border-radius: 50%", frame)
+        self.assertIn("overflow: hidden", frame,
+                      "a rectangular photo must be clipped to the circle")
+        self.assertIn("flex: none", frame, "the avatar must not squash under a long name")
+        image = self.css.split(".post-preview__avatar-img {", 1)[1].split("}", 1)[0]
+        self.assertIn("object-fit: cover", image)
+        who = self.css.split(".post-preview__who {", 1)[1].split("}", 1)[0]
+        self.assertIn("min-width: 0", who,
+                      "without it a long handle pushes the avatar out of the flex row")
+        # The initial has to disappear once a real face is on top of it, or a
+        # transparent avatar shows a letter through the member's photo.
+        self.assertIn(".post-preview__avatar.has-avatar .post-preview__monogram", self.css)
+        # Token-only: the light theme redefines these variables and nothing else.
+        for block in (frame, image, who):
+            self.assertNotRegex(block, r"#[0-9A-Fa-f]{3,8}\b",
+                                "a literal colour here would not invert in light mode")
+            self.assertNotRegex(block, r"\brgba?\(\s*\d", "same: use an --*-rgb token")
+
+    def test_the_error_branch_still_hides_every_card_state(self):
+        branch = self.app.split("if (resolved.status !== 'ok')", 1)[1] \
+                     .split("var postId = resolved.id;", 1)[0]
+        for element in ("emptyState", "resultState", "unavailableState", "actionsState"):
+            with self.subTest(element=element):
+                self.assertIn(element, branch,
+                              f"{element} must be settled, or a bad link can leave "
+                              "the previous render on screen")
