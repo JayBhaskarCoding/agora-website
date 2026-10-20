@@ -669,6 +669,43 @@ class ThemeContrast(unittest.TestCase):
                     _ratio(on_gradient, _hex(stop)), need - 0.01,
                     f"{name}: --on-gradient on gradient stop {stop}")
 
+    def test_specular_rim_stays_visible_on_saturated_fills(self):
+        """The rotary sign/name tag draws its rim ON a saturated gradient, so
+        the rim channel must stay bright in both themes.
+
+        Letting it follow --lavender-rgb inverts it into the same violet as the
+        gradient stop underneath, which measures 1.00:1 -- an edge that ceases
+        to exist. --rim-rgb is pinned bright instead: 5.82:1 in light.
+
+        Dark is baseline-locked at 1.25:1 rather than held to the light bar,
+        because pale lavender against the gradient's lightest #60A5FA stop is
+        1.32:1 as shipped and that palette is pinned by test_theme_contract.
+        """
+        floors = {"dark": 1.25, "light": 3.0}
+        alpha = 0.88  # as authored on .rotary-sign / .rotary-name-tag
+        for name, theme in (("dark", self.dark), ("light", self.light)):
+            self.assertIn("--rim-rgb", theme, f"{name}: rim channel missing")
+            rim = tuple(int(x) for x in theme["--rim-rgb"].split(","))
+            stops = re.findall(r"#[0-9a-fA-F]{6}",
+                               self._value(theme, "--brand-gradient-ink"))
+            self.assertTrue(stops, "brand gradient has no colour stops")
+            for stop in stops:
+                fill = _hex(stop)
+                painted = tuple(round(alpha * c + (1 - alpha) * f)
+                                for c, f in zip(rim, fill))
+                ratio = _ratio(painted, fill)
+                self.assertGreaterEqual(
+                    ratio, floors[name],
+                    f"{name}: rim rgb({theme['--rim-rgb']}) at {alpha} on stop "
+                    f"{stop} = {ratio:.2f}:1, needs {floors[name]}:1")
+
+        # And the component must consume the channel, not a colour token that
+        # would invert underneath it.
+        sign = re.search(r"\.rotary-sign,\s*\.rotary-name-tag \{([^}]+)\}",
+                         self.css)[1]
+        self.assertIn("border: 1px solid rgba(var(--rim-rgb), 0.88)", sign)
+        self.assertNotIn("var(--lavender-rgb)", sign)
+
     def test_select_chevron_clears_non_text_minimum(self):
         """The chevron is an inline SVG, so its stroke cannot hold var() and the
         whole data URI is the token. The dark theme's #9aa8bf measures 2.44:1 on

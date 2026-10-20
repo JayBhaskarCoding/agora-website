@@ -35,6 +35,13 @@
   --refuse-rgb: 244, 63, 94;
   --build-rgb: 16, 185, 129;
 
+  /* Specular rim for edges drawn ON a saturated fill. This one deliberately
+     does not invert with --overlay-rgb: the brand-gradient chip stays deep in
+     both themes, so its rim has to stay bright in both. Letting it follow
+     --lavender-rgb would make the light theme's rim the same violet as the
+     gradient stop underneath it, and the edge would simply disappear.   */
+  --rim-rgb: 196, 181, 253;
+
   /* White-based glass in the dark theme. The light theme flips this single
      channel to a dark slate, which inverts every border, sheen, hairline
      and glass panel in one move — the inversion the light theme lives on. */
@@ -254,6 +261,10 @@
        below the 3:1 bar for a non-text control indicator. Matched to
        --text-faint so it reads as part of the field, not as decoration. */
     --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%235A6472' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+
+    /* The sign/tag rim stays bright: its gradient fill is deep in both
+       themes, so a white edge is what keeps the chip reading as glass. */
+    --rim-rgb: 255, 255, 255;
 
     /* Deliberately NOT overridden:
        --device-* : the phone is hardware around dark app screenshots, so a
@@ -2827,7 +2838,7 @@ h1, h2, h3 {
   height: 2.5rem;
   min-width: clamp(8rem, calc(var(--rotary-disc-size) * 0.14), 11rem);
   padding: 8px 16px;
-  border: 1px solid rgba(var(--lavender-rgb), 0.88);
+  border: 1px solid rgba(var(--rim-rgb), 0.88);
   border-radius: 0.25rem;
   color: var(--on-gradient);
   background: var(--brand-gradient-ink);

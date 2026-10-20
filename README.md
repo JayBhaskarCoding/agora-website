@@ -199,6 +199,7 @@ channels do the heavy lifting:
 | --- | --- | --- | --- |
 | `--overlay-rgb` | `255, 255, 255` | `15, 23, 42` | The glass inversion — every hairline, sheen, grid texture, glass panel and the credits-screen floating tags flip from white-based to dark-based translucency in one declaration. |
 | `--glow-rgb` / `--glow-blue-rgb` | bright violet / blue | deep violet / blue | Neon bloom becomes a diffused drop-shadow. The alpha values stay as authored; only the colour depth changes. |
+| `--rim-rgb` | `196, 181, 253` | `255, 255, 255` | The one channel that stays **bright** in both themes, because it edges a fill that stays saturated in both. Letting the rotary sign's rim follow `--lavender-rgb` would make it the same violet as the gradient stop underneath — 1.00:1, an edge that ceases to exist. It measures 5.57–7.25:1 in light. |
 | `--bg-rgb`, `--surface-rgb`, `--text-rgb` | near-black / near-white | off-white / dark slate | Page, cards and typography. |
 
 Section 23 holds the only per-site light overrides — the handful of effects
@@ -219,6 +220,13 @@ the components they tune.
   cannot contain `var()`, so the whole URL is the token and each theme supplies
   its own. Note that a `%23`-encoded colour inside a URL hides from any
   "no hardcoded hex" scan; `test_light_theme_contract` guards that loophole.
+
+Every *colour* in the file is tokenised — `box-shadow` and gradient
+declarations contain no raw literals at all. What is deliberately left alone is
+**lengths**: `backdrop-filter: blur(18px)` and the `saturate()`/`brightness()`
+filters are theme-invariant geometry rather than colour, and `blur(18px)` is
+pinned verbatim by `test_theme_contract`. Tokenising them would add indirection
+with no visual difference in either theme.
 
 ### Canvas and browser chrome
 
