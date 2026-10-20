@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Someone shared an Agora post with you</title>
-  <meta name="description" content="It looks like someone shared an Agora post with you, but you don't have the app installed yet. Download Agora for Android — free, no ads, no tracking." />
+  <title>Someone shared a post with you — Agora</title>
+  <meta name="description" content="Someone shared a post with you on Agora. Open it in the app, or get Agora for Android — a human-first public square for free speech, with no ads and no tracking." />
   <meta name="robots" content="noindex, follow" />
   <!-- Browser chrome colour. The unqualified tag is the fallback for engines
        that ignore `media`; the two scoped tags let the OS pick the right one. -->
@@ -14,11 +14,11 @@
 
   <!-- Open Graph / Twitter (used when the link lands in chat apps) -->
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="Someone shared an Agora post with you" />
-  <meta property="og:description" content="Agora is the new town square for free speech. Get the Android app to read the post." />
+  <meta property="og:title" content="Someone shared a post with you" />
+  <meta property="og:description" content="Open it in Agora — the human-first public square for free speech. No ads, no algorithmic suppression, just people talking." />
   <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="Someone shared an Agora post with you" />
-  <meta name="twitter:description" content="Agora is the new town square for free speech. Get the Android app to read the post." />
+  <meta name="twitter:title" content="Someone shared a post with you" />
+  <meta name="twitter:description" content="Open it in Agora — the human-first public square for free speech. No ads, no algorithmic suppression, just people talking." />
 
   <link rel="icon" type="image/svg+xml" href="/assets/agora-logo.svg" />
 
@@ -62,12 +62,16 @@
         <!-- `data-first-name` is written server-side by
              functions/post/[id].js, which knows the author. Left alone it
              reads "someone"; enriched it reads "It looks like Jayvardhan
-             shared an Agora post with you". Lowercase on purpose: this is
-             mid-sentence, so a capitalised fallback would be a grammar bug
-             on every link the Function does not enrich. -->
+             shared a post with you". Lowercase on purpose: the hook sits
+             mid-sentence, so a capitalised fallback would be a grammar bug on
+             every link the Function does not enrich.
+
+             The old second clause -- "but you don't have the app installed
+             yet!" -- is gone on purpose. This page cannot know that, and a
+             visitor who DOES have the app was being told they were wrong
+             before they were offered the row below. -->
         <h1>
-          It looks like <span data-first-name>someone</span> shared an Agora post with you,
-          but you don&rsquo;t have the app installed yet!
+          It looks like <span data-first-name>someone</span> shared a post with you.
         </h1>
         <p>
           Welcome to the square. Agora is a human-first public square for free
@@ -84,6 +88,27 @@
           <a class="btn btn--ghost" href="/download.html">Learn more</a>
           <a class="btn btn--ghost" href="/index.html">About Agora</a>
         </div>
+
+        <!-- For the visitor who already has Agora and landed here anyway: a
+             share tapped before App Links finished verifying, a stale tab, or
+             a link opened in an in-app browser.
+
+             Revealed by app.js only on Android, because that is the only
+             platform the app exists on -- anywhere else the button would
+             promise something this device cannot do, and "Get the app" above
+             already covers the visitor. Also only once a post id has resolved,
+             so it never offers to open a post this page cannot name. Authored
+             hidden for both reasons, which is why the href below is a stub:
+             it is never seen before app.js replaces it. -->
+        <p class="shared-card__have-app" id="open-in-app-row" hidden>
+          <span>Already have the app?</span>
+          <a class="btn btn--ghost btn--sm" data-open-intent-btn href="/download.html" rel="nofollow">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="6" y="2.5" width="12" height="19" rx="2.5" /><path d="M11 18.5h2" />
+            </svg>
+            Open this post in Agora
+          </a>
+        </p>
       </section>
 
       <!-- ============ SHARED POST PREVIEW ============
@@ -97,7 +122,12 @@
            200, which leaves location.search empty) with ?post= / ?post_id= /
            ?id= as a fallback, and owns the chip, the "no id" / "invalid id"
            states, the avatar's load-or-fallback swap, and the Android intent
-           link. It never fetches the post itself. -->
+           link. It never fetches the post itself.
+
+           The "Open this post in Agora" button lives in the hero above, not
+           here: it answers a question about the visitor (do you already have
+           the app?), not about the post, and it should not be buried under the
+           fold behind the card it used to sit in. -->
       <section class="post-preview" id="post-preview" data-reveal data-reveal-delay="120" aria-live="polite">
         <div class="post-preview__bar">
           <span class="post-preview__label">Shared post</span>
@@ -157,18 +187,6 @@
             </p>
           </div>
 
-          <!-- Revealed by app.js only on Chromium/Android, where intent:// can
-               hand this post to net.in.agora and fall back to the download page
-               when the app is not installed. The authored href is the same
-               fallback, so the row is never a dead link. -->
-          <div class="post-preview__actions" id="preview-actions" hidden>
-            <a class="btn btn--ghost btn--sm" data-open-intent-btn href="/download.html" rel="nofollow">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <rect x="6" y="2.5" width="12" height="19" rx="2.5" /><path d="M11 18.5h2" />
-              </svg>
-              Open in the app
-            </a>
-          </div>
         </div>
       </section>
 
