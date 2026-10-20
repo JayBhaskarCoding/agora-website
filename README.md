@@ -11,7 +11,7 @@ Pure **vanilla HTML / CSS / JS** — no frameworks, no build step. Serve the rep
 | File               | Purpose                                                                 |
 | ------------------ | ----------------------------------------------------------------------- |
 | `index.html`       | Home — hero, motive/philosophy, CTAs                                    |
-| `shared-post.html` | Landing for shared post links (WhatsApp, etc.) when the app is not installed. Resolves the post id from the **path** (`/post/<id>`, `/p/<id>`) with `?post=` / `?post_id=` / `?id=` as a fallback, then renders a preview stub until the backend is connected |
+| `shared-post.html` | Landing for shared post links (WhatsApp, etc.) when the app is not installed. On `/post/<id>` and `/p/<id>` the author card is rendered **server-side** from Supabase; `app.js` resolves the id from the **path** (with `?post=` / `?post_id=` / `?id=` as a fallback) and owns the chip, the error states and the Android intent link |
 | `download.html`    | APK download, system requirements, version details, 3-step install guide |
 | `about.html`       | Vision, Jayvardhan Bhaskar's creator bio, and the live feedback form     |
 | `credits.html`     | Fixed-screen rotary team credits with synchronized off-screen discs and a pendulum role sign |
@@ -23,6 +23,8 @@ Shared assets:
 | `style.css`        | Mobile-first design system for all pages           |
 | `app.js`           | Routing, mobile menu, smooth scroll, reveals, feedback form, shared-post preview, dynamic download links |
 | `functions/api/latest-release.js` | Cloudflare Pages Function that resolves the newest `.apk` from the Android repo's latest GitHub release |
+| `functions/post/[id].js` | Cloudflare Pages Function serving `/post/<id>`: resolves the author in Supabase, renders the card into `shared-post.html`, and writes the per-post `og:*` / `twitter:*` tags |
+| `functions/p/[id].js` | The `/p/<id>` alias — re-exports the same handlers so both routes agree |
 | `assets/agora-logo.svg`      | Logo / tab icon                                    |
 | `assets/`          | App screenshots shown in the phone frames — see `assets/README.md` for the exact filenames to replace |
 
@@ -214,8 +216,30 @@ Since that lookup has to happen before the HTML is returned anyway,
   serialised — the values are written straight into element text and attributes.
 
 The card is authored **visible**. The generic member is a truthful card for
-every path the Function does not serve (`/p/<id>`, `?post=`, local dev), so a
-visitor without scripts gets an answer instead of a hole.
+every request the Function does not enrich (`?post=` and the other query
+fallbacks, local dev, and any lookup that declines), so a visitor without
+scripts gets an answer instead of a hole.
+
+### Both routes are served, and they agree
+
+`/p/<id>` is the short alias. `functions/p/[id].js` re-exports the long route's
+handlers rather than duplicating them, so the two cannot drift into disagreeing
+about who posted:
+
+```js
+export { onRequestGet, onRequestHead } from '../post/[id].js';
+```
+
+It is a real route file importing a sibling route file *on purpose*. Putting the
+shared logic in `functions/_shared/` would depend on Pages excluding
+underscore-prefixed paths from routing, and a share link is a poor thing to bet
+on that detail.
+
+`og:url` still names `/post/<id>` on **both** routes. Chat apps deduplicate
+previews by `og:url`, so one post shared both ways has to produce a single card,
+not two. `test_og_url_is_canonical_so_an_alias_makes_one_preview_not_two` holds
+that, and `test_the_short_alias_delegates_rather_than_duplicates` fails if the
+alias ever grows its own copy of the lookup.
 
 ### What the preview shows, and what it never shows
 

@@ -123,9 +123,9 @@
           <!-- Author card, rendered SERVER-SIDE by functions/post/[id].js so
                the avatar and name are in the first paint and survive with
                JavaScript off. The authored default below is the honest
-               fallback for every path the Function does not serve (/p/<id>,
-               ?post=, local dev): a real member posted something, we simply
-               did not resolve who.
+               fallback for every request the Function does not enrich (?post=
+               and the other query forms, local dev, any lookup that declines):
+               a real member posted something, we simply did not resolve who.
 
                Deliberately absent: the post text, its images, and its
                like/reply counts. This page is the install prompt, not the

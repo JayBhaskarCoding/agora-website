@@ -1439,6 +1439,36 @@ class SharedPostCard(unittest.TestCase):
         self.assertEqual(destinations["/post/:id"], self.constant("LANDING_PAGE"),
                          "the Function has to fetch the same file _redirects serves")
 
+    def test_the_short_alias_delegates_rather_than_duplicates(self):
+        alias_path = ROOT / "functions" / "p" / "[id].js"
+        self.assertTrue(alias_path.is_file(),
+                        "/p/<id> is a documented route; it needs a Function too")
+        alias = alias_path.read_text()
+        self.assertIn("export { onRequestGet, onRequestHead } from '../post/[id].js';",
+                      alias, "the alias must delegate to the long route's handlers")
+        # The point of delegating: a second copy of the lookup would drift, and
+        # the two routes would start disagreeing about who posted.
+        for marker in ("SUPABASE_TIMEOUT_MS", "fetchPostAuthor", "escapeHtml",
+                       "POST_COLUMNS", "PROFILE_COLUMNS", "UUID_PATTERN"):
+            with self.subTest(marker=marker):
+                self.assertNotIn(marker, alias,
+                                 f"{marker} redefined here would be a second, "
+                                 "diverging implementation")
+        # The alias is still a route in its own right, so when the Function
+        # declines the static fall-through has to remain.
+        destinations = {rule[0]: rule[1] for rule in self.redirects}
+        self.assertEqual(destinations["/p/:id"], self.constant("LANDING_PAGE"))
+
+    def test_og_url_is_canonical_so_an_alias_makes_one_preview_not_two(self):
+        # Chat apps deduplicate previews by og:url. If /p/<id> advertised itself,
+        # the same post shared both ways would render two different cards.
+        body = self.helper_body("describePost")
+        self.assertIn("`/post/${postId}`", body,
+                      "og:url must name the canonical route, not the request path")
+        self.assertNotIn("`/p/", body)
+        self.assertNotIn("request.url`", body.replace("new URL(path, request.url)", ""),
+                         "og:url must be built from the id, never echoed back")
+
     def test_the_og_fallback_image_exists(self):
         fallback = self.constant("FALLBACK_OG_IMAGE")
         self.assertTrue(fallback.startswith("/assets/"))
