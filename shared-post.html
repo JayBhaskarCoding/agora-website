@@ -59,8 +59,14 @@
           </svg>
         </span>
 
+        <!-- `data-first-name` is written server-side by
+             functions/post/[id].js, which knows the author. Left alone it
+             reads "someone"; enriched it reads "It looks like Jayvardhan
+             shared an Agora post with you". Lowercase on purpose: this is
+             mid-sentence, so a capitalised fallback would be a grammar bug
+             on every link the Function does not enrich. -->
         <h1>
-          It looks like someone shared an Agora post with you,
+          It looks like <span data-first-name>someone</span> shared an Agora post with you,
           but you don&rsquo;t have the app installed yet!
         </h1>
         <p>
@@ -156,7 +162,7 @@
                when the app is not installed. The authored href is the same
                fallback, so the row is never a dead link. -->
           <div class="post-preview__actions" id="preview-actions" hidden>
-            <a class="btn btn--ghost btn--sm" data-open-in-app href="/download.html" rel="nofollow">
+            <a class="btn btn--ghost btn--sm" data-open-intent-btn href="/download.html" rel="nofollow">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <rect x="6" y="2.5" width="12" height="19" rx="2.5" /><path d="M11 18.5h2" />
               </svg>

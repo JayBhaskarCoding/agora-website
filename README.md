@@ -199,6 +199,36 @@ never writes `[data-author]` — if it did, it would overwrite the real member
 with the generic fallback on every deep link, because it has no data to put
 there. `test_app_js_never_renders_the_author` holds that line.
 
+### The greeting is personalised, and the schema default is a trap
+
+The `<h1>` carries the same server render:
+
+```html
+It looks like <span data-first-name>someone</span> shared an Agora post with you,
+but you don't have the app installed yet!
+```
+
+Enriched, it reads *"It looks like Jayvardhan shared an Agora post with you"*.
+Two details are load-bearing:
+
+- **The fallback is lowercase.** It sits mid-sentence, so a capitalised
+  `Someone` would be a grammar bug on every link the Function does not enrich —
+  which is the majority of them. `FIRST_NAME_FALLBACK` and the authored markup
+  have to be the same word, or an unenriched page and an enriched page with no
+  first name would read differently; `test_the_h1_is_personalised_and_grammatical_by_default`
+  asserts both halves of that.
+- **`profiles.first_name` is `text default 'User'`.** Every member who never
+  chose a name stores the literal word `User`, so injecting it verbatim would
+  announce *"It looks like User shared an Agora post with you"*. The Function
+  treats that placeholder (case-insensitively) as no first name and falls back
+  to `someone`. The display name beside the avatar is **not** touched by this —
+  it still shows what the app shows, `User Nandi`, so the guard is scoped to the
+  sentence only.
+
+`app.js` never writes `data-first-name`. The server owns the greeting for the
+same reason it owns the card: a client-side write would race the render and, on
+a deep link, lose.
+
 ### The author card is server-rendered, on purpose
 
 A chat app scrapes a shared URL the moment it is pasted, long before anyone
@@ -312,7 +342,7 @@ it is the fallback for everyone else. On Chromium/Android the preview offers
 **Open in the app**, an `intent://` URL for the same https path:
 
 ```
-intent://agora.in.net/post/<id>#Intent;scheme=https;package=net.in.agora;S.browser_fallback_url=https%3A%2F%2Fagora.in.net%2Fdownload.html;end
+intent://agora.in.net/post/<id>#Intent;scheme=https;package=net.in.agora;S.browser_fallback_url=https%3A%2F%2Fagora.in.net%2Fdownload.html;end;
 ```
 
 Android routes it to the verified app; if the app is absent it opens
@@ -324,6 +354,20 @@ row to Android Chromium and it stays hidden everywhere else, where the regular
 `test_intent_package_matches_the_asset_links_statement` pins the package to
 `assetlinks.json`, because an intent aimed at a stale package fails silently on
 exactly the devices it was built for.
+
+`app.js` finds the button by its `data-open-intent-btn` hook. The host in that
+URI is `CANONICAL_HOST`, **pinned** to `agora.in.net` rather than derived from
+`window.location.host`: the manifest only auto-verifies the one host, so an
+intent built on a `*.pages.dev` preview or on localhost could never hand off to
+the app — it would fail with no fallback at all. `browser_fallback_url` *is*
+origin-relative, because that one should land on whichever deployment the
+visitor is actually on. `test_canonical_host_matches_the_verified_domain` is the
+drift lock, mirroring the package one above.
+
+`postId` still goes through `encodeURIComponent` even though the intent syntax
+would take it raw: `resolvePostId`'s charset permits `=`, which is a delimiter
+inside an intent URI. For a UUID the encoding is a no-op, so the emitted string
+is byte-identical either way.
 
 ### Verifying after deploy
 

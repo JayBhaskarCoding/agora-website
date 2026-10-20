@@ -1129,15 +1129,36 @@ class SharedPostRouting(unittest.TestCase):
             self.assertIn(fragment, builder, f"intent URL lost {fragment}")
         self.assertIn("encodeURIComponent(postId)", builder)
         self.assertIn("encodeURIComponent(fallback)", builder)
+        self.assertIn("';end;'", builder,
+                      "the intent URI must terminate exactly with ;end;")
+        self.assertIn("CANONICAL_HOST", builder,
+                      "the host is pinned, not derived from location.host: an "
+                      "intent built on a *.pages.dev preview could never hand "
+                      "off, because the manifest verifies one host only")
+        self.assertNotIn("window.location.host", builder)
+
+    def test_canonical_host_matches_the_verified_domain(self):
+        """Drift lock, mirroring the package one above: an intent aimed at any
+        other host cannot reach the app."""
+        declared = re.search(r"var CANONICAL_HOST = '([^']+)'", self.app)
+        self.assertIsNotNone(declared, "the intent host constant vanished")
+        self.assertEqual(declared.group(1), SITE_DOMAIN)
 
     def test_intent_row_is_authored_hidden_and_user_agent_gated(self):
         """intent:// is Chromium-on-Android only. Gecko ignores it, so the row
         must stay hidden there -- and its authored href must never be dead."""
         self.assertRegex(self.html, r'id="preview-actions"[^>]*hidden')
-        link = re.search(r"<a[^>]*data-open-in-app[^>]*>", self.html)
+        link = re.search(r"<a[^>]*data-open-intent-btn[^>]*>", self.html)
         self.assertIsNotNone(link, "the Open in the app link disappeared")
         self.assertIn(f'href="{DOWNLOAD_PAGE}"', link.group(0),
                       "pre-JS the link must still lead somewhere useful")
+        # The renamed hook has to be the ONLY one. A leftover attribute or a
+        # stale selector in app.js would silently stop matching, and the button
+        # would keep its plain href forever without anything failing loudly.
+        self.assertNotIn("data-open-in-app", self.html)
+        self.assertNotIn("data-open-in-app", self.app)
+        self.assertIn("[data-open-intent-btn]", self.app,
+                      "app.js must select the hook the markup actually carries")
         gate = self.section("function supportsIntentUrls", "function buildAppIntentUrl")
         self.assertIn("android", gate)
         self.assertIn("firefox", gate, "Gecko does not implement intent://")
@@ -1178,7 +1199,7 @@ class SharedPostCard(unittest.TestCase):
         "content", "image_urls", "media_urls", "likes", "comments",
     }
     HOOKS = ("data-author", "data-handle", "data-monogram", "data-avatar",
-             "data-avatar-frame")
+             "data-avatar-frame", "data-first-name")
     RETIRED_HOOKS = ("data-created", "data-preview-body", "data-preview-status",
                      "data-preview-note")
 
@@ -1229,6 +1250,37 @@ class SharedPostCard(unittest.TestCase):
         self.assertNotIn("hidden", attrs,
                          "#preview-result must be server-rendered into view, not "
                          "revealed by a script")
+
+    def test_the_h1_is_personalised_and_grammatical_by_default(self):
+        match = re.search(r"<h1>([\s\S]*?)</h1>", self.html)
+        self.assertIsNotNone(match, "the shared-card h1 disappeared")
+        heading = match.group(1)
+        self.assertRegex(heading, r"It looks like\s+<span data-first-name>",
+                         "the hook belongs in the h1's own sentence")
+        # The authored default and the injected fallback must be the same word,
+        # or an unenriched page and an enriched page with no first name would
+        # read differently -- and the fallback has to be lowercase, because it
+        # sits mid-sentence.
+        fallback = self.constant("FIRST_NAME_FALLBACK")
+        self.assertEqual(fallback, fallback.lower(),
+                         "a capitalised fallback is a grammar bug mid-sentence")
+        self.assertIn(f'<span data-first-name>{fallback}</span>', self.html)
+
+    def test_the_schema_first_name_placeholder_is_never_injected(self):
+        # profiles.first_name is `text default 'User'`, so the literal word
+        # "User" is what every member who never chose a name has stored.
+        self.assertEqual(self.constant("PLACEHOLDER_FIRST_NAME"), "user")
+        normalizer = self.helper_body("normalizeAuthor")
+        self.assertIn("PLACEHOLDER_FIRST_NAME", normalizer)
+        self.assertIn("toLowerCase()", normalizer,
+                      "the comparison must ignore casing")
+        self.assertIn("firstName", normalizer,
+                      "the first name has to survive normalisation separately "
+                      "from the full display name")
+        injector = self.helper_body("injectAuthor")
+        self.assertIn("data-first-name", injector)
+        self.assertIn("FIRST_NAME_FALLBACK", injector,
+                      "a missing first name must fall back, never inject ''")
 
     def test_the_gone_state_is_authored_hidden(self):
         _tag, attrs = self.element_with_id("preview-unavailable")
@@ -1484,6 +1536,9 @@ class SharedPostCard(unittest.TestCase):
         self.assertNotIn("data-author", self.app)
         self.assertNotIn("data-handle", self.app)
         self.assertNotIn("data-monogram", self.app)
+        self.assertNotIn("data-first-name", self.app,
+                         "the h1 is personalised server-side; a client write "
+                         "would race it and lose")
         self.assertNotIn("api.agora.example", self.app, "the stub API host is gone")
         self.assertNotIn("renderPreview", self.app)
         self.assertNotIn("fetchPost", self.app)

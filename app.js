@@ -608,6 +608,13 @@
   var POST_ID_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   // Must stay equal to target.package_name in .well-known/assetlinks.json.
   var ANDROID_PACKAGE = 'net.in.agora';
+  /* The App Links host the APK verifies against. Pinned rather than derived
+     from location.host on purpose: an intent built on a *.pages.dev preview or
+     on localhost could never hand off to the app, because the manifest only
+     declares this host -- so the intent would fail with no fallback at all.
+     The browser_fallback_url below stays origin-relative, because that one
+     SHOULD land on whichever deployment the visitor is actually on. */
+  var CANONICAL_HOST = 'agora.in.net';
 
   var EMPTY_MISSING_MESSAGE = 'This link doesn\u2019t include a post id.';
   var EMPTY_MALFORMED_MESSAGE = 'That link\u2019s post id doesn\u2019t look valid.';
@@ -677,12 +684,20 @@
   }
 
   function buildAppIntentUrl(postId) {
-    // Derived from the live origin, so this stays correct on the production
-    // domain, on a Pages preview deployment, and on localhost alike.
+    /* If the app is installed, Android hands this post straight to
+       net.in.agora. If it is not, Chrome for Android follows
+       S.browser_fallback_url to the download page instead of showing an
+       error -- which is the whole reason this is an intent:// URL rather than
+       a plain https link.
+
+       postId still goes through encodeURIComponent even though the intent
+       syntax would take it raw: resolvePostId's charset permits '=', which is
+       a delimiter inside an intent URI. For a UUID the encoding is a no-op, so
+       the emitted string is byte-identical either way. */
     var fallback = window.location.origin + '/download.html';
-    return 'intent://' + window.location.host + '/post/' + encodeURIComponent(postId) +
+    return 'intent://' + CANONICAL_HOST + '/post/' + encodeURIComponent(postId) +
       '#Intent;scheme=https;package=' + ANDROID_PACKAGE +
-      ';S.browser_fallback_url=' + encodeURIComponent(fallback) + ';end';
+      ';S.browser_fallback_url=' + encodeURIComponent(fallback) + ';end;';
   }
 
   /* The avatar is a third-party URL — Supabase Storage, or a Google CDN for
@@ -719,7 +734,7 @@
     var unavailableState = doc.getElementById('preview-unavailable');
     var resultState = doc.getElementById('preview-result');
     var actionsState = doc.getElementById('preview-actions');
-    var openInApp = actionsState ? actionsState.querySelector('[data-open-in-app]') : null;
+    var openIntentBtn = actionsState ? actionsState.querySelector('[data-open-intent-btn]') : null;
 
     /* --- 1. PARSE ------------------------------------------- */
     var resolved = resolvePostId(window.location);
@@ -759,9 +774,13 @@
     }
     initAvatarFallback(preview);
 
-    /* Offer the app itself, but only where intent:// actually resolves. */
-    if (actionsState && openInApp && supportsIntentUrls()) {
-      openInApp.setAttribute('href', buildAppIntentUrl(postId));
+    /* Offer the app itself, but only where intent:// actually resolves.
+       Everywhere else the button keeps its authored href="/download.html", so
+       it still reaches the same destination the fallback URL would have --
+       an unconditional intent:// would just be a dead link on Firefox, iOS
+       Safari and desktop Chrome, which ignore the scheme entirely. */
+    if (actionsState && openIntentBtn && supportsIntentUrls()) {
+      openIntentBtn.setAttribute('href', buildAppIntentUrl(postId));
       actionsState.hidden = false;
     }
 

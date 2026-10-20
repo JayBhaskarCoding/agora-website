@@ -44,6 +44,19 @@ const LANDING_PAGE = '/shared-post.html';
 const FALLBACK_OG_IMAGE = '/assets/agora-public.jpg';
 const GENERIC_AUTHOR = 'A member of the square';
 
+// The h1 reads "It looks like <span data-first-name>someone</span> shared an
+// Agora post with you", so the fallback is lowercase to stay grammatical
+// mid-sentence. It matches the authored markup exactly, which means an
+// unenriched page and an enriched page with no first name look identical.
+const FIRST_NAME_FALLBACK = 'someone';
+
+// profiles.first_name is `text default 'User'` in the schema, so every member
+// who never chose a name carries the literal word "User". Injecting that would
+// announce "It looks like User shared an Agora post with you", so the
+// placeholder is treated as no first name at all. The display name beside the
+// avatar is left as the app shows it -- this guard is for the sentence only.
+const PLACEHOLDER_FIRST_NAME = 'user';
+
 /* ------------------------------------------------------------
    Column allow-list — the privacy boundary of this page.
 
@@ -206,9 +219,15 @@ function normalizeAuthor(profile) {
   const handle = rawHandle ? (rawHandle.startsWith('@') ? rawHandle : `@${rawHandle}`) : '';
   const avatarUrl = cleanImageUrl(profile.avatar_url);
 
+  // For the h1 sentence only, which reads better with a first name than with
+  // the full display name -- and never with the schema's 'User' default.
+  const rawFirstName = cleanText(profile.first_name, 40);
+  const firstName = rawFirstName.toLowerCase() === PLACEHOLDER_FIRST_NAME ? '' : rawFirstName;
+
   if (!name && !handle && !avatarUrl) return null;
   return {
     name: name || (handle ? handle.slice(1) : GENERIC_AUTHOR),
+    firstName,
     handle,
     avatarUrl,
     monogram: monogramFor(name || handle)
@@ -322,7 +341,11 @@ function unhideByHook(html, hook) {
 }
 
 function injectAuthor(html, author) {
-  let out = setText(html, 'data-author', author ? author.name : GENERIC_AUTHOR);
+  // Set on every path, including a missing author, so the sentence is never
+  // left reading "someone" about a post we did resolve.
+  let out = setText(html, 'data-first-name',
+    (author && author.firstName) || FIRST_NAME_FALLBACK);
+  out = setText(out, 'data-author', author ? author.name : GENERIC_AUTHOR);
   if (!author) return out;
 
   out = setText(out, 'data-monogram', author.monogram);
