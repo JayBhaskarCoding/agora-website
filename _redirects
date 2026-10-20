@@ -1,6 +1,12 @@
 # Netlify / Cloudflare-Pages style redirects.
-# Pretty share links → the shared-post landing page (query string preserved).
-/post/:id          /shared-post.html?post=:id   200
-/p/:id             /shared-post.html?post=:id   200
+# Pretty share links -> the shared-post landing page.
+#
+# These are 200 rewrites: the edge serves shared-post.html's bytes while the
+# browser URL stays /post/<id>. Putting ?post=:id on the destination does NOT
+# forward a query string to the client -- it only steers the edge's internal
+# file lookup -- so app.js reads the post id from location.pathname and treats
+# ?post= / ?post_id= / ?id= as a fallback. Do not "restore" the query here.
+/post/:id          /shared-post.html          200
+/p/:id             /shared-post.html          200
 # SPA-style fallback for anything else (real files always win over this rule).
 /*                 /index.html                  200

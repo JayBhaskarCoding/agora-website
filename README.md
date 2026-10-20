@@ -11,7 +11,7 @@ Pure **vanilla HTML / CSS / JS** — no frameworks, no build step. Serve the rep
 | File               | Purpose                                                                 |
 | ------------------ | ----------------------------------------------------------------------- |
 | `index.html`       | Home — hero, motive/philosophy, CTAs                                    |
-| `shared-post.html` | Landing for shared post links (WhatsApp, etc.) when the app is not installed. Parses `?post=` / `?post_id=` / `?id=` and renders a preview stub until the backend is connected |
+| `shared-post.html` | Landing for shared post links (WhatsApp, etc.) when the app is not installed. Resolves the post id from the **path** (`/post/<id>`, `/p/<id>`) with `?post=` / `?post_id=` / `?id=` as a fallback, then renders a preview stub until the backend is connected |
 | `download.html`    | APK download, system requirements, version details, 3-step install guide |
 | `about.html`       | Vision, Jayvardhan Bhaskar's creator bio, and the live feedback form     |
 | `credits.html`     | Fixed-screen rotary team credits with synchronized off-screen discs and a pendulum role sign |
@@ -43,12 +43,20 @@ Useful local URLs:
 - `http://localhost:5173/download.html`
 - `http://localhost:5173/about.html`
 
+`python3 -m http.server` does not process `_redirects`, so locally a pretty
+`/post/<id>` URL 404s and the shared-link flow must be driven with the
+`?post=` fallback. That asymmetry is exactly how the query-only parser shipped:
+it looked correct on every local URL. See
+[Shared post deep links](#shared-post-deep-links-postid).
+
 ## Deploy
 
 The repository root **is** the static site. Point any static host
 (Netlify, Cloudflare Pages, GitHub Pages, S3+CloudFront…) at the root and
-keep `_redirects` / `robots.txt` in place. To test a shared link on a
-custom domain, share e.g. `https://your-domain/shared-post.html?post=<id>`.
+keep `_redirects` / `robots.txt` in place. On a host that honours
+`_redirects` (Cloudflare Pages, Netlify) the canonical share link is
+`https://your-domain/post/<id>`; the `?post=<id>` form keeps working
+everywhere, including on hosts with no redirect engine.
 
 ## Android App Links (`assetlinks.json`)
 
@@ -122,10 +130,115 @@ skips hidden directories, the fix is a `_redirects` **200 rewrite** (never a
 301/302 — Google rejects redirects on this path) from the canonical URL to a
 non-dot copy, keeping a single source of truth.
 
+## Shared post deep links (`/post/<id>`)
+
+The Android app shares **pretty** links — `https://agora.in.net/post/<id>`,
+plus the short `/p/<id>` — and `_redirects` rewrites both to
+`shared-post.html`:
+
+```
+/post/:id          /shared-post.html          200
+/p/:id             /shared-post.html          200
+/*                 /index.html                200
+```
+
+### The trap: a 200 rewrite never changes the browser URL
+
+Those are **200 rewrites**. The edge serves `shared-post.html`'s bytes while
+the address bar stays `/post/<id>`, so the script sees:
+
+```js
+location.pathname === '/post/<id>'
+location.search   === ''          // always empty
+```
+
+Writing `?post=:id` on the rewrite destination *looks* like it fills that in.
+It does not — the destination query only steers the edge's internal file
+lookup and never reaches the client. So a parser that read the query string
+alone answered **"This link doesn't include a post id"** to every real share
+link in production, while passing every local test (where the visitor types
+`?post=` by hand). The destination query is gone from `_redirects` on purpose;
+`test_rewrite_destination_carries_no_query_string` keeps it gone.
+
+### The resolver contract (`app.js` → `resolvePostId`)
+
+1. **Path first** — `/\/(?:post|p)\/([^/?#]+)\/?$/i` captures the segment.
+   Tolerates a trailing slash and route casing, and does not false-positive on
+   `/support/<x>`, `/app/<x>` or `/shared-post.html`.
+2. **Query fallback** — `?post=`, then `?post_id=`, then `?id=`, for legacy
+   links and for local dev.
+3. **The first candidate that validates wins**, so an unreadable path segment
+   never masks a usable `?post=` value.
+4. **Decode, then validate** against `/^[A-Za-z0-9][A-Za-z0-9._=-]{2,127}$/`.
+   Decoding first is what stops `%2F` smuggling a slash past the charset test,
+   and `decodeURIComponent` is wrapped because a stray `%` throws. The charset
+   is deliberately permissive — UUIDs, short hex, nanoid and base64url all pass.
+
+`SharedPostRouting` in `tests/test_site.py` lifts those two regexes out of
+`app.js` and compiles them, so the tests assert what the route *means* rather
+than merely that a regex exists.
+
+### Three UI states, not two
+
+| State | Trigger | Chip | Copy |
+| ----- | ------- | ---- | ---- |
+| preview | a valid id resolved | `post #0c298d8b` | skeleton → placeholder preview |
+| missing | no id anywhere | `no post id in link` | "This link doesn't include a post id." |
+| invalid | an id that fails validation | the truncated offender | "That link's post id doesn't look valid." |
+
+A valid `/post/<uuid>` must never reach either error state — that was the bug.
+Telling someone their id is *missing* when the URL plainly carries one sends
+them back to the app to re-share a link that was never broken.
+
+A full UUID is 36 characters and would blow out the mono chip, so the chip
+shows the leading group and keeps the whole value in its `title`. The id is
+URL data on a publicly reachable page, so it reaches the DOM through
+`textContent` only — never `innerHTML`.
+
+### Opening the app from the landing page
+
+When `assetlinks.json` verification is working, a device **with** the app
+installed hands `/post/<id>` straight to Android and this page never loads —
+it is the fallback for everyone else. On Chromium/Android the preview offers
+**Open in the app**, an `intent://` URL for the same https path:
+
+```
+intent://agora.in.net/post/<id>#Intent;scheme=https;package=net.in.agora;S.browser_fallback_url=https%3A%2F%2Fagora.in.net%2Fdownload.html;end
+```
+
+Android routes it to the verified app; if the app is absent it opens
+`browser_fallback_url` (the download page) instead. `intent://` is
+Chromium-only — Gecko ignores it entirely — so `supportsIntentUrls()` gates the
+row to Android Chromium and it stays hidden everywhere else, where the regular
+**Get the app** CTA already covers the visitor. Its authored `href` is
+`/download.html`, so the row is never a dead link even before JS runs.
+`test_intent_package_matches_the_asset_links_statement` pins the package to
+`assetlinks.json`, because an intent aimed at a stale package fails silently on
+exactly the devices it was built for.
+
+### Verifying after deploy
+
+`/post/<id>` must serve the landing page, **not** fall through to `/*`. Both
+answer `200 text/html`, so check for a marker unique to this page:
+
+```sh
+curl -sS https://agora.in.net/post/<uuid> | grep -c 'id="post-preview"'   # want: 1
+curl -sS -o /dev/null -w '%{http_code} %{url_effective}\n' \
+  https://agora.in.net/post/<uuid>                                        # want: 200, URL unchanged
+```
+
+`0` means the `/post/:id` rule did not apply and the catch-all served
+`index.html`. A changed `url_effective` means something redirected (3xx)
+instead of rewriting. Then open the link in a browser and confirm the chip
+reads `post #<first 8 chars>` with no error copy.
+
 ## Wiring up the backend
 
 - `initSharedPost()` — `fetchPost(id)` is a stub returning a simulated
-  payload after a delay. Replace with `GET /api/v1/posts/:id` when the API is live.
+  payload after a delay. Replace with `GET /api/v1/posts/:id` when the API is
+  live. The id arrives already resolved and validated by
+  `resolvePostId(window.location)`; still pass it through
+  `encodeURIComponent` when you build the real request.
 - `functions/api/contact.js` — Cloudflare Pages Function used by the About-page
   feedback form. It validates JSON or FormData, escapes the submitted values,
   and sends the message through Resend to `mail@agora.in.net`.
@@ -414,6 +527,8 @@ node --check app.js  # JavaScript syntax validation
   Smooth scrolling honors reduced-motion preferences.
 - `shared-post.html` is an external deep-link entrypoint, not a marketing page.
   No standard navigation or download-page buttons link to it; it is also marked
-  `noindex, follow`. Existing `/post/:id` and `/p/:id` deployment rewrites remain.
+  `noindex, follow`. The `/post/:id` and `/p/:id` rewrites remain and must stay
+  **above** the `/*` catch-all — see
+  [Shared post deep links](#shared-post-deep-links-postid).
   This isolates navigation, not access: anyone with a valid URL can open it.
 - About values use scoped crimson/emerald accents. Other UI accents remain violet.

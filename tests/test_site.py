@@ -893,5 +893,252 @@ class AssetLinksContract(unittest.TestCase):
                         "the /* SPA catch-all must remain the final rule")
 
 
+class SharedPostRouting(unittest.TestCase):
+    """/post/<id> deep links must resolve their id from the PATH.
+
+    `_redirects` rewrites /post/:id and /p/:id to shared-post.html with a **200**
+    status. A 200 rewrite serves the target file's bytes but never changes the
+    browser's address bar, so on a real share link window.location.search is
+    EMPTY. Writing ?post=:id on the rewrite destination looks like it fills that
+    in; it does not -- the destination query only steers the edge's internal
+    file lookup. Parsing the query alone therefore answered "This link doesn't
+    include a post id" to every valid deep link in production, while working in
+    local dev where the visitor types ?post= by hand.
+
+    The patterns below are lifted out of app.js and compiled here, so these
+    tests assert what the route MEANS rather than merely that a regex exists.
+    """
+
+    POST_UUID = "0c298d8b-c2f0-4f38-8585-7199f41c7769"
+    ROUTES = ("/post/:id", "/p/:id")
+    LANDING = "/shared-post.html"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = (ROOT / "app.js").read_text()
+        cls.html = (ROOT / "shared-post.html").read_text()
+        cls.rules = [
+            line.split()
+            for line in (ROOT / "_redirects").read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        cls.statements = json.loads((ROOT / ASSETLINKS_PATH).read_text())
+
+    # --- helpers -------------------------------------------------------
+    def js_regex(self, name):
+        """Extract `var NAME = /…/flags;` from app.js and compile it as Python.
+
+        Every pattern the resolver uses sticks to syntax Python's `re` shares
+        with JavaScript, so this exercises the real expression.
+        """
+        match = re.search(r"var %s = (/[^;\n]+);" % name, self.app)
+        self.assertIsNotNone(match, f"app.js no longer defines {name}")
+        literal = match.group(1)[1:]
+        body, _, flags = literal.rpartition("/")
+        return re.compile(body, re.IGNORECASE if "i" in flags else 0)
+
+    def section(self, start, end):
+        self.assertIn(start, self.app, f"{start} vanished from app.js")
+        self.assertIn(end, self.app, f"{end} vanished from app.js")
+        return self.app.split(start, 1)[1].split(end, 1)[0]
+
+    # --- routing -------------------------------------------------------
+    def test_deep_link_routes_rewrite_to_the_landing_page(self):
+        by_source = {rule[0]: rule[1:] for rule in self.rules}
+        for route in self.ROUTES:
+            with self.subTest(route=route):
+                self.assertIn(route, by_source,
+                              "the pretty share route must stay in _redirects")
+                destination, *status = by_source[route]
+                self.assertEqual(destination, self.LANDING)
+                self.assertEqual(status, ["200"],
+                                 "a 200 rewrite is what keeps the pretty URL in "
+                                 "the address bar -- and what leaves search empty")
+
+    def test_rewrite_destination_carries_no_query_string(self):
+        """?post=:id on a 200 destination never reaches the client. Leaving it
+        there is how the query-only parser came to look correct."""
+        for rule in self.rules:
+            with self.subTest(rule=" ".join(rule)):
+                self.assertNotIn("?", rule[1],
+                                 "a rewrite destination query is dead weight and "
+                                 "actively misleading")
+
+    def test_every_local_subresource_is_root_absolute(self):
+        """The landing page is served from an arbitrary-depth path (/post/<id>),
+        so a relative src would resolve against /post/ and request /post/app.js
+        -- which the /* catch-all answers with 200 and index.html. The script
+        tag would receive HTML, the page would die silently on pretty links and
+        still work at /shared-post.html: the same "passes locally, breaks in
+        production" trap as the query-only parser.
+        """
+        page = Page(ROOT / "shared-post.html")
+        offenders = []
+        absolute = 0
+        for tag, attrs in page.tags:
+            for attr in ("src", "href"):
+                url = attrs.get(attr)
+                if not url or url.startswith(("#", "mailto:", "tel:")):
+                    continue
+                if url.startswith("/") or re.match(r"^[a-z][a-z0-9+.-]*:", url, re.I):
+                    absolute += 1
+                    continue
+                offenders.append(f"<{tag} {attr}=\"{url}\">")
+        self.assertEqual(offenders, [],
+                         "relative URLs break when the page is served at /post/<id>")
+        self.assertGreater(absolute, 3, "the parser found no subresources at all")
+        scripts = {a.get("src") for t, a in page.tags if t == "script"}
+        self.assertIn("/app.js", scripts)
+        sheets = {a.get("href") for t, a in page.tags
+                  if t == "link" and a.get("rel") == "stylesheet"}
+        self.assertIn("/style.css", sheets)
+
+    def test_deep_link_rules_precede_the_catch_all(self):
+        """`/*` swallows everything below it: a deep-link rule placed after the
+        catch-all would silently serve index.html instead of the landing page,
+        and the visitor would see the home page with no post at all."""
+        sources = [rule[0] for rule in self.rules]
+        self.assertEqual(sources.count("/*"), 1, "exactly one SPA catch-all")
+        self.assertTrue(sources[-1].startswith("/*"),
+                        "the /* SPA fallback must remain the final rule")
+        for route in self.ROUTES:
+            with self.subTest(route=route):
+                self.assertEqual(sources.count(route), 1)
+                self.assertLess(sources.index(route), sources.index("/*"),
+                                f"{route} must come BEFORE the catch-all")
+
+    # --- parsing -------------------------------------------------------
+    def test_post_id_is_read_from_the_path(self):
+        pattern = self.js_regex("POST_PATH_PATTERN")
+        for path in (f"/post/{self.POST_UUID}", f"/p/{self.POST_UUID}",
+                     "/post/a8f3c2/", "/POST/a8f3c2", "/p/a8f3c2"):
+            with self.subTest(path=path):
+                self.assertTrue(pattern.search(path), f"{path} must resolve")
+        self.assertEqual(pattern.search(f"/post/{self.POST_UUID}").group(1),
+                         self.POST_UUID, "the captured segment IS the post id")
+        # Must not false-positive on the rest of the site.
+        for path in (self.LANDING, "/index.html", "/download.html", "/credits.html",
+                     "/support/a8f3c2", "/app/a8f3c2", "/help/a8f3c2",
+                     "/post/", "/post-preview/x"):
+            with self.subTest(path=path):
+                self.assertIsNone(pattern.search(path), f"{path} must NOT resolve")
+        # Scoped to the resolver: `location.pathname` occurs all over app.js, so
+        # a global assertion passes even with the path capture deleted.
+        resolver = self.section("function resolvePostId", "function shortenPostId")
+        self.assertIn("resolvePostId(window.location)", self.app)
+        self.assertIn("POST_PATH_PATTERN.exec(location.pathname", resolver,
+                      "the resolver must actually read the id out of the PATH")
+
+    def test_query_string_survives_only_as_a_fallback(self):
+        keys = re.search(r"var POST_QUERY_KEYS = \[([^\]]+)\];", self.app)
+        self.assertIsNotNone(keys, "the legacy query fallbacks disappeared")
+        self.assertEqual(re.findall(r"'([^']+)'", keys.group(1)),
+                         ["post", "post_id", "id"])
+        resolver = self.section("function resolvePostId", "function shortenPostId")
+        self.assertLess(resolver.index("POST_PATH_PATTERN.exec"),
+                        resolver.index("new URLSearchParams"),
+                        "the path must be tried BEFORE the query string")
+
+    # --- validation ----------------------------------------------------
+    def test_post_id_validation_is_permissive_but_safe(self):
+        pattern = self.js_regex("POST_ID_PATTERN")
+        for good in (self.POST_UUID, "a8f3c2", "abc", "V1StGXR8_Z5jdHi6B-myT",
+                     "dQw4w9WgXcQ=", "9f2c1e7a"):
+            with self.subTest(id=good):
+                self.assertTrue(pattern.match(good), f"{good} is a plausible id")
+        for bad in ("", "ab", "-abc", "a b", "../../etc/passwd", "a/b",
+                    "<script>alert(1)</script>", "a" * 129, "%3Cimg%3E",
+                    "..%2F..%2Fetc"):
+            with self.subTest(id=bad):
+                self.assertIsNone(pattern.match(bad), f"{bad!r} must be rejected")
+
+    def test_ids_are_decoded_before_they_are_validated(self):
+        """Decoding first is what stops %2F from smuggling a slash past the
+        charset test, and a stray % must not throw the whole page."""
+        decoder = self.section("function decodeUrlPart", "function resolvePostId")
+        self.assertIn("decodeURIComponent", decoder)
+        self.assertIn("try", decoder)
+        self.assertIn("catch", decoder)
+        resolver = self.section("function resolvePostId", "function shortenPostId")
+        self.assertIn("decodeUrlPart(pathMatch[1])", resolver)
+        self.assertLess(resolver.index("decodeUrlPart"),
+                        resolver.index("POST_ID_PATTERN.test"),
+                        "decode must happen before validation")
+
+    # --- error state ---------------------------------------------------
+    def test_error_state_separates_missing_from_invalid(self):
+        """A valid UUID must never see the "no post id" copy, and a genuinely
+        empty link must never be told its id is malformed."""
+        for status in ("'ok'", "'missing'", "'malformed'"):
+            self.assertIn(status, self.app)
+        invalid = re.search(r"var EMPTY_MALFORMED_MESSAGE = '([^']+)'", self.app)
+        missing = re.search(r"var EMPTY_MISSING_MESSAGE = '([^']+)'", self.app)
+        self.assertIsNotNone(invalid)
+        self.assertIsNotNone(missing)
+        self.assertNotEqual(invalid.group(1), missing.group(1))
+        self.assertNotIn("include a post id", invalid.group(1).lower())
+        self.assertIn("data-empty-message", self.html,
+                      "app.js needs a hook to swap the first sentence")
+        branch = self.section("if (resolved.status !== 'ok')", "var postId = resolved.id;")
+        for element in ("emptyState", "loadingState", "resultState", "actionsState"):
+            self.assertIn(element, branch, f"{element} must be settled in the error branch")
+
+    def test_empty_state_advertises_the_clean_link_shape(self):
+        self.assertIn("\u2026/post/xxxxxxxx", self.html)
+        self.assertNotIn("shared-post.html?post=xxxxxxxx", self.html,
+                         "the copy must teach the shape the app actually shares")
+
+    def test_post_id_is_never_written_with_innerhtml(self):
+        """The id is attacker-controlled URL data on a publicly reachable page."""
+        body = self.section("function initSharedPost", "function initImages")
+        self.assertNotRegex(body, r"innerHTML\s*[+]?=",
+                            "URL data must reach the DOM through textContent only")
+        self.assertIn("chip.textContent =", body)
+        self.assertIn("emptyMessage.textContent =", body)
+
+    def test_chip_truncates_long_ids_but_keeps_the_full_value(self):
+        """A 36-character UUID would blow out the mono chip in the flex bar."""
+        uuid = self.js_regex("POST_ID_UUID_PATTERN")
+        self.assertTrue(uuid.match(self.POST_UUID))
+        shortener = self.section("function shortenPostId", "function supportsIntentUrls")
+        self.assertRegex(shortener,
+                         r"POST_ID_UUID_PATTERN\.test\(id\)\)\s*return id\.slice\(0,\s*8\);",
+                         "a full UUID must be shortened, not printed whole into the chip")
+        self.assertIn("chip.setAttribute('title'", self.app,
+                      "the full id stays reachable for debugging")
+
+    # --- app intent fallback -------------------------------------------
+    def test_intent_package_matches_the_asset_links_statement(self):
+        """Drift lock: an intent aimed at a stale package silently does nothing
+        on a device that has the app installed."""
+        declared = re.search(r"var ANDROID_PACKAGE = '([^']+)'", self.app)
+        self.assertIsNotNone(declared)
+        self.assertEqual(declared.group(1), ANDROID_PACKAGE)
+        self.assertEqual(declared.group(1),
+                         self.statements[0]["target"]["package_name"],
+                         "app.js and assetlinks.json must name the same package")
+
+    def test_app_intent_falls_back_to_the_download_page(self):
+        builder = self.section("function buildAppIntentUrl", "function initSharedPost")
+        for fragment in ("'intent://'", "scheme=https", "package=",
+                         "S.browser_fallback_url=", "/download.html", ";end"):
+            self.assertIn(fragment, builder, f"intent URL lost {fragment}")
+        self.assertIn("encodeURIComponent(postId)", builder)
+        self.assertIn("encodeURIComponent(fallback)", builder)
+
+    def test_intent_row_is_authored_hidden_and_user_agent_gated(self):
+        """intent:// is Chromium-on-Android only. Gecko ignores it, so the row
+        must stay hidden there -- and its authored href must never be dead."""
+        self.assertRegex(self.html, r'id="preview-actions"[^>]*hidden')
+        link = re.search(r"<a[^>]*data-open-in-app[^>]*>", self.html)
+        self.assertIsNotNone(link, "the Open in the app link disappeared")
+        self.assertIn(f'href="{DOWNLOAD_PAGE}"', link.group(0),
+                      "pre-JS the link must still lead somewhere useful")
+        gate = self.section("function supportsIntentUrls", "function buildAppIntentUrl")
+        self.assertIn("android", gate)
+        self.assertIn("firefox", gate, "Gecko does not implement intent://")
+        self.assertIn("return false", gate)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1988,6 +1988,15 @@ h1, h2, h3 {
   color: var(--accent);
 }
 
+/* "Open in the app" row — revealed only where intent:// resolves. */
+.post-preview__actions {
+  margin-top: 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
 /* Security note */
 .secure-note {
   display: flex;

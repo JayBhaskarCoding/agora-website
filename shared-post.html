@@ -81,9 +81,11 @@
       </section>
 
       <!-- ============ SHARED POST PREVIEW ============
-           Filled in by app.js (initSharedPost): it parses the post id
-           from the URL (?post=… / ?post_id=… / ?id=…) and renders a
-           preview. The backend fetch is stubbed until the API exists. -->
+           Filled in by app.js (initSharedPost): it reads the post id from
+           the PATH — /post/<id> and /p/<id>, the routes `_redirects`
+           rewrites here with a 200, which leaves location.search empty —
+           and falls back to ?post= / ?post_id= / ?id= for legacy links.
+           The backend fetch is stubbed until the API exists. -->
       <section class="post-preview" id="post-preview" data-reveal data-reveal-delay="120" aria-live="polite">
         <div class="post-preview__bar">
           <span class="post-preview__label">Shared post</span>
@@ -91,11 +93,14 @@
         </div>
 
         <div class="post-preview__body">
-          <!-- Empty state: link carried no post id -->
+          <!-- Empty state: the link carried no usable post id. app.js swaps
+               the first sentence when an id IS present but unreadable, so a
+               valid /post/<uuid> deep link never lands here. The copy below is
+               also the no-JavaScript fallback. -->
           <p class="post-preview__empty" id="preview-empty" hidden>
-            This link doesn&rsquo;t include a post id. If you received it from a
-            friend, ask them to share it again from the app — links look like
-            <code>…/shared-post.html?post=xxxxxxxx</code>.
+            <span data-empty-message>This link doesn&rsquo;t include a post id.</span>
+            If you received it from a friend, ask them to share it again from
+            the app — links look like <code>…/post/xxxxxxxx</code>.
           </p>
 
           <!-- Loading state: id found, (simulated) fetch in flight -->
@@ -125,6 +130,19 @@
               </svg>
               <span data-preview-note>This is a placeholder preview. The full post — author, body, and thread — lives inside the app. Install Agora to read it.</span>
             </p>
+          </div>
+
+          <!-- Revealed by app.js only on Chromium/Android, where intent:// can
+               hand this post to net.in.agora and fall back to the download page
+               when the app is not installed. The authored href is the same
+               fallback, so the row is never a dead link. -->
+          <div class="post-preview__actions" id="preview-actions" hidden>
+            <a class="btn btn--ghost btn--sm" data-open-in-app href="/download.html" rel="nofollow">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="6" y="2.5" width="12" height="19" rx="2.5" /><path d="M11 18.5h2" />
+              </svg>
+              Open in the app
+            </a>
           </div>
         </div>
       </section>

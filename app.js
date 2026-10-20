@@ -557,9 +557,7 @@
      Simulates the full flow that will run once the backend is
      connected, so the page is already structured for it:
 
-       1. PARSE  — read the post id from the URL:
-                    ?post=…   ?post_id=…   ?id=…   (shared by the
-                    Android app's share sheet)
+       1. PARSE  — resolve the post id from the URL (see below)
        2. FETCH  — GET /api/v1/posts/:id  (stubbed below)
        3. RENDER — author, body, and thread stats inside
                     #post-preview
@@ -567,7 +565,120 @@
      Until then, step 2 resolves with a simulated payload after
      a short delay and the preview renders in a placeholder
      state — exactly what a visitor would see pre-launch.
+
+     ---- WHY THE ID COMES FROM THE PATH, NOT THE QUERY ----
+     Share links are pretty: /post/<id>, plus the short /p/<id>.
+     `_redirects` rewrites both to /shared-post.html with a **200**
+     status. A 200 rewrite serves the target file's bytes but never
+     changes the browser's address bar, so on /post/<id> the script
+     sees exactly this:
+
+         location.pathname === '/post/<id>'
+         location.search   === ''          <-- always empty
+
+     Writing ?post=:id on the rewrite destination looks like it
+     should fill that in. It does not: the destination query only
+     steers the edge's internal file lookup and never reaches the
+     client. Reading the query string alone therefore answered
+     "This link doesn't include a post id" to every real share link
+     in production, while working perfectly in local dev (where the
+     visitor types ?post= by hand).
+
+     So: the PATH is the source of truth, and the query string
+     survives only as a fallback for the legacy
+     /shared-post.html?post=… shape and for local dev, where
+     `python3 -m http.server` does not process `_redirects` at all.
      ------------------------------------------------------------ */
+
+  // Path routes that carry a post id. Keep in sync with `_redirects`.
+  var POST_PATH_PATTERN = /\/(?:post|p)\/([^/?#]+)\/?$/i;
+  // Legacy query fallbacks, in precedence order.
+  var POST_QUERY_KEYS = ['post', 'post_id', 'id'];
+  /* Deliberately permissive — UUIDs, short hex ids, nanoid and base64url all
+     pass — while rejecting traversal, separators, punctuation-only junk and
+     absurd lengths. Tested AFTER percent-decoding, so a %2F can never smuggle
+     a slash past the charset check. */
+  var POST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._=-]{2,127}$/;
+  var POST_ID_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  // Must stay equal to target.package_name in .well-known/assetlinks.json.
+  var ANDROID_PACKAGE = 'net.in.agora';
+
+  var EMPTY_MISSING_MESSAGE = 'This link doesn\u2019t include a post id.';
+  var EMPTY_MALFORMED_MESSAGE = 'That link\u2019s post id doesn\u2019t look valid.';
+
+  function decodeUrlPart(raw) {
+    try {
+      return decodeURIComponent(raw);
+    } catch (error) {
+      // A stray "%" throws URIError. Keep the raw text so it fails validation
+      // and lands on the "not valid" state instead of killing the script.
+      return raw;
+    }
+  }
+
+  /* Resolves the post id from a Location.
+     Returns { status: 'ok'|'missing'|'malformed', id, raw, source }.
+     The first candidate that passes validation wins, so an unreadable path
+     segment never masks a usable ?post= value. */
+  function resolvePostId(location) {
+    var candidates = [];
+
+    // PATH first — a 200 rewrite leaves search empty, see the note above.
+    var pathMatch = POST_PATH_PATTERN.exec(location.pathname || '');
+    if (pathMatch) candidates.push({ value: decodeUrlPart(pathMatch[1]), source: 'path' });
+
+    var params = new URLSearchParams(location.search || '');
+    for (var i = 0; i < POST_QUERY_KEYS.length; i++) {
+      var queryValue = params.get(POST_QUERY_KEYS[i]);
+      if (queryValue) candidates.push({ value: queryValue, source: 'query' });
+    }
+
+    if (!candidates.length) return { status: 'missing', id: '', raw: '', source: '' };
+
+    var rejected = '';
+    for (var j = 0; j < candidates.length; j++) {
+      if (POST_ID_PATTERN.test(candidates[j].value)) {
+        return {
+          status: 'ok',
+          id: candidates[j].value,
+          raw: candidates[j].value,
+          source: candidates[j].source
+        };
+      }
+      if (!rejected) rejected = candidates[j].value;
+    }
+    return { status: 'malformed', id: '', raw: rejected, source: '' };
+  }
+
+  /* A full UUID (36 characters) would blow out the mono chip, so the chip shows
+     the leading group and keeps the whole value in its tooltip. */
+  function shortenPostId(id) {
+    if (!id) return '';
+    if (POST_ID_UUID_PATTERN.test(id)) return id.slice(0, 8);
+    return id.length > 12 ? id.slice(0, 8) + '\u2026' : id;
+  }
+
+  /* intent:// is Chromium-on-Android only: it asks Android to hand this
+     verified App Link to the app and, when the app is missing, to open
+     S.browser_fallback_url instead. Gecko ignores intent:// completely, so the
+     button is revealed only where it genuinely works — everywhere else the
+     regular "Get the app" CTA already covers the visitor. */
+  function supportsIntentUrls() {
+    var ua = (window.navigator && window.navigator.userAgent) || '';
+    if (!/android/i.test(ua)) return false;
+    if (/firefox|fxios|focus/i.test(ua)) return false;
+    return /chrome|crios|chromium|samsungbrowser|edga|edgios|opr\/|opra/i.test(ua);
+  }
+
+  function buildAppIntentUrl(postId) {
+    // Derived from the live origin, so this stays correct on the production
+    // domain, on a Pages preview deployment, and on localhost alike.
+    var fallback = window.location.origin + '/download.html';
+    return 'intent://' + window.location.host + '/post/' + encodeURIComponent(postId) +
+      '#Intent;scheme=https;package=' + ANDROID_PACKAGE +
+      ';S.browser_fallback_url=' + encodeURIComponent(fallback) + ';end';
+  }
+
   function initSharedPost() {
     var preview = doc.getElementById('post-preview');
     if (!preview) return;
@@ -576,28 +687,52 @@
     var status = preview.querySelector('[data-preview-status]');
     var body = preview.querySelector('[data-preview-body]');
     var emptyState = doc.getElementById('preview-empty');
+    var emptyMessage = emptyState ? emptyState.querySelector('[data-empty-message]') : null;
     var loadingState = doc.getElementById('preview-loading');
     var resultState = doc.getElementById('preview-result');
+    var actionsState = doc.getElementById('preview-actions');
+    var openInApp = actionsState ? actionsState.querySelector('[data-open-in-app]') : null;
 
     /* --- 1. PARSE ------------------------------------------- */
-    var params = new URLSearchParams(window.location.search);
-    var postId = params.get('post') || params.get('post_id') || params.get('id') || '';
+    var resolved = resolvePostId(window.location);
 
-    if (!postId) {
+    if (resolved.status !== 'ok') {
+      // Only a genuinely absent or unreadable id reaches this branch. A valid
+      // /post/<uuid> deep link never does — that was the production bug.
+      var missing = resolved.status === 'missing';
+      if (emptyMessage) {
+        emptyMessage.textContent = missing ? EMPTY_MISSING_MESSAGE : EMPTY_MALFORMED_MESSAGE;
+      }
       if (emptyState) emptyState.hidden = false;
       if (loadingState) loadingState.hidden = true;
       if (resultState) resultState.hidden = true;
+      if (actionsState) actionsState.hidden = true;
       if (chip) {
-        chip.textContent = 'no post id in link';
+        // textContent only, never innerHTML: the id is attacker-controlled
+        // URL data and this page is publicly reachable with any path.
+        chip.textContent = missing ? 'no post id in link' : shortenPostId(resolved.raw);
         chip.classList.add('chip--idle');
+        chip.removeAttribute('title');
       }
       return;
     }
 
+    var postId = resolved.id;
+
     if (emptyState) emptyState.hidden = true;
     if (loadingState) loadingState.hidden = false; // show the skeleton while "fetching"
-    if (chip) chip.textContent = 'post #' + postId;
+    if (chip) {
+      chip.textContent = 'post #' + shortenPostId(postId);
+      chip.classList.remove('chip--idle');   // resolved: leave the idle styling behind
+      chip.setAttribute('title', 'Post ' + postId + ' — id read from the link ' + resolved.source);
+    }
     if (status) status.textContent = 'fetching preview…';
+
+    /* Offer the app itself, but only where intent:// actually resolves. */
+    if (actionsState && openInApp && supportsIntentUrls()) {
+      openInApp.setAttribute('href', buildAppIntentUrl(postId));
+      actionsState.hidden = false;
+    }
 
     /* --- 2. FETCH (stub) ------------------------------------ */
     function fetchPost(id) {
