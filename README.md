@@ -204,13 +204,19 @@ there. `test_app_js_never_renders_the_author` holds that line.
 The `<h1>` carries the same server render:
 
 ```html
-It looks like <span data-first-name>someone</span> shared an Agora post with you,
-but you don't have the app installed yet!
+It looks like <span data-first-name>someone</span> shared a post with you.
 ```
 
-Enriched, it reads *"It looks like Jayvardhan shared an Agora post with you"*.
-Two details are load-bearing:
+Enriched, it reads *"It looks like Jayvardhan shared a post with you"*. Three
+details are load-bearing:
 
+- **The sentence stops there.** It used to end *"…but you don't have the app
+  installed yet!"*, which the page cannot know — and which told a visitor who
+  **does** have the app that they were wrong, before offering them any way in.
+  That audience now gets the **Already have the app?** row described below, and
+  the sentence no longer argues with it. `<title>`, `og:title`, `twitter:title`
+  and both descriptions were reworded to match, because a chat preview that
+  contradicts the page it links to is worse than a plain one.
 - **The fallback is lowercase.** It sits mid-sentence, so a capitalised
   `Someone` would be a grammar bug on every link the Function does not enrich —
   which is the majority of them. `FIRST_NAME_FALLBACK` and the authored markup
@@ -219,7 +225,7 @@ Two details are load-bearing:
   asserts both halves of that.
 - **`profiles.first_name` is `text default 'User'`.** Every member who never
   chose a name stores the literal word `User`, so injecting it verbatim would
-  announce *"It looks like User shared an Agora post with you"*. The Function
+  announce *"It looks like User shared a post with you"*. The Function
   treats that placeholder (case-insensitively) as no first name and falls back
   to `someone`. The display name beside the avatar is **not** touched by this —
   it still shows what the app shows, `User Nandi`, so the guard is scoped to the
@@ -338,22 +344,58 @@ URL data on a publicly reachable page, so it reaches the DOM through
 
 When `assetlinks.json` verification is working, a device **with** the app
 installed hands `/post/<id>` straight to Android and this page never loads —
-it is the fallback for everyone else. On Chromium/Android the preview offers
-**Open in the app**, an `intent://` URL for the same https path:
+but verification only completes on the *first* tap after install, and plenty of
+visitors arrive through a stale tab, an in-app browser, or a link forwarded
+somewhere that strips App Links. For them the hero carries a second row:
+
+```html
+<p class="shared-card__have-app" id="open-in-app-row" hidden>
+  <span>Already have the app?</span>
+  <a class="btn btn--ghost btn--sm" data-open-intent-btn …>Open this post in Agora</a>
+</p>
+```
+
+It lives in the hero beside **Get the app**, not in the preview card where the
+button it replaced used to sit: it answers a question about the *visitor* (do
+you already have the app?), not about the post, and under the fold it was
+effectively invisible on a phone. There is exactly one such button on the page —
+`test_the_open_in_app_row_lives_in_the_hero_not_under_the_fold` counts them.
+
+On Chromium/Android it becomes an `intent://` URL for the same https path:
 
 ```
 intent://agora.in.net/post/<id>#Intent;scheme=https;package=net.in.agora;S.browser_fallback_url=https%3A%2F%2Fagora.in.net%2Fdownload.html;end;
 ```
 
 Android routes it to the verified app; if the app is absent it opens
-`browser_fallback_url` (the download page) instead. `intent://` is
-Chromium-only — Gecko ignores it entirely — so `supportsIntentUrls()` gates the
-row to Android Chromium and it stays hidden everywhere else, where the regular
-**Get the app** CTA already covers the visitor. Its authored `href` is
-`/download.html`, so the row is never a dead link even before JS runs.
+`browser_fallback_url` (the download page) instead.
+
+**Two gates, deliberately different.** `isAndroid()` decides whether the row
+exists for this visitor at all; `supportsIntentUrls()` decides which URI it
+gets. Collapsing them is wrong in both directions:
+
+- Revealing the row everywhere would promise an app the device cannot install —
+  Agora is Android-only, and on iOS or desktop the **Get the app** CTA above
+  already covers the visitor. So the row stays hidden off Android.
+- Giving *every* Android browser an `intent://` URI would hand Gecko a scheme it
+  ignores entirely, with a `browser_fallback_url` it also ignores — a dead
+  button. So non-Chromium Android gets `buildAppWebUrl()` instead: the plain
+  `https://agora.in.net/post/<id>` App Link, which Android itself offers to the
+  app. Every Android browser therefore ends up somewhere useful, and the two
+  paths differ only in who performs the handoff.
+
 `test_intent_package_matches_the_asset_links_statement` pins the package to
 `assetlinks.json`, because an intent aimed at a stale package fails silently on
 exactly the devices it was built for.
+
+The row is authored `hidden` and only JS reveals it, so its stub
+`href="/download.html"` is never seen — unlike the old card row, which was
+authored visible-capable and needed that href as a pre-JS fallback.
+`test_every_id_init_shared_post_looks_up_exists_on_the_page` binds each
+`getElementById` in `initSharedPost` to an id the page actually authors, because
+a rename on one side alone fails silently: the lookup returns `null`, every
+`if (row && btn)` guard degrades to a no-op, the page still renders, and every
+source-level assertion still passes.
 
 `app.js` finds the button by its `data-open-intent-btn` hook. The host in that
 URI is `CANONICAL_HOST`, **pinned** to `agora.in.net` rather than derived from
@@ -361,8 +403,10 @@ URI is `CANONICAL_HOST`, **pinned** to `agora.in.net` rather than derived from
 intent built on a `*.pages.dev` preview or on localhost could never hand off to
 the app — it would fail with no fallback at all. `browser_fallback_url` *is*
 origin-relative, because that one should land on whichever deployment the
-visitor is actually on. `test_canonical_host_matches_the_verified_domain` is the
-drift lock, mirroring the package one above.
+visitor is actually on. `buildAppWebUrl()` uses the same pinned host, since a
+verified App Link only verifies against the host the manifest declares.
+`test_canonical_host_matches_the_verified_domain` is the drift lock, mirroring
+the package one above.
 
 `postId` still goes through `encodeURIComponent` even though the intent syntax
 would take it raw: `resolvePostId`'s charset permits `=`, which is a delimiter

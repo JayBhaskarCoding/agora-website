@@ -1082,7 +1082,7 @@ class SharedPostRouting(unittest.TestCase):
         branch = self.section("if (resolved.status !== 'ok')", "var postId = resolved.id;")
         # Every state the page can be in has to be settled here, or an error
         # link can leave a previous render on screen behind it.
-        for element in ("emptyState", "resultState", "unavailableState", "actionsState"):
+        for element in ("emptyState", "resultState", "unavailableState", "openInAppRow"):
             self.assertIn(element, branch, f"{element} must be settled in the error branch")
         self.assertNotIn("loadingState", self.app,
                          "the simulated fetch is gone; nothing should still drive a skeleton")
@@ -1145,13 +1145,16 @@ class SharedPostRouting(unittest.TestCase):
         self.assertEqual(declared.group(1), SITE_DOMAIN)
 
     def test_intent_row_is_authored_hidden_and_user_agent_gated(self):
-        """intent:// is Chromium-on-Android only. Gecko ignores it, so the row
-        must stay hidden there -- and its authored href must never be dead."""
-        self.assertRegex(self.html, r'id="preview-actions"[^>]*hidden')
+        """The app is Android-only, so the row is authored hidden and revealed
+        only there. intent:// is narrower still -- Chromium-on-Android -- and
+        every other Android browser gets the verified App Link instead, so the
+        button is never a dead link on any platform."""
+        self.assertRegex(self.html, r'id="open-in-app-row"[^>]*hidden')
         link = re.search(r"<a[^>]*data-open-intent-btn[^>]*>", self.html)
         self.assertIsNotNone(link, "the Open in the app link disappeared")
         self.assertIn(f'href="{DOWNLOAD_PAGE}"', link.group(0),
-                      "pre-JS the link must still lead somewhere useful")
+                      "the authored href is the safe stub: the row is hidden "
+                      "until app.js replaces it")
         # The renamed hook has to be the ONLY one. A leftover attribute or a
         # stale selector in app.js would silently stop matching, and the button
         # would keep its plain href forever without anything failing loudly.
@@ -1163,6 +1166,52 @@ class SharedPostRouting(unittest.TestCase):
         self.assertIn("android", gate)
         self.assertIn("firefox", gate, "Gecko does not implement intent://")
         self.assertIn("return false", gate)
+
+    def test_every_id_init_shared_post_looks_up_exists_on_the_page(self):
+        """Each getElementById here is a contract between two files. Renaming one
+        side is exactly how a button silently stops working: the lookup returns
+        null, every `if (row && btn)` guard degrades to a no-op, the page still
+        renders, and every source-level assertion still passes. So bind them."""
+        body = self.section("function initSharedPost", "function initImages")
+        ids = sorted(set(re.findall(r"getElementById\('([^']+)'\)", body)))
+        self.assertTrue(ids, "no getElementById calls found; the anchor is stale")
+        for element_id in ids:
+            with self.subTest(element_id=element_id):
+                self.assertIn(f'id="{element_id}"', self.html,
+                              f"app.js looks up #{element_id} but shared-post.html "
+                              "does not author it")
+        self.assertIn("open-in-app-row", ids,
+                      "the open-in-app row must be one of the lookups")
+
+    def test_the_open_in_app_row_is_gated_to_the_platform_that_has_the_app(self):
+        """Two different gates, and they must not be conflated: isAndroid()
+        decides whether the row EXISTS for this visitor, supportsIntentUrls()
+        decides which URI it gets. Offering the row on iOS or desktop would
+        promise an app the device cannot install; offering intent:// to Gecko
+        would hand it a scheme it ignores entirely."""
+        reveal = self.section("if (openInAppRow && openIntentBtn", "openInAppRow.hidden = false;")
+        # Naming both builders is not enough: the choice has to land on the
+        # element, or the row appears with its authored stub href and every
+        # visitor gets sent to the download page instead of their post.
+        self.assertRegex(reveal,
+                         r"openIntentBtn\.setAttribute\('href',\s*supportsIntentUrls\(\)",
+                         "the platform choice must be written to the button's href")
+        self.assertIn("isAndroid()", reveal,
+                      "the row must only appear where the app can exist")
+        self.assertIn("supportsIntentUrls()", reveal,
+                      "and only Chromium should get the intent:// URI")
+        self.assertIn("buildAppWebUrl(postId)", reveal,
+                      "other Android browsers must still get a working link")
+
+        android = self.section("function isAndroid", "function buildAppWebUrl")
+        self.assertIn("/android/i", android)
+
+        web = self.section("function buildAppWebUrl", "function initSharedPost")
+        self.assertIn("CANONICAL_HOST", web,
+                      "the App Link host must be the verified one, not the "
+                      "deployment the visitor happens to be on")
+        self.assertIn("/post/", web, "and the path the manifest declares")
+        self.assertIn("encodeURIComponent(postId)", web)
 
 
 if __name__ == "__main__":
@@ -1281,6 +1330,66 @@ class SharedPostCard(unittest.TestCase):
         self.assertIn("data-first-name", injector)
         self.assertIn("FIRST_NAME_FALLBACK", injector,
                       "a missing first name must fall back, never inject ''")
+
+    def test_the_greeting_does_not_assume_the_visitor_lacks_the_app(self):
+        """The old h1 ended "but you don't have the app installed yet!" -- which
+        this page cannot know, and which told a visitor who DOES have the app
+        that they were wrong before offering them any way in."""
+        for stale in ("shared an Agora post with you",
+                      "don&rsquo;t have the app installed yet",
+                      "don't have the app installed yet"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, self.html)
+        heading = re.search(r"<h1>([\s\S]*?)</h1>", self.html).group(1)
+        self.assertRegex(heading, r"It looks like\s+<span data-first-name>someone</span>\s+"
+                                  r"shared a post with you\.",
+                         "the greeting keeps the first-name hook and drops the "
+                         f"assumption, got: {' '.join(heading.split())}")
+
+    def test_the_head_copy_matches_the_reworded_greeting(self):
+        """The h1, <title>, description and social tags all describe the same
+        page; rewording one and leaving the rest is how a chat preview ends up
+        contradicting the page it links to."""
+        title = re.search(r"<title>([^<]*)</title>", self.html).group(1)
+        self.assertEqual(title, "Someone shared a post with you — Agora",
+                         "the title follows the site's '<page> — Agora' pattern")
+        for attr, key in (("property", "og:title"), ("name", "twitter:title")):
+            with self.subTest(tag=key):
+                match = re.search(
+                    r'<meta[^>]*%s\s*=\s*"%s"[^>]*content="([^"]*)"' % (attr, re.escape(key)),
+                    self.html)
+                self.assertIsNotNone(match, f"{key} disappeared")
+                self.assertEqual(match.group(1), "Someone shared a post with you")
+        for stale in ("shared an Agora post", "Get the Android app to read the post"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, self.html)
+
+    def test_the_open_in_app_row_lives_in_the_hero_not_under_the_fold(self):
+        hero = self.html.split('<section class="shared-card"', 1)[1].split("</section>", 1)[0]
+        self.assertIn('id="open-in-app-row"', hero,
+                      "the row belongs beside 'Get the app', where a visitor "
+                      "who already has it will actually see it")
+        self.assertIn("Already have the app?", hero)
+        self.assertIn("Open this post in Agora", hero)
+        self.assertIn("data-open-intent-btn", hero)
+        after_preview = self.html.split('id="post-preview"', 1)[1]
+        self.assertNotIn("open-in-app-row", after_preview,
+                         "and it must not ALSO sit in the preview card")
+        self.assertEqual(len(re.findall(r"data-open-intent-btn", self.html)), 1,
+                         "moving the button must not leave the old one behind: "
+                         "two buttons that open the same post is one too many")
+
+    def test_the_retired_card_row_left_no_dead_css(self):
+        self.assertNotIn(".post-preview__actions", self.css,
+                         "the card row is gone; its layout rule went with it")
+        self.assertIn(".shared-card__have-app {", self.css,
+                      "the new row needs its own rule")
+        block = self.css.split(".shared-card__have-app {", 1)[1].split("}", 1)[0]
+        self.assertIn("flex-wrap: wrap", block, "the label and button must wrap on a narrow phone")
+        self.assertIn("justify-content: center", block, "the hero is centred")
+        self.assertNotRegex(block, r"#[0-9A-Fa-f]{3,8}\b",
+                            "a literal colour here would not invert in light mode")
+        self.assertNotRegex(block, r"\brgba?\(\s*\d", "same: use an --*-rgb token")
 
     def test_the_gone_state_is_authored_hidden(self):
         _tag, attrs = self.element_with_id("preview-unavailable")
@@ -1586,7 +1695,7 @@ class SharedPostCard(unittest.TestCase):
     def test_the_error_branch_still_hides_every_card_state(self):
         branch = self.app.split("if (resolved.status !== 'ok')", 1)[1] \
                      .split("var postId = resolved.id;", 1)[0]
-        for element in ("emptyState", "resultState", "unavailableState", "actionsState"):
+        for element in ("emptyState", "resultState", "unavailableState", "openInAppRow"):
             with self.subTest(element=element):
                 self.assertIn(element, branch,
                               f"{element} must be settled, or a bad link can leave "

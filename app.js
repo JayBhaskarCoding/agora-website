@@ -724,6 +724,22 @@
     image.addEventListener('error', function () { settle(false); });
   }
 
+  /* The app is Android-only, so "already have the app?" is worth asking only
+     there. Deliberately broader than supportsIntentUrls(): Android hands a
+     verified App Link to the app in EVERY browser, while intent:// is a
+     Chromium extension that Gecko ignores completely. */
+  function isAndroid() {
+    var ua = (window.navigator && window.navigator.userAgent) || '';
+    return /android/i.test(ua);
+  }
+
+  /* For Android browsers with no intent:// support. This is the same verified
+     App Link the app declares, so the OS offers the app instead of the browser
+     rendering the page again. */
+  function buildAppWebUrl(postId) {
+    return 'https://' + CANONICAL_HOST + '/post/' + encodeURIComponent(postId);
+  }
+
   function initSharedPost() {
     var preview = doc.getElementById('post-preview');
     if (!preview) return;
@@ -733,8 +749,8 @@
     var emptyMessage = emptyState ? emptyState.querySelector('[data-empty-message]') : null;
     var unavailableState = doc.getElementById('preview-unavailable');
     var resultState = doc.getElementById('preview-result');
-    var actionsState = doc.getElementById('preview-actions');
-    var openIntentBtn = actionsState ? actionsState.querySelector('[data-open-intent-btn]') : null;
+    var openInAppRow = doc.getElementById('open-in-app-row');
+    var openIntentBtn = openInAppRow ? openInAppRow.querySelector('[data-open-intent-btn]') : null;
 
     /* --- 1. PARSE ------------------------------------------- */
     var resolved = resolvePostId(window.location);
@@ -749,7 +765,7 @@
       if (emptyState) emptyState.hidden = false;
       if (resultState) resultState.hidden = true;
       if (unavailableState) unavailableState.hidden = true;
-      if (actionsState) actionsState.hidden = true;
+      if (openInAppRow) openInAppRow.hidden = true;
       if (chip) {
         // textContent only, never innerHTML: the id is attacker-controlled
         // URL data and this page is publicly reachable with any path.
@@ -774,14 +790,18 @@
     }
     initAvatarFallback(preview);
 
-    /* Offer the app itself, but only where intent:// actually resolves.
-       Everywhere else the button keeps its authored href="/download.html", so
-       it still reaches the same destination the fallback URL would have --
-       an unconditional intent:// would just be a dead link on Firefox, iOS
-       Safari and desktop Chrome, which ignore the scheme entirely. */
-    if (actionsState && openIntentBtn && supportsIntentUrls()) {
-      openIntentBtn.setAttribute('href', buildAppIntentUrl(postId));
-      actionsState.hidden = false;
+    /* "Already have the app?" Only Android gets the row, since that is the
+       only platform the app exists on. Chromium gets the intent:// URI, which
+       is the reliable path and carries its own browser_fallback_url. Other
+       Android browsers implement neither intent:// nor that fallback, but they
+       do follow a verified App Link -- so they get the plain https post URL and
+       Android does the handoff. Nowhere is the button a dead link, and nowhere
+       does it promise an app the device cannot have. */
+    if (openInAppRow && openIntentBtn && isAndroid()) {
+      openIntentBtn.setAttribute('href', supportsIntentUrls()
+        ? buildAppIntentUrl(postId)
+        : buildAppWebUrl(postId));
+      openInAppRow.hidden = false;
     }
 
   }
