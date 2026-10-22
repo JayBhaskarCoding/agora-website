@@ -775,14 +775,21 @@ Hung from a corner, the landing point moves with the block's own height and one
 extra line of bio shoves it through the viewport edge. Centred, it is exact at
 any `--segment-scale`.
 
-| Breakpoint | `top` | `left` | arm radius |
+| Block | Breakpoint | `top` | `left` |
 | --- | --- | --- | --- |
-| desktop | `43%` | `81.5%` | 31.6% of the disc |
-| `max-width: 768px` | `88%` | `115%` | 75.3% of the disc |
+| contribution (upper wheel) | desktop | `58%` | `76%` |
+| profile (lower wheel) | desktop | `64%` | `76.5%` |
+| contribution | `max-width: 768px` | `85.5%` | `108.5%` |
+| profile | `max-width: 768px` | `84.5%` | `103.5%` |
 
-One shared pair per breakpoint, for both wheels. The only thing separating them
-is `--sector-offset` (`40deg` upper, `220deg` lower), which is what puts one
-block in the upper-left zone and its mirror in the lower-right.
+**Each block carries its own arm**, and that is a geometric necessity rather than
+a stylistic choice. With the sectors exactly 180 degrees apart and the hubs on
+opposite corners, one shared `v` forces `top = hub + u` and `bottom = hub' - u`,
+so a single arm can only reach two boxes that mirror each other about the
+viewport centre. These do not: they differ by ~48px horizontally and ~36px
+vertically at 1440x900. Sharing an arm split that error across both blocks and
+left the profile block ~74px short of its zone. `--sector-offset` (`40deg` upper,
+`220deg` lower) still decides which *direction* each arm points.
 
 ### The hubs are inset, and that inset is the sector-utilisation dial
 
@@ -852,6 +859,28 @@ Constraint 4 is the binding one, and it is invisible without modelling it: the
 previously shipped offsets passed 1-3 comfortably and still put a role sign
 across its own contribution text on the upward ray.
 
+Those four are hard constraints. The **objective** is the distance from each
+block's landed centre to the box the design review asked for — description at
+`left: clamp(24px, 2.8vw, 48px)` / `top: clamp(140px, 22vh, 220px)`, profile
+block right-aligned at `clamp(20px, 2.2vw, 40px)` and centred in the `42vh`-`82vh`
+band. A rotary cannot teleport a block to an arbitrary viewport box, so the
+solver minimises the residual instead of matching exactly: worst case **122px on
+desktop, 96px on a phone**, asserted per viewport by
+`test_the_blocks_reach_the_requested_viewport_boxes`.
+
+A fifth candidate constraint was dropped on purpose. "The block's farthest corner
+stays inside the wheel rim" is satisfiable on desktop (119px of clearance) but
+**provably impossible on a phone**: a 230px block inside a 421px disc leaves 57px
+of reach while the header and padding need 184px. Enforcing it there yields no
+solution at all, so narrow screens solve against 1-4 only.
+
+The requested widths are floored for the same reason. Bare `min(23vw, 340px)` is
+90px on a 390px phone — about eleven characters a line — and bare
+`min(17.5vw, 260px)` is 68px, narrower than the 110px avatar it has to contain.
+Both are therefore `min(max(<vw>, <floor>), <cap>)`, and the narrow-screen block
+declares no width of its own, so the solver only ever has one set of numbers to
+reason about.
+
 ### Role signs hang from their own segment
 
 The three upper-wheel signs were once positioned by hand with per-index
@@ -882,6 +911,41 @@ The wedge looked tidy and silently truncated copy at narrow viewports (corners
 reach 64-78 degrees against a 60-degree limit), and a clip-path is invisible in a
 text diff. `.rotary-disc__sector-track::before` is `z-index: 1`, below the detail
 blocks at `4`; at `5` the decorative radial lines drew across the text.
+
+### The backdrop is deliberately bright, and the copy gets a scrim
+
+Two canvas layers sit behind this screen: the site-wide `.ambient-dot-matrix`
+and the credits-only `.credits-wave-matrix`. Both were tuned faint, a design
+review called the result close to invisible, and both now paint at the values it
+specified — dots from 2px at rest to 4.5px on an audio peak at 0.75-0.95 alpha,
+mesh lines from 0.28 up to 0.45 on a crest, idle undulation 0.26 of a cell where
+it used to be 0.12.
+
+Two things make that survivable:
+
+**A scrim behind each detail block.** `.rotary-segment__content::before` paints a
+radial gradient of the theme's own `--bg-rgb` at `z-index: -1`, with
+`inset: -24% -18%` so it extends *past* the text box instead of stopping at its
+edge, where the glow would otherwise be most visible. This is the chosen answer
+to "the background is now loud": dim the pixels behind the copy specifically,
+rather than dimming the whole canvas or vignetting the screen edges.
+
+**A pre-rendered glow sprite.** The review asked for `shadowBlur` 8-12 on every
+dot and mesh node. Across the two layers that is on the order of 2000 `shadowBlur`
+calls per frame, and it is one of the most expensive things a 2D context can do.
+`makeGlowSprite()` bakes the same radial falloff into an off-screen canvas once
+per colour and `drawGlow()` blits it with `drawImage` — the same picture for a
+fraction of the cost, and the reason no `shadowBlur` assignment appears anywhere
+in `app.js`. Both canvases rebuild their sprite when the OS flips scheme, because
+the glow is baked together with the palette.
+
+Colours come from four dedicated tokens — `--mesh-node-rgb`, `--mesh-node-hi-rgb`,
+`--mesh-glow-rgb`, `--mesh-line-rgb` — declared in `:root` and redefined *deeper*
+under `prefers-color-scheme: light`, since a bright violet reads as a stain on a
+light page. They are separate from the brand channels so the background can be
+retuned without touching buttons, links or the wordmark, and both canvases read
+them back out of CSS rather than hardcoding a triple that would paint dark-theme
+neon onto a light page.
 
 ### Scroll physics
 

@@ -140,6 +140,17 @@
   --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%239aa8bf' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
 
 
+  /* ---- 1h. Credits mesh ----
+     Deliberately bright: on the credits screen the mesh is a feature, not a
+     texture. Tokenised rather than hardcoded in the canvas for two reasons --
+     the light theme needs deep equivalents instead of dark-theme neon on white,
+     and the whole background should be retunable from one place. The four
+     values are the ones the design review asked for. */
+  --mesh-node-rgb: 147, 112, 255;      /* electric violet */
+  --mesh-node-hi-rgb: 190, 210, 255;   /* cyan-white highlight */
+  --mesh-glow-rgb: 124, 92, 255;       /* bloom around each dot and node */
+  --mesh-line-rgb: 120, 95, 255;       /* the connecting grid lines */
+
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -212,6 +223,14 @@
     --text-dim: #4B5563;
     /* 5.02:1 on the darkest light surface; still visibly fainter than --text-dim. */
     --text-faint: #5A6472;
+
+    /* The dark mesh values are neon on near-black and would wash out to nothing
+       on off-white, so they are deepened the same way --lavender and --accent
+       are: same hue, enough ink to read as a line rather than a haze. */
+    --mesh-node-rgb: 109, 40, 217;
+    --mesh-node-hi-rgb: 29, 78, 216;
+    --mesh-glow-rgb: 91, 33, 182;
+    --mesh-line-rgb: 109, 40, 217;
     --text-bright: #0F1216;
     /* The light accent is deep enough to carry white ink, so buttons flip
        from dark-plum-on-violet to white-on-violet (7.2:1).             */
@@ -2792,25 +2811,34 @@ h1, h2, h3 {
   --segment-scale: 0.6;
   --segment-opacity: 0.3;
   position: absolute;
-  /* ONE offset for both wheels. Each block is centred on this point rather than
-     hung from its top-left corner, so where it lands no longer depends on how
-     tall its own copy happens to be -- a longer bio used to push the whole
-     block off its mark, through the viewport edge and into the status bar.
+  /* Each block is centred on this point rather than hung from its top-left
+     corner, so where it lands does not depend on how tall its own copy happens
+     to be -- a longer bio used to push the whole block off its mark, through the
+     viewport edge and into the status bar.
 
-     What separates the two wheels is only --sector-offset (40deg upper,
-     220deg lower), which is what puts one block in the upper-left zone and its
-     mirror in the lower-right.
+     The two blocks no longer share ONE arm. They used to, and that is a real
+     constraint rather than a tidy-up: the sectors are exactly 180 degrees apart
+     and the hubs sit on opposite corners, so top = hub + u forces
+     bottom = hub' - u. Both target zones are then reachable only if they are
+     symmetric about the viewport centre, and the requested ones are not (they
+     differ by ~48px horizontally and ~36px vertically at 1440x900). Sharing an
+     arm split that error across both blocks and left the profile block ~74px
+     short of its zone. Giving --contribution and --profile their own top/left
+     breaks the coupling.
 
-     Solved, not eyeballed, against 14 viewports and four hard constraints: the
-     safe area (edges, header, status bar), the zone each wheel owns, no overlap
-     between the two blocks, and no overlap with the rim label that shares the
-     block's ray -- the hanging role sign above, the name plate below. That last
-     constraint is checked on all three landing rays per wheel, which are always
-     {40,160,280} and {220,340,100} no matter which member is settled, because
-     A_i -/+ 120m reduces to the same three angles. See "Credits rotary
-     geometry" in the README. */
-  top: 43%;
-  left: 81.5%;
+     Solved by constrained search over 14 viewports against the four hard
+     contracts the suite already asserts: the safe area (24px from every edge,
+     clear of the header and the status bar), the zone each wheel owns, no
+     overlap between the two blocks, and no collision with the rim label sharing
+     the block's ray -- on all three landing rays, with the two non-settled
+     blocks measured at the 0.6 scale they really render at. The objective is the
+     distance to the boxes the design review asked for: worst case 122px desktop,
+     96px on a phone. "Fully inside the wheel rim" is deliberately NOT one of the
+     constraints because it is provably impossible on a phone -- a 230px block
+     inside a 421px disc leaves 57px of reach, while the header and padding need
+     184px. See "Credits rotary geometry" in the README. */
+  top: 58%;
+  left: 76%;
   z-index: 4;
   opacity: var(--segment-opacity);
   transform: translate(-50%, -50%) rotate(calc(0deg - var(--segment-angle) - var(--disc-rotation, 0deg))) scale(var(--segment-scale));
@@ -2822,6 +2850,26 @@ h1, h2, h3 {
 .rotary-segment.is-active .rotary-segment__content {
   --segment-scale: 1;
   --segment-opacity: 1;
+}
+
+/* The mesh is now bright enough to compete with the copy, and the copy has no
+   background of its own -- it sits directly on the canvas. So each block carries
+   a soft scrim: a radial fade of the page background painted behind the text but
+   above the canvas (z-index -1 inside the block's own stacking context). It has
+   no hard edge, and because it is a child of the block it inherits
+   --segment-opacity, so the two non-settled blocks fade their scrims out along
+   with their copy instead of leaving dark blobs on the wheel. */
+.rotary-segment__content::before {
+  content: '';
+  position: absolute;
+  inset: -24% -18%;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    rgba(var(--bg-rgb), 0.9),
+    rgba(var(--bg-rgb), 0.6) 52%,
+    rgba(var(--bg-rgb), 0) 78%);
+  pointer-events: none;
 }
 
 /* The arriving contributor.
@@ -2866,7 +2914,12 @@ h1, h2, h3 {
 }
 
 .rotary-segment__content--contribution {
-  width: min(30rem, calc(var(--rotary-disc-size) * 0.37));
+  /* Narrower and taller than before, so the paragraph wraps clear of the wheel's
+     inner ring instead of running across it. The 230px floor keeps it readable
+     on a phone: the review's bare min(23vw, 340px) is 90px at 390px wide, about
+     eleven characters a line. */
+  width: min(max(23vw, 230px), 340px);
+  min-height: 24vh;
 }
 
 .rotary-disc__contributions {
@@ -2958,7 +3011,12 @@ h1, h2, h3 {
   display: grid;
   justify-items: center;
   gap: clamp(0.9rem, calc(var(--rotary-disc-size) * 0.015), 1.5rem);
-  width: min(21rem, calc(var(--rotary-disc-size) * 0.30));
+  /* Its own arm: see .rotary-segment__content. Width floored at 200px so the
+     110px avatar and its caption always fit -- the review's bare min(17.5vw,
+     260px) is 68px on a 390px phone, narrower than the avatar it contains. */
+  top: 64%;
+  left: 76.5%;
+  width: min(max(17.5vw, 200px), 260px);
   text-align: center;
 }
 
@@ -3235,13 +3293,13 @@ h1, h2, h3 {
      old 137% because the hub no longer sits off-screen, but it is still longer
      than desktop's: a phone's blocks are a larger fraction of its disc. */
   .rotary-segment__content {
-    top: 88%;
-    left: 115%;
+    top: 85.5%;
+    left: 108.5%;
   }
 
-  .rotary-segment__content--contribution {
-    width: min(10.5rem, 32vw);
-  }
+  /* No width override here on purpose. The base rule is already viewport-relative
+     with a readable floor, so re-declaring a rem/vw mix would only hand the
+     geometry solver a second set of numbers to disagree with. */
 
   .rotary-disc__contributions {
     font-size: clamp(0.66rem, calc(var(--rotary-disc-size) * 0.014), 0.88rem);
@@ -3249,8 +3307,9 @@ h1, h2, h3 {
   }
 
   .rotary-segment__content--profile {
+    top: 84.5%;
+    left: 103.5%;
     gap: 0.45rem;
-    width: min(10.5rem, 32vw);
   }
 
   .rotary-profile__photo-frame {

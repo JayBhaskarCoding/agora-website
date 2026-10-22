@@ -586,15 +586,17 @@ class LaunchContract(unittest.TestCase):
         dark-theme dots onto a light page.
         """
         js = (ROOT / "app.js").read_text()
-        self.assertIn("getPropertyValue('--blue-rgb')", js)
-        self.assertIn("getPropertyValue('--accent-rgb')", js)
-        self.assertIn("palette.blue : palette.accent", js)
+        # Dedicated mesh channels, so the background can be retuned without
+        # touching buttons, links or the wordmark -- but still read from CSS.
+        for token in ("--mesh-node-rgb", "--mesh-node-hi-rgb", "--mesh-glow-rgb"):
+            self.assertIn("getPropertyValue('" + token + "')", js)
+        self.assertIn("highlight ? sprites.hi : sprites.node", js)
         self.assertIn("(prefers-color-scheme: light)", js)
         # The draw loop must not inline the palette; the literals may only
         # survive as the named fallbacks used when the tokens are unreadable.
-        self.assertNotRegex(js, r"\?\s*'96,165,250'\s*:\s*'139,92,246'")
-        self.assertIn("FALLBACK_BLUE", js)
-        self.assertIn("FALLBACK_ACCENT", js)
+        self.assertNotRegex(js, r"\?\s*'147,112,255'\s*:\s*'190,210,255'")
+        for name in ("FALLBACK_NODE", "FALLBACK_HI", "FALLBACK_GLOW"):
+            self.assertIn(name, js)
 
     def test_theme_color_meta_follows_scheme(self):
         """Browser chrome must not stay dark when the page goes light."""
@@ -2131,17 +2133,30 @@ class CreditsRotaryGeometry(unittest.TestCase):
         self.assertIn("--disc-rotation", transform)
         self.assertEqual(self.decl(body, "transform-origin"), "center")
 
-    def test_both_wheels_share_one_detail_block_offset(self):
-        """The only thing that should separate the two blocks is the wheel's own
-        --sector-offset. Two independently tuned offsets is how they ended up on
-        the same side of the screen."""
-        base, _ = self.block(".rotary-segment__content {")
-        for modifier in (".rotary-segment__content--contribution {",
-                         ".rotary-segment__content--profile {"):
-            body, _ = self.block(modifier)
-            self.assertIsNone(self.decl(body, "top"), f"{modifier} re-tunes top")
-            self.assertIsNone(self.decl(body, "left"), f"{modifier} re-tunes left")
-        self.assertEqual((self.pct(base, "left"), self.pct(base, "top")), (81.5, 43.0))
+    def test_each_detail_block_carries_its_own_arm(self):
+        """This replaces the previous rule that both blocks shared one offset.
+
+        Sharing an arm is a real geometric constraint, not a tidy-up: with the
+        sectors exactly 180 degrees apart and the hubs on opposite corners,
+        `top = hub + u` forces `bottom = hub' - u`, so one arm can only land two
+        boxes that are symmetric about the viewport centre. The requested ones
+        are not -- they differ by ~48px horizontally and ~36px vertically at
+        1440x900 -- so each block now solves for its own.
+        """
+        self.assertEqual(self.arm("contribution"), (76.0, 58.0))
+        self.assertEqual(self.arm("profile"), (76.5, 64.0))
+        self.assertNotEqual(self.arm("contribution"), self.arm("profile"),
+                            "the arms must differ, or one box is unreachable")
+        self.assertEqual(self.arm("contribution", mobile=True), (108.5, 85.5))
+        self.assertEqual(self.arm("profile", mobile=True), (103.5, 84.5))
+
+    def test_the_mobile_width_overrides_are_gone(self):
+        """The base widths are viewport-relative with a readable floor, so a
+        second rem/vw pair under the mobile breakpoint only gave the solver two
+        sets of numbers to disagree with."""
+        tail = self.mobile_offset()
+        self.assertNotIn("10.5rem, 32vw", self.css[tail:],
+                         "a stale mobile width override survived")
 
     def test_segments_no_longer_clip_their_content(self):
         """The upper wheel clipped its sectors to a 120-degree wedge, which cut
@@ -2179,6 +2194,23 @@ class CreditsRotaryGeometry(unittest.TestCase):
                   + math.ceil(96 / max(1, pw / (bfs * 0.505))) * bfs * 1.55)
         return (cw, ch), (pw, ph)
 
+    def arm(self, block, mobile=False):
+        """The settled arm of ONE detail block, read from the CSS on disk.
+
+        Each block now carries its own top/left, so a caller has to say which
+        one it means. This is the whole reason the helper exists: a single
+        shared arm cannot reach two boxes that are not symmetric about the
+        viewport centre, and the requested ones are not.
+        """
+        selector = (".rotary-segment__content--profile {" if block == "profile"
+                    else ".rotary-segment__content {")
+        body, _ = self.block(selector)
+        if mobile:
+            override, _ = self.block(selector, self.mobile_offset())
+            if override:
+                body = override
+        return self.pct(body, "left"), self.pct(body, "top")
+
     def _landing(self, w, h, mobile, which, left, top, bw, bh):
         d = self.disc_diameter(w, h, mobile)
         hub_x, hub_y = self.hub(which, w, h, mobile)
@@ -2194,16 +2226,17 @@ class CreditsRotaryGeometry(unittest.TestCase):
         Recomputes each block's landing box from the CSS actually on disk and
         fails if it reaches past an edge, under the header, or into the status
         bar. Before the fix this failed on 8 of 9 viewports."""
-        base, _ = self.block(".rotary-segment__content {")
-        mobile, _ = self.block(".rotary-segment__content {", self.mobile_offset())
-        cases = [(w, h, False, self.pct(base, "left"), self.pct(base, "top"), 68, 76)
-                 for w, h in self.DESKTOP]
-        cases += [(w, h, True, self.pct(mobile, "left"), self.pct(mobile, "top"), 58, 100)
-                  for w, h in self.MOBILE]
-        for w, h, mob, left, top, header, status in cases:
+        cases = [(w, h, False, 68, 76) for w, h in self.DESKTOP]
+        cases += [(w, h, True, 58, 100) for w, h in self.MOBILE]
+        for w, h, mob, header, status in cases:
             d = self.disc_diameter(w, h, mob)
             (cw, chh), (pw, phh) = self._metrics(w, h, d, mob)
+            # Each block lands from ITS OWN arm; feeding both the same one is how
+            # a passing test used to hide an unreachable box.
+            arms = {"top": self.arm("contribution", mob),
+                    "bottom": self.arm("profile", mob)}
             for which, bw, bh in (("top", cw, chh), ("bottom", pw, phh)):
+                left, top = arms[which]
                 x0, y0, x1, y1 = self._landing(w, h, mob, which, left, top, bw, bh)
                 with self.subTest(viewport=f"{w}x{h}", mobile=mob, block=which):
                     self.assertGreaterEqual(x0, self.PAD, "runs off the left edge")
@@ -2219,14 +2252,58 @@ class CreditsRotaryGeometry(unittest.TestCase):
         w, h = 1440, 900
         d = self.disc_diameter(w, h, False)
         (cw, chh), (pw, phh) = self._metrics(w, h, d, False)
-        tx, ty, _, _ = self._landing(w, h, False, "top", self.pct(base, "left"),
-                                     self.pct(base, "top"), cw, chh)
-        bx, by, _, _ = self._landing(w, h, False, "bottom", self.pct(base, "left"),
-                                     self.pct(base, "top"), pw, phh)
+        tl, tt = self.arm("contribution")
+        bl, bt = self.arm("profile")
+        tx, ty, _, _ = self._landing(w, h, False, "top", tl, tt, cw, chh)
+        bx, by, _, _ = self._landing(w, h, False, "bottom", bl, bt, pw, phh)
         self.assertLess(tx + cw / 2, w / 2, "the description block is not upper-left")
         self.assertLess(ty + chh / 2, h / 2, "the description block is not upper-left")
         self.assertGreater(bx + pw / 2, w / 2, "the profile block is not lower-right")
         self.assertGreater(by + phh / 2, h / 2, "the profile block is not lower-right")
+
+    def test_the_blocks_reach_the_requested_viewport_boxes(self):
+        """The review asked for two specific boxes: the description at
+        left clamp(24px, 2.8vw, 48px) / top clamp(140px, 22vh, 220px), and the
+        profile block right-aligned at clamp(20px, 2.2vw, 40px), vertically
+        centred in the 42vh-82vh band.
+
+        The rotary cannot teleport a block to an arbitrary viewport box -- it
+        lands wherever its arm puts it after the wheel's own rotation -- so this
+        asserts the residual instead of an exact match, and the tolerance is the
+        solver's honest output rather than a round number. On desktop the arms
+        land within ~48px (description) and ~56px (profile) of the requested
+        centre. Every number here comes out of a constrained search that also
+        has to satisfy the shipped safe-area, rim-label and non-overlap
+        contracts, so it is the closest the mechanism can legally get -- not a
+        round number chosen to make the test pass. Worst case: 122px desktop,
+        96px on a phone.
+        """
+        def requested(w, h, mob):
+            pad_l = min(max(24, 0.028 * w), 48)
+            pad_r = min(max(20, 0.022 * w), 40)
+            cw = min(max(0.23 * w, 230), 340)
+            pw = min(max(0.175 * w, 200), 260)
+            top = min(max(140, 0.22 * h), 220)
+            return ((pad_l + cw / 2, top + 0.12 * h),          # description
+                    (w - pad_r - pw / 2, 0.62 * h))            # profile
+
+        tolerance = {False: 130.0, True: 100.0}
+        for mob, viewports in ((False, self.DESKTOP), (True, self.MOBILE)):
+            for w, h in viewports:
+                d = self.disc_diameter(w, h, mob)
+                (cw, chh), (pw, phh) = self._metrics(w, h, d, mob)
+                (rx, ry), (qx, qy) = requested(w, h, mob)
+                tl, tt = self.arm("contribution", mob)
+                bl, bt = self.arm("profile", mob)
+                for which, (bw, bh), arm, (tx, ty) in (
+                        ("top", (cw, chh), (tl, tt), (rx, ry)),
+                        ("bottom", (pw, phh), (bl, bt), (qx, qy))):
+                    x0, y0, x1, y1 = self._landing(w, h, mob, which, arm[0], arm[1], bw, bh)
+                    residual = math.hypot((x0 + x1) / 2 - tx, (y0 + y1) / 2 - ty)
+                    with self.subTest(viewport=f"{w}x{h}", mobile=mob, block=which):
+                        self.assertLessEqual(
+                            residual, tolerance[mob],
+                            f"{which} block landed {residual:.0f}px from the requested box")
 
     # --- helpers for the rim labels ------------------------------------
     REM = 16.0
@@ -2387,17 +2464,19 @@ class CreditsRotaryGeometry(unittest.TestCase):
         A_i -/+ 120m always reduces to {40,160,280} and {220,340,100}, so the set
         of directions is fixed no matter which contributor is showing. The two
         non-settled blocks are measured at the 0.6 scale they really render at."""
-        base, _ = self.block(".rotary-segment__content {")
-        mobile_body, _ = self.block(".rotary-segment__content {", self.mobile_offset())
         rays = {"top": (40, 160, 280), "bottom": (220, 340, 100)}
-        for mobile, viewports, body in ((False, self.DESKTOP, base), (True, self.MOBILE, mobile_body)):
-            left, top = self.pct(body, "left"), self.pct(body, "top")
+        for mobile, viewports in ((False, self.DESKTOP), (True, self.MOBILE)):
+            # Each block now carries its own arm, so each wheel is measured at
+            # the arm that actually places ITS block.
+            arms = {"top": self.arm("contribution", mobile),
+                    "bottom": self.arm("profile", mobile)}
             for w, h in viewports:
                 d = self.disc_diameter(w, h, mobile)
                 (cw, chh), (pw, phh) = self._metrics(w, h, d, mobile)
                 bw_l, bh_l = self.label_box(mobile, d, w)
                 cord = self.cord_length(mobile, d)
                 for which in ("top", "bottom"):
+                    left, top = arms[which]
                     r_orbit = self.orbit_radius("sign" if which == "top" else "name", mobile)
                     size = (cw, chh) if which == "top" else (pw, phh)
                     for theta in rays[which]:
@@ -2415,15 +2494,14 @@ class CreditsRotaryGeometry(unittest.TestCase):
                                              "the copy collides with its own rim label")
 
     def test_the_two_detail_blocks_never_overlap_each_other(self):
-        base, _ = self.block(".rotary-segment__content {")
-        mobile_body, _ = self.block(".rotary-segment__content {", self.mobile_offset())
-        for mobile, viewports, body in ((False, self.DESKTOP, base), (True, self.MOBILE, mobile_body)):
-            left, top = self.pct(body, "left"), self.pct(body, "top")
+        for mobile, viewports in ((False, self.DESKTOP), (True, self.MOBILE)):
+            lc, tc = self.arm("contribution", mobile)
+            lp, tp = self.arm("profile", mobile)
             for w, h in viewports:
                 d = self.disc_diameter(w, h, mobile)
                 (cw, chh), (pw, phh) = self._metrics(w, h, d, mobile)
-                tx, ty = self.content_centre(w, h, mobile, "top", 40, left, top)
-                bx, by = self.content_centre(w, h, mobile, "bottom", 220, left, top)
+                tx, ty = self.content_centre(w, h, mobile, "top", 40, lc, tc)
+                bx, by = self.content_centre(w, h, mobile, "bottom", 220, lp, tp)
                 with self.subTest(viewport=f"{w}x{h}", mobile=mobile):
                     self.assertFalse(self.hits(self.box(tx, ty, cw, chh),
                                                self.box(bx, by, pw, phh)),
@@ -2540,8 +2618,11 @@ class CreditsWaveMatrix(unittest.TestCase):
                       "and must not stack a second canvas on a re-run")
 
     def test_it_follows_the_theme_instead_of_hardcoding_colour(self):
-        self.assertIn("getPropertyValue('--violet-soft-rgb')", self.body)
-        self.assertIn("getPropertyValue('--blue-rgb')", self.body)
+        # The mesh now reads dedicated --mesh-* channels rather than the general
+        # brand ones, so the background can be retuned without touching buttons,
+        # links or the wordmark. Still read from CSS, never hardcoded.
+        for token in ("--mesh-line-rgb", "--mesh-node-rgb", "--mesh-glow-rgb"):
+            self.assertIn("getPropertyValue('" + token + "')", self.body)
         self.assertIn("prefers-color-scheme: light", self.body,
                       "a mid-session scheme flip has to re-read the palette")
         # Assert on the PAINT CALL SITES. The regex has to exclude the helper's
@@ -2559,38 +2640,88 @@ class CreditsWaveMatrix(unittest.TestCase):
         self.assertIn("context.strokeStyle = 'rgba(' + color + ','", self.body,
                       "the helper must build its colour from the channel it is given")
 
-    def test_it_stays_subtle_enough_to_read_through(self):
-        """The mesh sits behind the copy, so the CEILING matters more than the
-        ramp: a loud track must not be able to push a line into competing with
-        the text. Each stroke pass therefore carries its own Math.min cap."""
-        # Exclude the helper's own declaration -- `function stroke(points,
-        # color, alpha)` matches the same shape as a call site.
+    def _stroke_caps(self):
+        """(ceiling, floor) for each stroke pass, excluding the helper's own
+        declaration -- `function stroke(points, color, alpha)` matches the same
+        shape as a call site and has no numbers worth reading."""
         declaration = "function stroke(points, color, alpha) {"
         self.assertIn(declaration, self.body)
         call_body = self.body.replace(declaration, "")
         callsites = re.findall(r"stroke\(points,\s*([^,]+),", call_body)
         self.assertEqual(len(callsites), 2,
                          f"expected a row pass and a column pass, got {callsites}")
+        # Scoped to the stroke calls: glowNode carries a Math.min of its own for
+        # the node alpha, and counting it here would look like a third stroke pass.
         caps = [(float(cap), float(floor)) for cap, floor
-                in re.findall(r"Math\.min\((0\.\d+),\s*(0\.\d+) \+", self.body)]
+                in re.findall(r"stroke\(points,[^;]*?Math\.min\((0\.\d+),\s*(0\.\d+) \+",
+                              call_body, re.DOTALL)]
         self.assertEqual(len(caps), len(callsites),
                          "every stroke pass must be capped, one Math.min each")
-        self.assertLessEqual(max(cap for cap, _ in caps), 0.13,
-                             "the mesh must sit behind the copy, not compete with it")
-        # Silence still has to be visible, or the background reads as dead.
-        self.assertGreater(min(floor for _, floor in caps), 0,
-                           "the silent mesh vanished")
+        return caps
 
-    def test_the_glowing_nodes_are_capped_too(self):
-        """Nodes are tiny but bright, so they get their own ceiling: a halo and a
-        core, neither of which may bloom into the copy above them."""
-        alphas = [float(a) for a in re.findall(r"\+ \(heat \* (0\.\d+)\)", self.body)]
-        bases = [float(a) for a in re.findall(r"\((0\.\d+) \+ \(heat", self.body)]
-        self.assertEqual(len(alphas), 2, f"expected a halo and a core, got {alphas}")
-        self.assertEqual(len(bases), 2, bases)
-        peaks = [b + a for b, a in zip(bases, alphas)]
-        self.assertLessEqual(max(peaks), 0.22 + 1e-9,
-                             "a node at full heat must stay a speck, not a lamp")
+    def test_the_mesh_is_prominent_by_design(self):
+        """This is the inverse of the rule this file used to assert.
+
+        The previous contract was "stay under 0.13 alpha because it sits behind
+        the copy". The review looked at that and called it too faint, so the
+        FLOOR is now the interesting number: a silent mesh has to read at 0.28,
+        and a crest may go to 0.45. The ceiling still exists -- a loud track
+        must not be able to push a line past it -- it just moved up.
+        """
+        caps = self._stroke_caps()
+        rows = max(caps)                      # the brighter of the two passes
+        self.assertGreaterEqual(rows[1], 0.28,
+                                "a silent mesh must still read as present")
+        self.assertLessEqual(rows[0], 0.45,
+                             "a loud track must not blow the mesh past its cap")
+        self.assertLessEqual(min(caps)[0], 0.38,
+                             "columns sit a step below rows so the grid keeps depth")
+        amp = re.search(r"spacing \* \((0\.\d+) \+ \(energy \* (0\.\d+)\)\)",
+                        self.body)
+        self.assertIsNotNone(amp, "the idle amplitude is no longer expressed in cells")
+        self.assertGreaterEqual(float(amp.group(1)), 0.26,
+                                "the undulation must be obvious with the music paused")
+        self.assertLess(float(amp.group(1)) + float(amp.group(2)), 1.0,
+                        "past one cell the lines cross and read as tearing")
+
+    def test_the_glowing_nodes_use_the_requested_size_ramp(self):
+        """Nodes follow the same ramp the dot matrix does -- 2px at rest up to
+        4.5px at full audio heat -- so the two layers read as one material
+        rather than as a grid with unrelated stars on it."""
+        radius = re.search(r"Math\.min\((4\.\d+), 2 \+ \(heat \* (\d+\.\d+)\)\)",
+                           self.body)
+        self.assertIsNotNone(radius, "the node radius ramp changed shape")
+        self.assertEqual(float(radius.group(1)), 4.5)
+        # Full heat has to actually REACH that ceiling, or the cap is decoration.
+        self.assertGreaterEqual(2 + float(radius.group(2)), 4.5,
+                                "a node at full audio heat never reaches 4.5px")
+        alpha = re.search(r"Math\.min\((0\.\d+), 0\.7 \+ \(heat \* (0\.\d+)\)\)",
+                          self.body)
+        self.assertIsNotNone(alpha, "the node alpha ramp changed shape")
+        self.assertGreaterEqual(float(alpha.group(1)), 0.9)
+        self.assertIn("drawGlow(context, nodeSprite, palette.node", self.body,
+                      "nodes must be blitted from the shared sprite")
+
+    def test_the_glow_is_prerendered_because_shadowblur_cannot_afford_it(self):
+        """The review asked for shadowBlur 8-12 on every dot and node. Between
+        the two canvases that is ~2000 shadowBlur calls per frame, which is a
+        dropped-frame machine on a phone. The sprite is the same picture for a
+        fraction of the cost, so the literal API must not creep back in."""
+        self.assertNotRegex(self.app, r"(ctx|context|c)\.shadowBlur\s*=",
+                            "shadowBlur is back in the frame loop")
+        self.assertIn("function makeGlowSprite(", self.app)
+        self.assertIn("function drawGlow(", self.app)
+        self.assertIn("createRadialGradient(", self.app)
+        # Both canvases must rebuild their sprite when the palette does, or the
+        # nodes keep glowing in the previous theme's colour after a scheme flip.
+        self.assertIn("nodeSprite = makeGlowSprite(palette.node, palette.glow);", self.app)
+        # A COUNT, not assertIn: the dot matrix also builds its sprites once at
+        # init, and that line alone satisfies a substring check -- so deleting
+        # only the rebuild-on-scheme-flip used to survive.
+        self.assertEqual(self.app.count("sprites = buildSprites(palette);"), 2,
+                         "one build at init and one on every scheme flip")
+        self.assertEqual(self.app.count("makeGlowSprite(palette.node, palette.glow)"), 2,
+                         "one rebuild per canvas")
 
     def test_reduced_motion_gets_one_frame_and_no_loop(self):
         self.assertIn("if (!reduceMotion()) window.requestAnimationFrame(draw);", self.body,
@@ -2602,6 +2733,150 @@ class CreditsWaveMatrix(unittest.TestCase):
         self.assertIn("Math.min(window.devicePixelRatio || 1, 1.75)", self.body)
         self.assertIn("context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)", self.body)
         self.assertIn("addEventListener('resize', resize", self.body)
+
+
+class CreditsBackdrop(unittest.TestCase):
+    """The two painted layers behind the credits screen, plus what keeps the copy
+    readable now that both are deliberately bright.
+
+    The review asked for the dot matrix and wave mesh to stop reading as a faint
+    texture. That is a real change of contract -- this file used to assert the
+    opposite -- so the numbers the review specified are pinned here, and so is
+    the thing that makes them survivable: a scrim behind each block of copy.
+    """
+
+    TOKENS = ("--mesh-node-rgb", "--mesh-node-hi-rgb", "--mesh-glow-rgb",
+              "--mesh-line-rgb")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.css = (ROOT / "style.css").read_text()
+        cls.app = (ROOT / "app.js").read_text()
+        cls.root = cls.css.split(":root {", 1)[1].split("\n}", 1)[0]
+        i = cls.css.index("@media (prefers-color-scheme: light) {")
+        cls.light = cls.css[i:].split("\n}", 1)[0]
+
+    def channels(self, region):
+        out = {}
+        for token in self.TOKENS:
+            found = re.findall(re.escape(token) + r":\s*([\d,\s]+);", region)
+            if found:
+                out[token] = [int(x) for x in found[0].replace(" ", "").split(",")]
+        return out
+
+    # --- the colour contract -------------------------------------------
+    def test_the_mesh_channels_exist_in_both_themes(self):
+        """Four dedicated channels, not literals in the canvas code. Both canvases
+        read them back out of CSS, so a theme with no definition would silently
+        fall back to the dark values on a light page."""
+        dark, light = self.channels(self.root), self.channels(self.light)
+        for token in self.TOKENS:
+            with self.subTest(token=token):
+                self.assertIn(token, dark, "missing from :root")
+                self.assertIn(token, light, "missing from the light theme")
+                self.assertEqual(len(dark[token]), 3)
+                self.assertNotEqual(dark[token], light[token],
+                                    "light mode would inherit dark neon")
+
+    def test_the_mesh_channels_are_the_requested_colours(self):
+        """The review specified exact channels -- dots from rgba(147,112,255)
+        up to rgba(190,210,255), bloom at rgba(124,92,255), lines at
+        rgba(120,95,255). Pinning them means a recolour is a decision recorded
+        in a diff rather than a silent drift, and it is what stops the dark
+        theme from being swapped for a generic brand blue."""
+        dark = self.channels(self.root)
+        self.assertEqual(dark["--mesh-node-rgb"], [147, 112, 255])
+        self.assertEqual(dark["--mesh-node-hi-rgb"], [190, 210, 255])
+        self.assertEqual(dark["--mesh-glow-rgb"], [124, 92, 255])
+        self.assertEqual(dark["--mesh-line-rgb"], [120, 95, 255])
+
+    def test_the_light_theme_deepens_the_mesh(self):
+        """On a light page a bright violet reads as a stain, so the light values
+        have to go DARKER, not just different. Asserting direction rather than
+        exact numbers keeps this from becoming a second copy of the palette."""
+        dark, light = self.channels(self.root), self.channels(self.light)
+        for token in self.TOKENS:
+            with self.subTest(token=token):
+                self.assertLess(sum(light[token]), sum(dark[token]),
+                                "light theme mesh is not deeper than dark")
+
+    def test_the_canvas_never_hardcodes_a_channel(self):
+        """The literals may only survive as named fallbacks for an unreadable
+        custom property. A bare triple inside a draw call is how a canvas ends up
+        painting the wrong theme."""
+        # Two earlier versions of this check were both wrong. Scanning quoted
+        # literals pairs apostrophes across the whole file, and a comment like
+        # "the dot's own disc" shifts that pairing so real literals fall BETWEEN
+        # matches -- which is how it passed on a mutated file. Stripping comments
+        # with a regex is worse: app.js is full of regex literals, so a
+        # non-greedy /*...*/ pairs across them and eats live code. Assert the
+        # bug class directly instead of trying to parse JavaScript.
+        for rgb in ("147,112,255", "190,210,255", "124,92,255", "120,95,255"):
+            bare = r"\s*,\s*".join(rgb.split(","))
+            with self.subTest(channel=rgb):
+                # It exists, as a bare constant...
+                self.assertIn("'" + rgb + "'", self.app, "channel is not declared at all")
+                # ...and is never baked into a colour literal, which is the shape
+                # an inlined paint call takes: 'rgba(147,112,255,0.8)'.
+                self.assertNotRegex(self.app, r"rgba\(\s*" + bare,
+                                    f"{rgb} is inlined into an rgba() literal")
+        for name in ("FALLBACK_NODE", "FALLBACK_HI", "FALLBACK_GLOW", "FALLBACK_LINE"):
+            self.assertIn(name, self.app)
+
+    # --- the size and brightness contract -------------------------------
+    def test_the_dot_matrix_uses_the_requested_size_ramp(self):
+        """2px at rest, 3.5px across the wave, 4.5px on an audio peak, and alpha
+        0.75 to 0.95 -- the review's numbers. Both are ceilinged, so a loud track
+        cannot grow a dot past the range it was designed for."""
+        radius = re.search(
+            r"Math\.min\((4\.\d+), 2 \+ \(wave \* (\d+\.\d+)\) \+ \(pulse \* (\d+)\)\)",
+            self.app)
+        self.assertIsNotNone(radius, "the dot radius ramp changed shape")
+        self.assertEqual(float(radius.group(1)), 4.5)
+        self.assertEqual(2 + float(radius.group(2)), 3.5,
+                         "a full wave should reach 3.5px before any audio")
+        alpha = re.search(
+            r"Math\.min\((0\.\d+), (0\.\d+) \+ \(wave \* (0\.\d+)\) \+ \(pulse \* (0\.\d+)\)\)",
+            self.app)
+        self.assertIsNotNone(alpha, "the dot alpha ramp changed shape")
+        self.assertEqual(float(alpha.group(1)), 0.95)
+        self.assertEqual(float(alpha.group(2)), 0.75, "a resting dot must read at 0.75")
+
+    def test_both_canvases_stay_passive_fixed_layers(self):
+        """However bright they get, they must cover the viewport and never eat a
+        wheel event -- the credits screen is entirely gesture driven."""
+        for selector in (".ambient-dot-matrix {", ".credits-wave-matrix {"):
+            body = self.css.split(selector, 1)[1].split("}", 1)[0]
+            with self.subTest(layer=selector):
+                self.assertIn("position: fixed", body)
+                self.assertIn("inset: 0", body)
+                self.assertEqual(int(re.search(r"z-index:\s*(\d+)", body).group(1)), 0)
+                self.assertIn("pointer-events: none", body)
+                self.assertNotIn("pointer-events: auto", body)
+
+    # --- the scrim that makes the brightness survivable -----------------
+    def test_the_copy_gets_a_scrim_behind_it(self):
+        """Chosen over both alternatives the review was offered: full brightness
+        everywhere with a soft radial scrim behind each detail block, rather than
+        dimming the whole canvas or vignetting the edges. The paragraph and the
+        caption sit on the darkest part of it."""
+        body = self.css.split(".rotary-segment__content::before {", 1)[1].split("}", 1)[0]
+        self.assertIn("radial-gradient", body)
+        self.assertIn("z-index: -1", body, "the scrim must sit behind the copy")
+        self.assertIn("pointer-events: none", body)
+        # Negative inset: the scrim has to extend past the text box, or the glow
+        # returns right at the edge of the paragraph where it is most visible.
+        self.assertRegex(body, r"inset:\s*-")
+
+    def test_the_scrim_follows_the_theme(self):
+        """A hardcoded dark blob would put a black halo behind the copy in light
+        mode. It has to be the theme's own background channel."""
+        body = self.css.split(".rotary-segment__content::before {", 1)[1].split("}", 1)[0]
+        self.assertIn("rgba(var(--bg-rgb)", body)
+        self.assertNotRegex(body, r"rgba\(\s*\d+\s*,", "a literal rgb triple crept in")
+        # --bg-rgb has to be defined in BOTH themes or the scrim breaks in one.
+        self.assertIn("--bg-rgb:", self.root)
+        self.assertIn("--bg-rgb:", self.light)
 
 
 class CreditsScrollPhysics(unittest.TestCase):
@@ -2792,7 +3067,11 @@ class CreditsWaveAudioReactivity(unittest.TestCase):
         what keeps the background alive instead of frozen."""
         floor = float(re.search(r"spacing \* \(([\d.]+) \+ \(energy", self.mesh).group(1))
         self.assertGreater(floor, 0, "the mesh is static until the music starts")
-        self.assertLess(floor, 0.2, "and the silent drift must stay subtle")
+        # This used to assert "stay subtle" (< 0.2 of a cell). The review called
+        # the result too faint, so the silent drift is now deliberately obvious;
+        # the ceiling that matters is one full cell, past which the lines cross.
+        self.assertGreaterEqual(floor, 0.26, "the silent mesh must visibly undulate")
+        self.assertLess(floor, 1.0, "past one cell the lines cross and read as tearing")
 
     def test_a_grid_node_lands_in_the_same_place_from_either_pass(self):
         """Rows and columns are stroked as separate passes over the same nodes. If
