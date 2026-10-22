@@ -19,6 +19,48 @@ PENDING_ASSETS = {
     "/assets/yashvardhan-bhaskar.jpg",
 }
 LOGO = "/assets/agora-logo.svg"
+
+
+# --- colour maths ------------------------------------------------------------
+# Two contracts in this file are about whether a painted layer can actually be
+# SEEN: the background mesh against the page, and the copy against the mesh. Both
+# depend on the blend mode, so both compute it rather than grepping for its name.
+def _luminance(rgb):
+    def f(c):
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (f(x) for x in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _contrast(fg, bg):
+    hi = max(_luminance(fg), _luminance(bg))
+    lo = min(_luminance(fg), _luminance(bg))
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _resolve_colour(token, region):
+    """Find `token` in `region` as three 0-1 floats.
+
+    The stylesheet stores colour two ways: an `r, g, b` channel for anything that
+    gets an alpha, and a `#RRGGBB` literal for solid ink. A test that only parsed
+    one form would silently report "not defined" for the other.
+    """
+    m = re.search(re.escape(token) + r":\s*(#[0-9A-Fa-f]{6}|[\d,\s]+);", region)
+    if not m:
+        return None
+    raw = m.group(1).strip()
+    if raw.startswith("#"):
+        return [int(raw[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    return [int(x) / 255 for x in raw.replace(" ", "").split(",")]
+
+
+def _composite(src, back, alpha, blend):
+    """Premultiply a translucent source over a backdrop using `blend`."""
+    return [(1 - alpha) * back[i] + alpha * blend(src[i], back[i]) for i in range(3)]
+
+
+SCREEN = lambda a, b: 1 - (1 - a) * (1 - b)
+MULTIPLY = lambda a, b: a * b
 # Exactly ONE element site-wide downloads the APK: the "Download APK" button on
 # download.html. It never pins a build — it ships with GitHub's permanent
 # latest-release redirect, which resolves server-side to the newest release's
@@ -2583,175 +2625,639 @@ class CreditsRotaryGeometry(unittest.TestCase):
 
 
 
-class CreditsWaveMatrix(unittest.TestCase):
-    """The credits screen's one animated background layer."""
+class AmbientMesh(unittest.TestCase):
+    """The site's ONE background canvas.
+
+    There used to be two: a square dot matrix on every page, plus a sine wave mesh
+    layered on top of it on the credits screen alone. On credits they occupied the
+    same pixels, doubled the frame cost, and where the two lattices crossed they
+    read as moire rather than as depth. This is the contract that replaced them --
+    one canvas, one triangulated field, identical on every page.
+    """
 
     @classmethod
     def setUpClass(cls):
         cls.css = (ROOT / "style.css").read_text()
         cls.app = (ROOT / "app.js").read_text()
-        cls.body = cls.app.split("function initWaveMatrix()", 1)[1].split("\n  function bootPage", 1)[0]
+        cls.mesh = cls.app.split("function initAmbientMesh()", 1)[1].split(
+            "\n  function initCreditsRotary", 1)[0]
+        cls.boot = cls.app.split("function boot()", 1)[1].split("\n  }", 1)[0]
+        cls.page = cls.app.split("function bootPage()", 1)[1].split("\n  }", 1)[0]
+        # The session-scoped ambient layer, bounded by the credits team data that
+        # follows it -- so "built once per session" is a region claim, not a guess.
+        cls.ambient = cls.app.split("function initAmbientExperience()", 1)[1].split(
+            "\n  var ROTARY_TEAM", 1)[0]
 
-    def test_the_static_texture_it_replaces_is_gone(self):
-        self.assertNotIn(".credits-rotary-page::before", self.css,
-                         "two grids on one page is exactly the noise this replaced")
-        self.assertIn(".credits-wave-matrix {", self.css)
-        body = self.css.split(".credits-wave-matrix {", 1)[1].split("}", 1)[0]
+    def rule(self, selector):
+        return self.css.split(selector + " {", 1)[1].split("}", 1)[0]
+
+    # --- exactly one ------------------------------------------------------
+    def test_the_retired_credits_layer_is_gone_from_both_files(self):
+        """Deleting a layer means deleting it. The class, the initializer, the
+        cleanup closure and the section banner are all gone -- 300 lines of canvas
+        code that nothing calls would still be 300 lines a future reader has to
+        reconcile against the one that does run."""
+        for token in (".credits-wave-matrix {", "initWaveMatrix", "waveMatrixCleanup",
+                      "CREDITS WAVE MATRIX", "credits-wave-matrix"):
+            for name, source in (("style.css", self.css), ("app.js", self.app)):
+                with self.subTest(token=token, file=name):
+                    self.assertNotIn(token, source)
+        # A class selector is the thing that would resurrect the layer; the word
+        # "wave" on its own is ordinary prose about a wave and must stay usable.
+        self.assertNotIn("ambient-dot-matrix", self.css, "the old class outlived its rename")
+        self.assertNotIn("ambient-dot-matrix", self.app)
+
+    def test_exactly_one_canvas_is_built_for_the_whole_site(self):
+        """One createElement('canvas') in the entire file.
+
+        A second background canvas is not a styling choice, it is two lattices
+        fighting over the same pixels at twice the frame cost -- the exact thing
+        this round removed. Counted on the source rather than on a rendered page,
+        because the count is the contract: the site-wide layer and the
+        page-scoped layer are the same layer now."""
+        # createElement('canvas') appears TWICE and that is correct: the second is
+        # makeGlowSprite's 64x64 offscreen glow texture, which is never inserted
+        # into the document. What has to be singular is a canvas ATTACHED to the
+        # page, so count the attachment rather than the creation.
+        self.assertEqual(self.app.count("createElement('canvas')"), 2,
+                         "one background canvas plus one offscreen sprite texture")
+        sprite = self.app.split("function makeGlowSprite(", 1)[1].split("\n  }", 1)[0]
+        self.assertIn("createElement('canvas')", sprite,
+                      "and the second one is the sprite, not a hidden background layer")
+        self.assertEqual(self.app.count("body.insertBefore(canvas"), 1,
+                         "exactly one canvas is ever attached to the page")
+        self.assertNotIn("body.appendChild(canvas", self.app)
+        self.assertEqual(self.app.count("initAmbientMesh();"), 1,
+                         "and exactly one live call to it")
+
+    def test_it_is_built_once_per_session_not_once_per_page(self):
+        """The mesh is global, so it belongs in initAmbientExperience (run once)
+        and NOT in bootPage (run on every PJAX swap). Building it per swap would
+        stack a canvas per navigation, which is how the credits layer used to need
+        a cleanup closure at all."""
+        self.assertIn("initAmbientExperience();", self.boot)
+        self.assertIn("initAmbientMesh();", self.ambient,
+                      "the mesh is not built by the session-scoped ambient layer")
+        self.assertNotIn("initAmbientMesh();", self.page,
+                         "and must not also be rebuilt on every page swap")
+        # Which is also why it needs no teardown: nothing removes it, and the
+        # self-terminating draw loop is the only thing that can stop it.
+        self.assertNotIn("removeChild(canvas)", self.mesh)
+        self.assertIn("if (!canvas.isConnected) return;", self.mesh,
+                      "the draw loop must still stop itself if the canvas is detached")
+
+    def test_it_is_global_rather_than_scoped_to_the_credits_screen(self):
+        """The old wave mesh refused to build itself anywhere but credits. The
+        replacement is every page's background, so the only credits check left in
+        it gates the SCROLL coupling -- and that check must not have crept up
+        around the canvas's own creation."""
+        self.assertNotIn("if (!wanted)", self.mesh, "the page gate survived the rewrite")
+        head = self.mesh.split("function resize()", 1)[0]
+        self.assertNotIn("credits-rotary-page", head,
+                         "the canvas itself is gated on the credits page again")
+        self.assertIn("doc.body.classList.contains('credits-rotary-page')", self.mesh,
+                      "but the scroll coupling still has to be")
+        self.assertIn("canvas.className = 'ambient-mesh';", self.mesh)
+        self.assertIn("doc.body.insertBefore(canvas, doc.body.firstChild);", self.mesh,
+                      "it must be the first child so main's z-index 1 sits above it")
+
+    # --- the CSS box ------------------------------------------------------
+    def test_the_canvas_covers_the_viewport_and_never_eats_an_event(self):
+        body = self.rule(".ambient-mesh")
         self.assertIn("position: fixed", body)
-        self.assertIn("pointer-events: none", body, "it must never eat a wheel event")
+        self.assertIn("inset: 0", body)
+        self.assertIn("width: 100vw", body)
+        self.assertIn("height: 100vh", body)
+        self.assertEqual(int(re.search(r"z-index:\s*(\d+)", body).group(1)), 0,
+                         "it has to sit under main (z-index 1)")
+        self.assertIn("pointer-events: none", body)
         self.assertNotIn("pointer-events: auto", body,
                          "an earlier `auto` in the same block wins the cascade")
-        self.assertLessEqual(int(re.search(r"z-index:\s*(\d+)", body).group(1)), 0,
-                             "it has to sit under main.credits-rotary (z-index 1)")
+        # The credits screen is entirely gesture driven; a canvas that swallowed a
+        # wheel event would stop the wheels turning at all.
+        self.assertIn("touch-action", self.css)
 
-    def test_it_only_exists_on_the_credits_screen(self):
-        self.assertIn("doc.body.classList.contains('credits-rotary-page')", self.body)
-        boot = self.app.split("function bootPage()", 1)[1].split("\n  }", 1)[0]
-        calls = [line.strip() for line in boot.split("\n")
-                 if "initWaveMatrix();" in line]
-        self.assertEqual(len(calls), 1,
-                         f"expected exactly one live call, got {calls}")
-        self.assertFalse(calls[0].startswith("//"),
-                         "the call is commented out; counting a substring "
-                         "counts a comment")
+    def test_the_class_the_script_applies_matches_the_stylesheet(self):
+        """Renaming a layer is exactly the change that passes every JS test and
+        every CSS test while rendering nothing: each half agrees with itself and
+        disagrees with the other. Pin the join."""
+        self.assertIn("canvas.className = 'ambient-mesh';", self.app)
+        self.assertIn(".ambient-mesh {", self.css)
 
-    def test_it_is_torn_down_when_the_page_is_left(self):
-        """A fixed full-viewport canvas that survives the swap would paint over
-        every other page."""
-        self.assertIn("waveMatrixCleanup()", self.body)
-        self.assertIn("removeEventListener('resize'", self.body)
-        self.assertIn("removeChild(canvas)", self.body)
-        self.assertIn("canvas.isConnected", self.body,
-                      "the draw loop must stop itself once detached")
-        self.assertIn("if (waveMatrixCleanup) return;", self.body,
-                      "and must not stack a second canvas on a re-run")
-
+    # --- colour -----------------------------------------------------------
     def test_it_follows_the_theme_instead_of_hardcoding_colour(self):
-        # The mesh now reads dedicated --mesh-* channels rather than the general
-        # brand ones, so the background can be retuned without touching buttons,
-        # links or the wordmark. Still read from CSS, never hardcoded.
-        for token in ("--mesh-line-rgb", "--mesh-node-rgb", "--mesh-glow-rgb"):
-            self.assertIn("getPropertyValue('" + token + "')", self.body)
-        self.assertIn("prefers-color-scheme: light", self.body,
+        for token in ("--mesh-line-rgb", "--mesh-node-rgb", "--mesh-node-hi-rgb",
+                      "--mesh-glow-rgb"):
+            self.assertIn("getPropertyValue('" + token + "')", self.mesh)
+        self.assertIn("prefers-color-scheme: light", self.mesh,
                       "a mid-session scheme flip has to re-read the palette")
-        # Assert on the PAINT CALL SITES. The regex has to exclude the helper's
-        # own declaration -- `function stroke(points, color, alpha)` matches the
-        # same shape as a call and its `color` parameter is not a channel.
-        declaration = "function stroke(points, color, alpha) {"
-        self.assertIn(declaration, self.body)
-        call_body = self.body.replace(declaration, "")
-        callsites = re.findall(r"stroke\(points,\s*([^,]+),", call_body)
-        self.assertEqual(len(callsites), 2,
-                         f"expected a row pass and a column pass, got {callsites}")
-        for expression in callsites:
-            self.assertIn("palette.", expression,
-                          f"painted with {expression!r}, not a theme channel")
-        self.assertIn("context.strokeStyle = 'rgba(' + color + ','", self.body,
-                      "the helper must build its colour from the channel it is given")
+        # Assert on the PAINT CALL SITES, not on the palette object: the point is
+        # that what reaches the context came from a channel.
+        strokes = re.findall(r"context\.strokeStyle = 'rgba\(' \+ ([\w.]+) \+", self.mesh)
+        self.assertEqual(len(strokes), 2, f"expected a row pass and a column pass, got {strokes}")
+        for expression in strokes:
+            self.assertEqual(expression, "palette.line",
+                             f"lines painted from {expression!r}, not a theme channel")
+        self.assertEqual(self.mesh.count("rgba(' + palette.line + ','"), 2)
+        # And the rebuild on a scheme flip must remake the SPRITE too, or the
+        # vertices keep glowing in the previous theme's colour.
+        flip = self.mesh.split("function onSchemeChange()", 1)[1].split("\n      }", 1)[0]
+        self.assertIn("palette = readPalette();", flip)
+        self.assertIn("sprites = buildSprites(palette);", flip)
 
-    def _stroke_caps(self):
-        """(ceiling, floor) for each stroke pass, excluding the helper's own
-        declaration -- `function stroke(points, color, alpha)` matches the same
-        shape as a call site and has no numbers worth reading."""
-        declaration = "function stroke(points, color, alpha) {"
-        self.assertIn(declaration, self.body)
-        call_body = self.body.replace(declaration, "")
-        callsites = re.findall(r"stroke\(points,\s*([^,]+),", call_body)
-        self.assertEqual(len(callsites), 2,
-                         f"expected a row pass and a column pass, got {callsites}")
-        # Scoped to the stroke calls: glowNode carries a Math.min of its own for
-        # the node alpha, and counting it here would look like a third stroke pass.
-        caps = [(float(cap), float(floor)) for cap, floor
-                in re.findall(r"stroke\(points,[^;]*?Math\.min\((0\.\d+),\s*(0\.\d+) \+",
-                              call_body, re.DOTALL)]
-        self.assertEqual(len(caps), len(callsites),
-                         "every stroke pass must be capped, one Math.min each")
-        return caps
+    # --- the blend mode, measured ----------------------------------------
+    def test_the_light_theme_can_actually_see_the_mesh(self):
+        """Measured, not asserted by keyword.
 
+        `mix-blend-mode: screen` brightens. On the dark theme's near-black
+        background that lifts a 0.20-alpha line by 18-48 levels. On off-white it
+        does nothing at all -- screen can only push a channel UP and 247/255 has
+        nowhere to go -- so the mesh rendered at 1.003:1 against --bg. Invisible,
+        and it silently undid the deepened light-theme --mesh-* values and their
+        own "enough ink to read as a line rather than a haze" comment.
+
+        This recomputes the blend instead of grepping for its name, so swapping
+        screen for overlay or lighten fails here rather than shipping a layer
+        nobody can see in one of the two themes.
+        """
+        def channels(token, region):
+            value = _resolve_colour(token, region)
+            self.assertIsNotNone(value, token + " is not defined in that theme")
+            return value
+
+        root = self.css.split(":root {", 1)[1].split("\n}", 1)[0]
+        light = self.css[self.css.index("@media (prefers-color-scheme: light) {"):].split("\n}", 1)[0]
+
+        self.assertEqual(re.search(r"mix-blend-mode:\s*(\w+)", self.rule(".ambient-mesh")).group(1),
+                         "screen", "the dark theme wants screen")
+        override = re.search(
+            r"@media \(prefers-color-scheme: light\) \{\s*\.ambient-mesh \{\s*"
+            r"mix-blend-mode:\s*(\w+);", self.css)
+        self.assertIsNotNone(override, "the light theme inherits screen and vanishes")
+        self.assertEqual(override.group(1), "multiply")
+
+        for name, region, blend in (("dark", root, SCREEN), ("light", light, MULTIPLY)):
+            bg = channels("--bg-rgb", region)
+            for what, token, alpha in (("line", "--mesh-line-rgb", 0.20),
+                                       ("vertex", "--mesh-node-rgb", 0.30)):
+                ratio = _contrast(_composite(channels(token, region), bg, alpha, blend), bg)
+                with self.subTest(theme=name, element=what):
+                    self.assertGreater(ratio, 1.15,
+                                       f"{name}-theme {what} is {ratio:.3f}:1 against the page "
+                                       f"background -- that is not a faint decoration, it is nothing")
+                    self.assertLess(ratio, 3.0,
+                                    f"{name}-theme {what} is {ratio:.3f}:1 -- a background layer "
+                                    f"that loud would compete with the copy")
+
+    def test_the_glow_is_prerendered_because_shadowblur_cannot_afford_it(self):
+        """~600 vertices a frame at 60fps is 36,000 blits a second. Literal
+        shadowBlur on each is a dropped-frame machine on a phone, so the glow is
+        baked into two sprites at init and blitted. The literal API must not creep
+        back in."""
+        self.assertNotRegex(self.app, r"(ctx|context|c)\.shadowBlur\s*=",
+                            "shadowBlur is back in the frame loop")
+        self.assertIn("function makeGlowSprite(coreRgb, glowRgb, bloom)", self.app)
+        self.assertIn("function drawGlow(", self.app)
+        self.assertIn("createRadialGradient(", self.app)
+        bloom = self.num("MESH_GLOW_BLOOM")
+        self.assertLess(bloom, 1.0, "the vertices are calibrated for minimal glow")
+        self.assertEqual(self.num("MESH_GLOW_SPREAD"), 1.9)
+        # Both sprites are built by ONE function called at init and again on a
+        # scheme flip. Two call sites, same arguments -- this is the check that
+        # caught the flip losing its bloom argument and giving the mesh a much
+        # heavier glow in one theme than the other.
+        self.assertEqual(self.mesh.count("buildSprites("), 3,
+                         "one declaration, one init call, one scheme-flip call")
+        builds = re.findall(r"node: makeGlowSprite\(([^)]+)\),\n\s*hi: makeGlowSprite\(([^)]+)\)",
+                            self.mesh)
+        self.assertEqual(len(builds), 1, "buildSprites must make both sprites together")
+        self.assertEqual(builds[0][0], "p.node, p.glow, MESH_GLOW_BLOOM")
+        self.assertEqual(builds[0][1], "p.hi, p.glow, MESH_GLOW_BLOOM",
+                         "the two sprites disagree about bloom")
+
+    def test_reduced_motion_gets_one_frame_and_no_loop(self):
+        self.assertIn("if (!reduceMotion()) window.requestAnimationFrame(draw);", self.mesh,
+                      "the loop must be gated on reduced motion")
+        self.assertIn("if (reduceMotion()) {", self.mesh,
+                      "and a paused canvas still needs one frame on a scheme change")
+
+    def test_the_ambient_layer_cannot_stop_the_page_booting(self):
+        """initAmbientExperience() runs FIRST in boot(), and it touches every
+        optional browser API this site has: fetch, AudioContext, matchMedia, a 2D
+        canvas context. Any one of them missing used to be able to abort boot()
+        before bootPage(), leaving a visitor with a page whose routing, menu,
+        contact form and credits screen were all dead while its background was
+        fine. Precisely backwards.
+
+        Found by a jsdom run, which has no fetch: the mesh came up, nothing else
+        did. Two guards, both asserted, because either alone is insufficient --
+        the wrapper stops any throw from escaping, and the source-level guard
+        stops the one call that throws SYNCHRONOUSLY on a missing global, where
+        `.catch()` has no promise to attach to.
+        """
+        boot = self.app.split("function boot()", 1)[1].split("\n  }", 1)[0]
+        self.assertRegex(boot, r"try \{\s*initAmbientExperience\(\);\s*\} catch \(error\) \{",
+                         "the decorative layer is no longer isolated from boot()")
+        self.assertIn("initAmbientExperience();", boot)
+        self.assertIn("bootPage();", boot)
+        # bootPage must be OUTSIDE the try: catching around it too would turn a
+        # real hydration failure into a page that looks fine and does nothing.
+        self.assertGreater(boot.index("bootPage();"), boot.index("} catch (error) {"),
+                           "bootPage() is inside the ambient layer's try block")
+        caught = boot.split("} catch (error) {", 1)[1]
+        self.assertIn("window.console.warn", caught,
+                      "a background that silently fails to start is indistinguishable "
+                      "from one that was never asked to")
+        self.assertRegex(self.ambient,
+                         r"typeof fetch === 'function' \? fetch\(MUSIC_SRC\)",
+                         "fetch is called without checking it exists")
+
+    def test_the_buffer_is_capped(self):
+        self.assertIn("Math.min(window.devicePixelRatio || 1, 1.75)", self.mesh)
+        self.assertIn("context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)", self.mesh)
+        self.assertIn("addEventListener('resize', resize", self.mesh)
+
+    def num(self, name, region=None):
+        m = re.search(r"var " + name + r" = (-?[\d.]+);", region or self.mesh)
+        self.assertIsNotNone(m, f"{name} is gone")
+        return float(m.group(1))
+
+
+class AmbientMeshGeometry(unittest.TestCase):
+    """The lattice is arithmetic, and every one of its failure modes is invisible
+    in a diff.
+
+    A jittered grid subdivided into triangles, chosen over a real Delaunay on
+    purpose: the topology is hashed from (row, column) once per resize, so it is
+    identical every frame. Re-triangulating per frame would boil -- the vertices
+    move, so the triangles would flip constantly -- and re-running Bowyer-Watson
+    on ~600 moving points is not something a phone survives. At this opacity the
+    two are indistinguishable; only one of them holds a frame rate.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = (ROOT / "app.js").read_text()
+        cls.mesh = cls.app.split("function initAmbientMesh()", 1)[1].split(
+            "\n  function initCreditsRotary", 1)[0]
+        cls.draw = cls.mesh.split("function draw(timestamp)", 1)[1]
+
+    def num(self, name, region=None):
+        m = re.search(r"var " + name + r" = (-?[\d.]+);", region or self.mesh)
+        self.assertIsNotNone(m, f"{name} is gone")
+        return float(m.group(1))
+
+    # --- triangulation ----------------------------------------------------
+    def test_the_lattice_is_triangulated_not_square(self):
+        """Squares read as graph paper. Every cell additionally carries one of its
+        two diagonals, so the field is ~550 triangles rather than ~550 boxes at
+        the same vertex count."""
+        self.assertIn("flips = new Uint8Array(", self.mesh, "no per-cell diagonal table")
+        self.assertIn("flips[c] = hash2(c, 0x5f3a7c11) & 1;", self.mesh,
+                      "the diagonal choice must be hashed per cell")
+        diag = self.draw.split("for (row = 0; row < rows - 1; row += 1)", 1)[1]
+        self.assertIn("if (flips[cellBase + column])", diag)
+        self.assertRegex(diag, r"moveTo\(pts\[a\], pts\[a \+ 1\]\);\s*"
+                               r"context\.lineTo\(pts\[d\], pts\[d \+ 1\]\);",
+                         "one diagonal is never drawn")
+        self.assertRegex(diag, r"moveTo\(pts\[br\], pts\[br \+ 1\]\);\s*"
+                               r"context\.lineTo\(pts\[bl\], pts\[bl \+ 1\]\);",
+                         "the other diagonal is never drawn")
+
+    def test_the_diagonal_choice_actually_varies(self):
+        """`& 1` proves intent, not outcome. This runs the REAL constants from
+        hash2 over a 40x40 field.
+
+        The failure it catches is specific: without Math.imul the products exceed
+        2^53, the low bits -- the only ones that look random -- are lost, and
+        every diagonal leans the same way. A uniform lattice of diagonals is as
+        monotonous as no diagonals at all, and it looks fine in the source.
+        """
+        body = self.app.split("function hash2(a, b) {", 1)[1].split("\n  }", 1)[0]
+        self.assertEqual(body.count("Math.imul"), 3,
+                         "hash2 must multiply in 32-bit integer range; a plain * overflows "
+                         "to a double and only its high bits survive")
+        self.assertIn(">>> 0", body, "and must fold back to an unsigned 32-bit int")
+        salts = [int(x) for x in re.findall(r"Math\.imul\(\w+ \| 0, (\d+)\)", body)]
+        self.assertEqual(len(salts), 2, "hash2 must mix both of its arguments")
+        mix_shift, mix_mul = (int(x) for x in
+                              re.search(r"Math\.imul\(h \^ \(h >>> (\d+)\), (\d+)\)", body).groups())
+        final_shift = int(re.search(r"\(h \^ \(h >>> (\d+)\)\) >>> 0", body).group(1))
+
+        mask = 0xFFFFFFFF
+
+        def hash2(a, b):
+            h = ((a * salts[0]) & mask) ^ ((b * salts[1]) & mask)
+            h = ((h ^ (h >> mix_shift)) * mix_mul) & mask
+            return (h ^ (h >> final_shift)) & mask
+
+        flips = [hash2(c, 0x5F3A7C11) & 1 for c in range(1600)]
+        ones = sum(flips)
+        self.assertGreater(ones, 1600 * 0.35, f"only {ones}/1600 cells lean one way")
+        self.assertLess(ones, 1600 * 0.65, f"{ones}/1600 cells lean one way")
+        # A hash with a short period shows up as long runs of identical diagonals,
+        # which reads on screen as banding rather than as an organic lean.
+        # A run of 8 is NORMAL here -- for 1600 fair coin flips the expected
+        # longest run is about log2(1600) = 10.6 -- so an aggressive run limit
+        # would flag a good hash and pass a bad one. What a degenerate hash
+        # actually loses is entropy: repeated outputs and a period short enough to
+        # tile visibly. Assert those instead.
+        values = [hash2(c, 0x5F3A7C11) for c in range(1600)]
+        self.assertGreater(len(set(values)), 1590, "hash2 is colliding; entropy is being lost")
+        self.assertGreater(len(set(flips[:400])), 1, "the low bit is constant over a row")
+        period = next((p for p in range(1, 64) if flips[:1500] == flips[p:1500 + p][:1500]
+                       and flips[:p] * (1500 // p) == flips[:(1500 // p) * p]), None)
+        self.assertIsNone(period, f"the diagonal pattern repeats with period {period}")
+
+    def test_the_jitter_is_deterministic_not_random(self):
+        """The topology has to survive from frame to frame. A jitter recomputed per
+        frame would make the whole mesh boil, and Math.random() in a draw loop is
+        how that happens by accident."""
+        self.assertNotIn("Math.random", self.mesh.replace("Not Math.random()", ""))
+        self.assertIn("jitterX = new Float32Array(vertices);", self.mesh)
+        self.assertIn("jitterY = new Float32Array(vertices);", self.mesh)
+        resize = self.mesh.split("function resize()", 1)[1].split("\n      }", 1)[0]
+        self.assertIn("hash2(", resize, "the jitter is not hashed from (column, row)")
+        self.assertNotIn("hash2(", self.draw,
+                         "and must not be recomputed per frame")
+        # Both axes come from ONE hash, split high/low, so they are uncorrelated
+        # without costing a second hash per vertex.
+        self.assertIn("h & 0xffff", resize)
+        self.assertIn("h >>> 16", resize)
+
+    # --- the budget that keeps it from tearing ----------------------------
+    def test_the_displacement_budget_holds_the_lattice_together(self):
+        """The failure this guards is invisible in a diff and only mildly visible
+        on screen: two neighbouring vertices displaced toward each other by more
+        than the gap between them cross, and every triangle they share inverts.
+        The wireframe version of the mesh tearing at each intersection.
+
+        Jitter is the unconditional spend -- its wavelength IS one cell, so its
+        worst-case neighbour difference is 2*JITTER of a cell no matter how calm
+        the audio is. TEAR_LIMIT is the total allowed. Verified end to end by
+        running the mesh and measuring the signed area of all ~550 triangles per
+        frame, in silence and at full scale: zero inversions, minimum area 60% of
+        a nominal cell.
+        """
+        jitter = self.num("JITTER")
+        tear = self.num("TEAR_LIMIT")
+        self.assertLess(2 * jitter, tear,
+                        "the jitter alone spends the whole tear budget, leaving the wave nothing")
+        self.assertLessEqual(tear, 0.5,
+                             "past half a cell a vertex can reach its neighbour's rest position")
+        self.assertGreater(tear - (2 * jitter), 0.15,
+                           "so little headroom for the travelling wave that it cannot be seen")
+
+    def test_the_sharp_term_is_capped_against_its_own_wavenumber(self):
+        """A smooth swell cannot tear the lattice however large it gets -- the
+        Gaussian front is four cells wide, so adjacent vertices ride it almost
+        identically -- but a short-wavelength sine can. Its amplitude ceiling is
+        therefore derived from the wavelength the audio actually asked for, not
+        guessed at: A <= (TEAR_LIMIT - 2*JITTER) / k.
+
+        k rises with the dominant pitch, so a bright passage gets finer ripples AND
+        a lower ceiling, which is what a real membrane does. Pinning the division
+        by kx is what stops someone 'fixing' a quiet treble response by raising the
+        amplitude constant and quietly reintroducing inversions at high pitch.
+        """
+        self.assertRegex(self.mesh,
+                         r"Math\.min\(\(TEAR_LIMIT - \(2 \* JITTER\)\) / kx,")
+        self.assertIn("var kx = 0.0062 + (b.pitch * 0.019);", self.mesh,
+                      "the wavenumber must be the same one the sine is drawn with")
+        self.assertIn("Math.sin((gx * kx) - travel", self.mesh,
+                      "and the sine must actually use it")
+        # The ceiling has to bind: at the widest pitch range the audio-driven
+        # amplitude must be able to exceed it, or the Math.min is decoration.
+        tear, jitter = self.num("TEAR_LIMIT"), self.num("JITTER")
+        spacing = float(re.search(r"spacing = width < 600 \? (\d+) : (\d+);", self.mesh).group(2))
+        ceiling_at_top_pitch = (tear - 2 * jitter) / 0.0252
+        wanted_at_full_audio = spacing * 0.48
+        self.assertLess(ceiling_at_top_pitch, wanted_at_full_audio,
+                        "the wavenumber cap never binds, so it protects nothing")
+
+    def test_the_field_is_dense_enough_to_read_as_filled(self):
+        """"Richly filled rather than empty" is a vertex count. Pinned at the two
+        spacings the code actually uses, over the viewports that matter, so
+        'denser' and 'cheaper' are both decisions recorded in a diff."""
+        mobile, desktop = (int(x) for x in re.search(
+            r"spacing = width < 600 \? (\d+) : (\d+);", self.mesh).groups())
+        self.assertEqual((desktop, mobile), (54, 38),
+                         "the cell size is a density decision, not a free parameter")
+        for width, height, spacing in ((1440, 900, desktop), (1920, 1080, desktop),
+                                       (390, 844, mobile), (768, 1024, desktop)):
+            cols = math.ceil(width / spacing) + 3
+            rows = math.ceil(height / spacing) + 3
+            with self.subTest(viewport=f"{width}x{height}"):
+                self.assertGreaterEqual(cols * rows, 250, "too sparse to read as a field")
+                self.assertGreaterEqual((cols - 1) * (rows - 1), 200,
+                                        "too few triangles to read as low-poly")
+                self.assertLessEqual(cols * rows, 1600,
+                                     "more vertices than a phone can blit at 60fps")
+        # One spare cell each way is what stops the field showing a ragged border
+        # where a displaced vertex would otherwise run off the edge.
+        self.assertIn("columns = Math.ceil(width / spacing) + 3;", self.mesh)
+        self.assertIn("rows = Math.ceil(height / spacing) + 3;", self.mesh)
+
+    # --- direction of travel ---------------------------------------------
+    def test_every_travelling_term_is_phased_left_to_right(self):
+        """A crest of sin(k*x - w*t) sits at x = (phase + w*t)/k, so it moves in
+        +x as time grows. The opposite sign looks identical frame to frame and
+        sweeps the other way, which is why this is checked per term rather than
+        trusted.
+
+        This is the bug the round was asked to fix, and it was still live in the
+        idle drift after the first rewrite: sin(time*0.23 + column*0.17) walks
+        LEFT, and it was the loudest term in silence -- the site's default state --
+        so the one wave every visitor saw with the music off travelled backwards.
+        Measuring the trough's drift over 620 frames is what found it.
+        """
+        phases = [
+            ("travelling sine", r"Math\.sin\(\(gx \* kx\) - travel \+ \(gy \* 0\.0022\)\)"),
+            ("idle drift, vertical", r"Math\.sin\(\(column \* 0\.17\) \+ \(row \* 0\.41\) - \(time \* 0\.23\)\)"),
+            ("idle drift, horizontal", r"Math\.cos\(\(column \* 0\.37\) - \(time \* 0\.19\)\)"),
+            ("spin ripple", r"\(sd \* 0\.012\) - \(time \* 3\.1 \* spinDir\)"),
+        ]
+        for name, pattern in phases:
+            with self.subTest(term=name):
+                self.assertRegex(self.mesh, pattern, f"{name} is no longer phased (space) - (time)")
+        # The front advances in +x too: it is a position, not a phase, so the
+        # sign lives in the modulo rather than in a subtraction.
+        self.assertIn("var front = ((time * FRONT_SPEED) % period) - FRONT_PAD;", self.mesh)
+        self.assertGreater(self.num("FRONT_SPEED"), 0)
+        self.assertGreater(self.num("WAVE_SPEED"), 0)
+        # And no term may reintroduce the backwards convention.
+        for backwards in ("+ (time * 0.23)", "+ (time * 0.19)", "+ travel", "+ (time * 3.1"):
+            self.assertNotIn(backwards, self.mesh, f"{backwards!r} travels right to left")
+
+    def test_the_front_wraps_instead_of_leaving_a_dead_screen(self):
+        """The localized crest is what makes the motion read as a wave crossing the
+        screen rather than as the field shimmering in place. It has to travel the
+        full width and then come back, so its period carries off-screen padding at
+        both ends -- without FRONT_PAD it would pop out of existence at the right
+        edge and reappear at the left."""
+        self.assertIn("var period = width + (FRONT_PAD * 2);", self.mesh)
+        pad = self.num("FRONT_PAD")
+        self.assertGreaterEqual(pad, 200, "too little lead-in: the crest appears mid-screen")
+        sigma = re.search(r"var frontSigma = Math\.max\((\d+), width \* ([\d.]+)\);", self.mesh)
+        self.assertIsNotNone(sigma, "the front's width changed shape")
+        self.assertGreaterEqual(float(sigma.group(1)) * 2, 54 * 3,
+                                "a front narrower than three cells is a line, not a crest")
+
+    # --- calibration ------------------------------------------------------
     def test_the_mesh_lines_are_calibrated_into_their_band(self):
         """0.15 at rest, 0.20 at the very most.
 
-        This is the third contract this file has carried for the same two
-        numbers: first "under 0.13, stay subtle", then "at least 0.28, be
-        prominent", now a narrow calibrated band between them. The ceiling is
-        what makes it safe to drive the mesh from audio at all -- however hard
-        the track hits, a line cannot leave the band and compete with the copy.
+        The fourth contract this file has carried for these two numbers: first
+        "under 0.13, stay subtle", then "at least 0.28, be prominent", then a
+        narrow band between them. The ceiling is what makes it safe to drive the
+        mesh from audio at all -- however hard the track hits, a line cannot leave
+        the band and compete with the copy.
         """
-        caps = self._stroke_caps()
-        rows = max(caps)                      # the brighter of the two passes
-        self.assertEqual(rows[1], 0.15, "a resting line must read at 0.15")
-        self.assertEqual(rows[0], 0.2, "and can never exceed 0.20")
-        columns = min(caps)
-        self.assertEqual(columns[1], 0.15)
-        self.assertLessEqual(columns[0], 0.2, "columns stay inside the same band")
-        self.assertLess(columns[0], rows[0],
-                        "columns sit a step below rows so the grid keeps depth")
+        caps = [(float(cap), float(floor)) for cap, floor in re.findall(
+            r"Math\.min\((0\.\d+), (0\.\d+) \+ \(b\.treble \* [\d.]+\) \+ \(b\.onset \* [\d.]+\)\)",
+            self.draw)]
+        self.assertEqual(len(caps), 2, f"expected a row pass and a column pass, got {caps}")
+        by_cap = {cap: floor for cap, floor in caps}
+        self.assertEqual(sorted(by_cap), [0.18, 0.2], "the two passes left the 0.15-0.20 band")
+        for cap, floor in caps:
+            with self.subTest(cap=cap):
+                self.assertGreaterEqual(floor, 0.15, "a resting line must read at 0.15")
+                self.assertLessEqual(cap, 0.2, "and can never exceed 0.20")
+        # The dimmer pass rests AT the floor; the brighter one sits a step above it
+        # so the field keeps some depth instead of reading as one flat lattice.
+        self.assertEqual(by_cap[0.18], 0.15, "the row pass no longer rests at 0.15")
+        self.assertGreater(by_cap[0.2], 0.15,
+                           "both passes rest at the same alpha and the field goes flat")
 
-    def test_the_glowing_nodes_share_the_matrix_calibration(self):
-        """Nodes follow the same ramp the dot matrix does -- 1.5px at rest up to
-        2.2px, 0.25 to 0.35 alpha -- so the two layers read as one material rather
-        than as a grid with unrelated stars on it."""
-        radius = re.search(r"Math\.min\(([\d.]+), 1\.5 \+ \(heat \* ([\d.]+)\)\)",
-                           self.body)
-        self.assertIsNotNone(radius, "the node radius ramp changed shape")
+    def test_the_vertices_are_calibrated_into_their_band(self):
+        """1.5px to 2.2px, 0.25 to 0.30 alpha.
+
+        With the whole field capped that low the visible contrast has to come from
+        somewhere else, so a vertex's alpha and radius ride the travelling crest:
+        the wave reads as a bright band sweeping left to right without any element
+        exceeding its ceiling. The ceiling is the point -- the ramp must REACH it,
+        or the Math.min is decoration and the band is a lie.
+        """
+        radius = re.search(
+            r"Math\.min\(([\d.]+), 1\.5 \+ \(w \* ([\d.]+)\) \+ \(b\.bass \* ([\d.]+)\)"
+            r" \+ \(near \* ([\d.]+)\)\)", self.draw)
+        self.assertIsNotNone(radius, "the vertex radius ramp changed shape")
         self.assertEqual(float(radius.group(1)), 2.2)
-        # Full heat has to actually REACH the ceiling, or the cap is decoration.
-        self.assertGreaterEqual(1.5 + float(radius.group(2)), 2.2 - 1e-9,
-                                "a node at full heat never reaches 2.2px")
-        alpha = re.search(r"Math\.min\(([\d.]+), 0\.25 \+ \(heat \* ([\d.]+)\)\)",
-                          self.body)
-        self.assertIsNotNone(alpha, "the node alpha ramp changed shape")
-        self.assertEqual(float(alpha.group(1)), 0.35)
-        self.assertIn("drawGlow(context, nodeSprite, palette.node", self.body,
-                      "nodes must be blitted from the shared sprite")
+        self.reach(float(radius.group(1)), 1.5 + sum(float(x) for x in radius.groups()[1:]),
+                   "radius")
+        alpha = re.search(
+            r"Math\.min\(([\d.]+),\s*0\.25 \+ \(w \* ([\d.]+)\) \+ \(near \* ([\d.]+)\)"
+            r" \+ \(b\.onset \* ([\d.]+)\) \+ \(b\.treble \* ([\d.]+)\)\)", self.draw)
+        self.assertIsNotNone(alpha, "the vertex alpha ramp changed shape")
+        self.assertEqual(float(alpha.group(1)), 0.3, "vertices top out at 0.30")
+        self.reach(float(alpha.group(1)), 0.25 + sum(float(x) for x in alpha.groups()[1:]),
+                   "alpha")
+        # The crest term alone has to be a visible share of that reach, or the
+        # brightness is really just tracking the audio rather than the wave.
+        self.assertGreaterEqual(float(alpha.group(2)) + float(alpha.group(3)), 0.04,
+                                "the travelling crest contributes nothing to a vertex's alpha")
+        self.assertIn("drawGlow(context, highlight ? sprites.hi : sprites.node", self.draw,
+                      "vertices must be blitted from the shared sprite")
 
-    def test_the_glow_is_prerendered_because_shadowblur_cannot_afford_it(self):
-        """The review asked for shadowBlur 8-12 on every dot and node. Between
-        the two canvases that is ~2000 shadowBlur calls per frame, which is a
-        dropped-frame machine on a phone. The sprite is the same picture for a
-        fraction of the cost, so the literal API must not creep back in."""
-        self.assertNotRegex(self.app, r"(ctx|context|c)\.shadowBlur\s*=",
-                            "shadowBlur is back in the frame loop")
-        self.assertIn("function makeGlowSprite(", self.app)
-        self.assertIn("function drawGlow(", self.app)
-        self.assertIn("createRadialGradient(", self.app)
-        # Both canvases must rebuild their sprite when the palette does, or the
-        # nodes keep glowing in the previous theme's colour after a scheme flip.
-        self.assertIn("nodeSprite = makeGlowSprite(palette.node, palette.glow, 0.7);", self.app)
-        self.assertEqual(self.app.count("sprites = buildSprites(palette);"), 2,
-                         "one build at init and one on every scheme flip")
-        self.assertEqual(self.app.count(", DOT_GLOW_BLOOM)"), 2,
-                         "one sprite per dot colour")
-        # Both the init call and the scheme-flip rebuild must carry the SAME
-        # bloom. This caught a real drift: the rebuild had lost its third
-        # argument, so flipping light/dark silently gave the mesh nodes a much
-        # heavier glow than they were calibrated for.
-        self.assertEqual(self.app.count("makeGlowSprite(palette.node, palette.glow, 0.7)"), 2,
-                         "the sprite's init and its rebuild disagree about bloom")
-        self.assertIn("function makeGlowSprite(coreRgb, glowRgb, bloom)", self.app)
-        bloom = float(re.search(r"var DOT_GLOW_BLOOM = ([\d.]+);", self.app).group(1))
-        self.assertLess(bloom, 1.0, "the matrix dots are calibrated for minimal glow")
+    def reach(self, ceiling, total, what):
+        """A capped ramp has exactly two ways to be wrong, and they look opposite.
 
-    def test_reduced_motion_gets_one_frame_and_no_loop(self):
-        self.assertIn("if (!reduceMotion()) window.requestAnimationFrame(draw);", self.body,
-                      "the loop must be gated on reduced motion")
-        self.assertIn("if (reduceMotion()) {", self.body,
-                      "and a paused canvas still needs one frame on a scheme change")
+        If the ramp cannot REACH its ceiling the Math.min never binds and the
+        ceiling is decoration -- the calibration comment describes a range the code
+        does not actually produce. If it overshoots by a lot the ceiling binds all
+        the time, so every loud vertex pins to the same value and the modulation
+        the ramp was written for disappears.
 
-    def test_the_buffer_is_capped_like_the_other_canvas(self):
-        self.assertIn("Math.min(window.devicePixelRatio || 1, 1.75)", self.body)
-        self.assertIn("context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)", self.body)
-        self.assertIn("addEventListener('resize', resize", self.body)
+        A modest overshoot is the intended design, though: it means any ONE driver
+        can light a vertex to full, and several drivers saturate together rather
+        than having to align exactly. So the window is generous upward and exact
+        downward.
+        """
+        self.assertGreaterEqual(total, ceiling - 1e-9,
+                                f"the {what} ramp cannot reach its own {ceiling} ceiling, "
+                                f"so the Math.min never binds and the ceiling is decoration")
+        self.assertLessEqual(total, ceiling * 1.2 + 1e-9,
+                             f"the {what} ramp reaches {total:.3f} against a {ceiling} ceiling: "
+                             f"it would pin there constantly and lose all modulation")
+
+    def test_the_whole_grid_costs_two_strokes_not_three_thousand(self):
+        """~1700 edges a frame at 1440x900. Stroking each one separately is ~1700
+        beginPath/stroke pairs and the state changes alone would not survive a
+        phone, so rows are one polyline batch, and columns plus every diagonal
+        share a second. Counted, because 'batched' is the kind of claim that
+        quietly stops being true."""
+        self.assertEqual(self.draw.count("context.beginPath();"), 2)
+        self.assertEqual(self.draw.count("context.stroke();"), 2)
+        self.assertEqual(self.draw.count("context.lineWidth = 1;"), 1)
+        # Rows first, then columns and diagonals in one path: the diagonal loop is
+        # inside the column pass, between its beginPath and its stroke.
+        col_pass = self.draw.split("context.strokeStyle = 'rgba(' + palette.line + ',' + colAlpha", 1)[1]
+        self.assertIn("for (row = 0; row < rows - 1; row += 1)", col_pass,
+                      "the diagonals are stroked separately from the columns")
+        self.assertNotIn("context.stroke();", col_pass.split("context.stroke();", 1)[0])
+
+    def test_positions_are_computed_once_per_frame_and_shared_by_every_pass(self):
+        """Three passes read the same vertices: rows, columns-plus-diagonals, and
+        the vertex blits. If the displacement depended on which pass reached it the
+        mesh would tear at every intersection.
+
+        An earlier version enforced that with bandAt(), a function whose whole job
+        was to make displacement a pure function of (row, column). Positions are
+        now written once per frame into a shared Float32Array that all three passes
+        read, which makes agreement structural rather than something three loops
+        have to be careful about -- so assert the structure.
+        """
+        self.assertIn("pts = new Float32Array(vertices * 2);", self.mesh)
+        self.assertIn("pts = new Float32Array(", self.mesh)
+        self.assertNotIn("bandAt(", self.mesh, "the agreement helper is back")
+        # One write loop, then three readers.
+        self.assertEqual(self.draw.count("pts[index] = gx + dx;"), 1,
+                         "positions are computed in more than one place")
+        self.assertEqual(self.draw.count("index += 2;"), 1)
+        readers = self.draw.split("pts[index + 1] = gy + dy;", 1)[1]
+        self.assertIn("context.moveTo(pts[o], pts[o + 1]);", readers, "the row pass")
+        self.assertIn("context.moveTo(pts[v], pts[v + 1]);", readers, "the column pass")
+        self.assertIn("context.moveTo(pts[a], pts[a + 1]);", readers, "the diagonal pass")
+        self.assertGreaterEqual(readers.count("pts["), 16,
+                                "the stroke passes are not reading the shared buffer")
+        self.assertIn("drawGlow(context, highlight ? sprites.hi : sprites.node,\n"
+                      "              highlight ? palette.hi : palette.node,\n"
+                      "              x, pts[q + 1], radius, alpha, MESH_GLOW_SPREAD);", self.draw,
+                      "the vertex pass must read the same buffer too")
+
+    def test_the_idle_wave_is_loud_enough_to_read_with_the_music_off(self):
+        """The site boots muted, so silence is not an edge case -- it is the state
+        most visitors see the background in. The idle drift and the sweeping front
+        must both be present at full strength with every band at zero, or the
+        background looks frozen until someone presses play."""
+        self.assertIn("var driftAmp = spacing * 0.10;", self.mesh)
+        front = re.search(r"var frontAmp = spacing \* \(([\d.]+) \+", self.mesh)
+        self.assertIsNotNone(front, "the front's resting amplitude changed shape")
+        self.assertGreaterEqual(float(front.group(1)), 0.15,
+                                "the crest is not visible with the music off")
+        # Every audio term is MULTIPLIED by its band, so silence cancels it exactly
+        # instead of leaving a residual wobble that reads as the mesh ignoring the
+        # mute button.
+        front_line = self.mesh.split("var frontAmp = ", 1)[1].split(";", 1)[0]
+        for driver in ("b.bass", "b.onset"):
+            with self.subTest(driver=driver):
+                self.assertIn(driver + " * ", front_line,
+                              f"the front ignores {driver}, so a loud track adds no crest")
+        self.assertRegex(self.mesh, r"sineAmp[\s\S]{0,120}?0\.30 \* b\.bass")
+        self.assertRegex(self.mesh, r"sineAmp[\s\S]{0,120}?0\.18 \* b\.treble")
+
 
 
 class CreditsBackdrop(unittest.TestCase):
-    """The two painted layers behind the credits screen, plus what keeps the copy
-    readable now that both are deliberately bright.
+    """What sits behind the credits copy, and what keeps that copy readable.
 
-    The review asked for the dot matrix and wave mesh to stop reading as a faint
-    texture. That is a real change of contract -- this file used to assert the
-    opposite -- so the numbers the review specified are pinned here, and so is
-    the thing that makes them survivable: a scrim behind each block of copy.
+    The review asked for the background to stop reading as a faint texture. That
+    is a real change of contract -- this file used to assert the opposite -- so
+    the colour channels the review specified are pinned here, and so is the thing
+    that makes them survivable: a scrim behind each block of copy. The mesh's own
+    size, brightness and geometry live in AmbientMesh and AmbientMeshGeometry; what
+    belongs here is the interaction between that background and the words on top
+    of it, because that is the only place the two can be tuned against each other.
     """
 
     TOKENS = ("--mesh-node-rgb", "--mesh-node-hi-rgb", "--mesh-glow-rgb",
@@ -2762,7 +3268,7 @@ class CreditsBackdrop(unittest.TestCase):
         cls.css = (ROOT / "style.css").read_text()
         cls.app = (ROOT / "app.js").read_text()
         cls.root = cls.css.split(":root {", 1)[1].split("\n}", 1)[0]
-        cls.dots = cls.app.split("function initDotMatrix()", 1)[1].split(
+        cls.mesh = cls.app.split("function initAmbientMesh()", 1)[1].split(
             "\n  function initCreditsRotary", 1)[0]
         i = cls.css.index("@media (prefers-color-scheme: light) {")
         cls.light = cls.css[i:].split("\n}", 1)[0]
@@ -2777,9 +3283,9 @@ class CreditsBackdrop(unittest.TestCase):
 
     # --- the colour contract -------------------------------------------
     def test_the_mesh_channels_exist_in_both_themes(self):
-        """Four dedicated channels, not literals in the canvas code. Both canvases
-        read them back out of CSS, so a theme with no definition would silently
-        fall back to the dark values on a light page."""
+        """Four dedicated channels, not literals in the canvas code. The mesh reads
+        them back out of CSS, so a theme with no definition would silently fall
+        back to the dark values on a light page."""
         dark, light = self.channels(self.root), self.channels(self.light)
         for token in self.TOKENS:
             with self.subTest(token=token):
@@ -2834,54 +3340,78 @@ class CreditsBackdrop(unittest.TestCase):
         for name in ("FALLBACK_NODE", "FALLBACK_HI", "FALLBACK_GLOW", "FALLBACK_LINE"):
             self.assertIn(name, self.app)
 
-    # --- the size and brightness contract -------------------------------
-    def test_the_dot_matrix_stays_inside_its_calibration(self):
-        """1.5px at rest to 2.2px, 0.25 alpha at rest to 0.30, nudging toward 0.35
-        only on a sharp transient. Both are ceilinged with Math.min so a loud
-        track cannot grow a dot past the range it was calibrated for -- the point
-        of the ceiling is that the grid never overpowers the foreground UI."""
-        radius = re.search(
-            r"Math\.min\(([\d.]+), 1\.5 \+ \(w \* ([\d.]+)\) \+ \(b\.bass \* ([\d.]+)\)\)",
-            self.dots)
-        self.assertIsNotNone(radius, "the dot radius ramp changed shape")
-        self.assertEqual(float(radius.group(1)), 2.2)
-        self.assertLessEqual(1.5 + float(radius.group(2)) + float(radius.group(3)),
-                             2.2 + 1e-9, "the ramp can overshoot its own ceiling")
-        alpha = re.search(
-            r"Math\.min\(([\d.]+),\s*0\.25 \+ \(w \* ([\d.]+)\) \+ \(b\.onset \* ([\d.]+)\)"
-            r" \+ \(b\.treble \* ([\d.]+)\)\)", self.dots)
-        self.assertIsNotNone(alpha, "the dot alpha ramp changed shape")
-        self.assertEqual(float(alpha.group(1)), 0.35, "the transient ceiling moved")
-        self.assertEqual(float(alpha.group(2)), 0.05,
-                         "the idle wave alone should only reach 0.30")
+    # --- the mesh and the scrim are one budget --------------------------
+    def test_the_scrim_outweighs_the_mesh_at_its_brightest(self):
+        """The scrim and the mesh cannot be tuned independently.
 
-    def test_the_dot_matrix_interconnects_every_node(self):
-        """Every dot is joined to its right and lower neighbour so the grid is
-        continuous in both directions -- built as ONE path (all rows, then all
-        columns) rather than a segment per pair, which is a single stroke call
-        instead of several thousand for the same picture."""
-        draw = self.dots.split("function draw(timestamp)", 1)[1]
-        self.assertEqual(draw.count("context.beginPath();"), 1)
-        self.assertEqual(draw.count("context.stroke();"), 1)
-        self.assertEqual(draw.count("context.moveTo("), 2, "a row pass and a column pass")
-        self.assertEqual(draw.count("context.lineTo("), 2)
-        line = re.search(r"Math\.min\(([\d.]+), ([\d.]+) \+ \(b\.treble", draw)
-        self.assertIsNotNone(line, "the mesh line opacity changed shape")
-        self.assertEqual(float(line.group(2)), 0.15, "a resting line must read at 0.15")
-        self.assertEqual(float(line.group(1)), 0.2, "and can never exceed 0.20")
-        self.assertIn("palette.line", draw, "the lines must use the mesh line channel")
+        A detail block can sit directly on the brightest thing the mesh ever
+        paints -- a vertex at its 0.30 ceiling over the page background -- so the
+        copy's contrast has to be computed against THAT, not against the flat page.
+        Both themes, and both with and without the scrim, so the test can say the
+        scrim is load-bearing rather than merely present.
 
-    def test_both_canvases_stay_passive_fixed_layers(self):
-        """However bright they get, they must cover the viewport and never eat a
-        wheel event -- the credits screen is entirely gesture driven."""
-        for selector in (".ambient-dot-matrix {", ".credits-wave-matrix {"):
-            body = self.css.split(selector, 1)[1].split("}", 1)[0]
-            with self.subTest(layer=selector):
-                self.assertIn("position: fixed", body)
-                self.assertIn("inset: 0", body)
-                self.assertEqual(int(re.search(r"z-index:\s*(\d+)", body).group(1)), 0)
-                self.assertIn("pointer-events: none", body)
-                self.assertNotIn("pointer-events: auto", body)
+        This is the check that stops "make the background more visible" from
+        quietly becoming "make the credits unreadable". Raising the mesh's alpha
+        ceiling lowers `bare` here long before any mesh test notices.
+        """
+        para = self.css.split(".rotary-disc__contributions {", 1)[1].split("}", 1)[0]
+        token = re.search(r"color:\s*var\((--[\w-]+)\)", para)
+        self.assertIsNotNone(token,
+                             "the contribution paragraph is not on a colour token, so nothing "
+                             "can reason about its contrast")
+
+        scrim = self.css.split(".rotary-segment__content::before {", 1)[1].split("}", 1)[0]
+        stops = [float(x) for x in re.findall(r"rgba\(var\(--bg-rgb\),\s*([\d.]+)\)", scrim)]
+        self.assertTrue(stops, "the scrim is not built from the theme's own background channel")
+        centre = max(stops)
+        self.assertGreaterEqual(centre, 0.7, "a scrim thinner than this does not rescue the copy")
+
+        light = self.css[self.css.index("@media (prefers-color-scheme: light) {"):].split("\n}", 1)[0]
+        for name, region, blend in (("dark", self.root, SCREEN), ("light", light, MULTIPLY)):
+            page = _resolve_colour("--bg-rgb", region)
+            ink = _resolve_colour(token.group(1), region)
+            self.assertIsNotNone(page, f"--bg-rgb is missing from the {name} theme")
+            self.assertIsNotNone(ink, f"{token.group(1)} is missing from the {name} theme")
+            brightest = _composite(_resolve_colour("--mesh-node-rgb", region), page, 0.30, blend)
+            bare = _contrast(ink, brightest)
+            # The scrim is plain source-over: it is ink laid on top, not a blend.
+            behind = _contrast(ink, _composite(page, brightest, centre, lambda a, b: a))
+            with self.subTest(theme=name):
+                self.assertGreater(bare, 3.0,
+                                   f"{name}: with no scrim at all the paragraph would sit at "
+                                   f"{bare:.2f}:1 on the mesh at its brightest -- the background "
+                                   f"would be the reason the copy fails, which is backwards")
+                self.assertGreater(behind, 4.5,
+                                   f"{name}: {behind:.2f}:1 through the scrim does not clear AA")
+                self.assertGreater(behind, bare + 0.5,
+                                   f"{name}: the scrim barely changes anything ({bare:.2f} -> "
+                                   f"{behind:.2f}), so it is decoration rather than structure")
+
+    def test_the_credits_page_paints_no_background_of_its_own(self):
+        """One canvas, one lattice. The credits screen used to carry a second
+        animated layer plus a static grid-and-dot texture on ::before; both are
+        gone, and what is left is a stacking order that puts the wheels over the
+        site-wide mesh rather than over a second mesh."""
+        self.assertNotIn(".credits-rotary-page::before", self.css,
+                         "the static texture this replaced is back")
+        body = self.css.split(".credits-rotary-page main.credits-rotary {", 1)[1].split("}", 1)[0]
+        self.assertEqual(int(re.search(r"z-index:\s*(\d+)", body).group(1)), 1,
+                         "the wheels have to sit above the canvas's z-index 0")
+        self.assertIn("isolation: isolate", body,
+                      "without it the wheels' own blend modes reach down into the canvas")
+        self.assertIn("touch-action: none", body)
+        # No other element in the credits section paints a competing lattice.
+        credits_css = self.css[self.css.index(".credits-rotary-page main.credits-rotary {"):]
+        for pattern in (r"background-image:\s*(repeating-)?linear-gradient",
+                        r"background-image:\s*radial-gradient"):
+            hits = [m.start() for m in re.finditer(pattern, credits_css)]
+            for hit in hits:
+                context = credits_css[max(0, hit - 400):hit]
+                selector = re.findall(r"\.([\w-]+(?:__?[\w-]+)*)\s*(?:::[\w-]+)?\s*\{[^}]*$",
+                                      context)
+                with self.subTest(selector=selector[-1] if selector else "?"):
+                    self.assertNotIn(selector[-1] if selector else "", ("credits-rotary",),
+                                     "a grid texture is being painted over the mesh")
 
     # --- the scrim that makes the brightness survivable -----------------
     def test_the_copy_gets_a_scrim_behind_it(self):
@@ -3022,22 +3552,35 @@ class CreditsScrollPhysics(unittest.TestCase):
         self.assertIn("SEGMENT * SNAP_THRESHOLD", self.rotary)
 
 
-class CreditsWaveAudioReactivity(unittest.TestCase):
-    """The mesh is driven by the track that is actually playing."""
+class AmbientMeshReactivity(unittest.TestCase):
+    """What drives the mesh: the audio analysis everywhere, and -- on the credits
+    screen alone -- the wheel.
+
+    The audio half is a contract with the facade: the mesh must read it every
+    frame rather than once, must not throw when it is missing or older than
+    getBands(), and must still be alive in silence. The scroll half is a contract
+    about EXCLUSIVITY, which is the part that is easy to get subtly wrong now that
+    the canvas outlives the page it was made for.
+    """
 
     @classmethod
     def setUpClass(cls):
         cls.app = (ROOT / "app.js").read_text()
         cls.audio = cls.app.split("var SPECTRUM_BANDS =", 1)[1].split("window.AgoraAudio = {", 1)[0]
-        # Bounded by initWheelReactivity, not bootPage: the wheel driver was
-        # inserted between them, and letting it leak into cls.mesh would make
-        # every "the mesh does X" assertion pass on the wrong function.
-        cls.mesh = cls.app.split("function initWaveMatrix()", 1)[1].split("var wheelReactivityCleanup", 1)[0]
-        cls.wheel = cls.app.split("function initWheelReactivity()", 1)[1].split("function bootPage", 1)[0]
-        cls.dots = cls.app.split("function initDotMatrix()", 1)[1].split(
+        cls.mesh = cls.app.split("function initAmbientMesh()", 1)[1].split(
             "\n  function initCreditsRotary", 1)[0]
+        cls.draw = cls.mesh.split("function draw(timestamp)", 1)[1]
+        cls.wheel = cls.app.split("function initWheelReactivity()", 1)[1].split("function bootPage", 1)[0]
+        cls.physics = cls.app.split("function initCreditsRotary()", 1)[1].split(
+            "     9. DYNAMIC DOWNLOAD LINK", 1)[0]
         cls.facade = cls.app.split("window.AgoraAudio = {", 1)[1].split("};", 1)[0]
 
+    def num(self, name, region=None):
+        m = re.search(r"var " + name + r" = (-?[\d.]+);", region or self.app)
+        self.assertIsNotNone(m, f"{name} is gone")
+        return float(m.group(1))
+
+    # --- the audio facade -------------------------------------------------
     def test_the_facade_exposes_a_spectrum_tap(self):
         """Exposed on the existing facade rather than duplicated: these close over
         the audio graph, and a second graph would drift out of sync with the track
@@ -3079,21 +3622,30 @@ class CreditsWaveAudioReactivity(unittest.TestCase):
         self.assertLess(float(release), 0.2, "the release is too fast to read as an ease")
 
     def test_the_mesh_reads_the_facade_every_frame_not_once(self):
-        """The mesh is rebuilt on each PJAX swap while the audio graph is built
-        once per session, and the track can start or stop at any moment."""
-        draw = self.mesh.split("function draw(timestamp)", 1)[1]
-        self.assertIn("readBands()", draw, "the draw loop never consults the audio")
-        self.assertIn("readSpin(timestamp)", draw, "the draw loop never consults the wheel")
-        self.assertIn("computeGrid(time, b, spinWave, spinDir);", draw,
-                      "positions must be rebuilt every frame, not cached at init")
-        self.assertNotIn("readBands();\n    resize();", self.mesh,
-                         "audio is being sampled once at init")
+        """The audio graph is built once per session and the track can start or
+        stop at any moment, so the bands have to be re-read inside draw().
+
+        Sampling them at construction is the failure this guards: it produces a
+        mesh that reacts to whatever the music was doing at page load and then
+        never changes, which looks correct for the first second of a visit."""
+        self.assertEqual(self.mesh.count("readBands()"), 1,
+                         "the bands must be read exactly once per frame, inside draw()")
+        self.assertIn("var b = readBands();", self.draw)
+        before = self.mesh.split("function draw(timestamp)", 1)[0]
+        self.assertNotIn("readBands()", before, "audio is being sampled at construction")
+        resize = self.mesh.split("function resize()", 1)[1].split("\n      }", 1)[0]
+        self.assertNotIn("readBands()", resize, "or at resize")
+        # And every band the analysis bothers to compute for the mesh has to
+        # actually reach a paint or a displacement, or it is being paid for twice.
+        for band in ("b.bass", "b.treble", "b.onset", "b.pitch"):
+            with self.subTest(band=band):
+                self.assertIn(band, self.draw, f"{band} is computed but never used")
 
     def test_the_mesh_degrades_when_the_facade_is_missing_or_older(self):
         """A browser with no AudioContext, or a cached older app.js that predates
         getBands(), must not throw -- the mesh just keeps breathing on its own.
-        The guard moved out of the mesh to module scope so the dot matrix and the
-        wheels degrade the same way instead of each inventing their own."""
+        The guard lives at module scope so the mesh and the wheels degrade the
+        same way instead of each inventing their own."""
         guard = self.app.split("function readBands()", 1)[1].split("\n  }", 1)[0]
         self.assertIn("typeof api.getBands !== 'function'", guard,
                       "an older facade without getBands would throw")
@@ -3101,71 +3653,141 @@ class CreditsWaveAudioReactivity(unittest.TestCase):
         self.assertIn("catch (error)", guard,
                       "a throwing facade must not take the canvas down with it")
         # The idle object has to carry every key the consumers read, or a silent
-        # page throws on the first frame instead of drawing a calm grid.
+        # page throws on the first frame instead of drawing a calm field.
         idle = self.app.split("var IDLE_BANDS = {", 1)[1].split("};", 1)[0]
         for key in ("bass", "mid", "treble", "onset", "pitch", "centroid"):
             with self.subTest(key=key):
                 self.assertIn(key, idle, f"IDLE_BANDS is missing {key}")
+        # A shared mutable default handed to every caller would let one consumer's
+        # snapshot change underneath another, so getBands must copy.
+        getter = self.app.split("function getBands()", 1)[1].split("\n    }", 1)[0]
+        self.assertRegex(getter, r"return \{[\s\S]*bass:",
+                         "getBands hands out the object it caches instead of a copy")
 
-    def test_silence_still_moves_the_mesh(self):
-        """With the music off, energy and bands are zero -- the amplitude floor is
-        what keeps the background alive instead of frozen."""
-        shears = [float(x) for x in re.findall(r"\* spacing \* ([\d.]+);", self.mesh)]
-        self.assertTrue(shears, "the idle shear disappeared")
-        self.assertGreaterEqual(min(shears), 0.26, "the silent mesh must visibly undulate")
-        self.assertLess(min(shears), 1.0, "past one cell the lines cross and read as tearing")
-        # Every audio- and scroll-driven term must be MULTIPLIED by its driver, so
-        # silence cancels it exactly instead of leaving a residual wobble that
-        # reads as the mesh ignoring the mute button.
-        # Checked in BOTH canvases: the dot matrix has its own set of these
-        # terms, and asserting only the wave mesh let its bass coupling be
-        # deleted without any test noticing.
-        for term, driver in (("swellK", "b.bass"), ("midK", "b.mid"),
-                             ("rippleK", "b.treble"), ("jumpK", "b.onset"),
-                             ("swirlK", "spinWave")):
-            for name, region in (("wave mesh", self.mesh), ("dot matrix", self.dots)):
-                if term == "midK" and region is self.dots:
-                    continue          # the matrix has no separate mid term
-                with self.subTest(term=term, canvas=name):
-                    self.assertRegex(region, term + r" = [^;]*\* " + re.escape(driver),
-                                     f"{name}: {term} is no longer driven by {driver}")
+    # --- scroll coupling, credits only ------------------------------------
+    def test_scroll_coupling_is_exclusive_to_the_credits_screen(self):
+        """Every other page is strictly audio-reactive.
 
-    def test_a_grid_node_lands_in_the_same_place_from_either_pass(self):
-        """Rows and columns are stroked as separate passes over the same nodes. If
-        the displacement depended on which pass reached it, the mesh would tear at
-        every intersection.
+        Two independent things have to hold: nothing outside the credits wheel may
+        PUBLISH a spin, and the mesh must refuse to READ one even if something did.
+        The second half is not paranoia -- a PJAX swap away from credits leaves the
+        last velocity sitting in the module-level slot, and that slot now outlives
+        the page, so without the body-class gate a visitor would arrive on the home
+        page with the credits wheel still rippling it.
 
-        This used to be enforced by bandAt(), a function whose entire job was to
-        make the displacement a pure function of (row, column) so the two passes
-        agreed. Positions are now computed ONCE per frame into a shared
-        Float32Array that the row pass, the column pass and the node pass all
-        read, which makes agreement structural rather than something two
-        functions have to be careful about -- so assert the structure.
+        Verified end to end by running two simulations of index.html that differ
+        only in whether a wheel event was dispatched: the lattices come out
+        bit-for-bit identical.
         """
-        self.assertEqual(self.mesh.count("computeGrid(time, b, spinWave, spinDir);"), 1,
-                         "positions must be computed exactly once per frame")
-        self.assertIn("pts = new Float32Array(rows * columns * 2);", self.mesh)
-        self.assertGreaterEqual(self.mesh.count("points.push(pts["), 2,
-                                "both stroke passes must read the shared buffer")
-        self.assertIn("glowNode(pts[q], pts[q + 1]", self.mesh,
-                      "the node pass must read the same buffer too")
-        prose = "nodeX()/nodeY()/bandAt()"
-        self.assertNotIn("bandAt(", self.mesh.replace(prose, ""),
-                         "the agreement helper is back; the shared buffer replaced it")
+        gate = self.draw.split("readSpin(timestamp)", 1)[0]
+        self.assertIn("doc.body.classList.contains('credits-rotary-page')", gate,
+                      "the spin is read without checking which page is showing")
+        self.assertIn("var spin = credits ? readSpin(timestamp) : 0;", self.draw)
+        # Exactly one writer, and it is the credits wheel physics.
+        # Counted across the WHOLE file, not just the physics region: the danger is
+        # a second writer appearing anywhere, and a region-scoped count cannot see
+        # one. That is exactly the mutation this check missed on its first pass.
+        writes = [m.start() for m in re.finditer(r"^\s*wheelSpin\.velocity =", self.app,
+                                                 re.MULTILINE)]
+        self.assertEqual(len(writes), 1, "more than one thing can publish a spin")
+        # Anchored to a line start, because a plain assertIn on the statement also
+        # matches `// wheelSpin.velocity = ...` -- the mutation that commented this
+        # out survived its first sweep for exactly that reason.
+        self.assertIsNotNone(
+            re.search(r"^\s*wheelSpin\.velocity = state\.rotationVelocity;",
+                      self.physics, re.MULTILINE),
+            "the physics loop is not publishing the spin")
+        # The spin only reaches the displacement through spinWave, so a page that
+        # never publishes one cannot be affected by having the term in the code.
+        self.assertIn("var spinAmp = spacing * 0.22 * spinWave;", self.mesh)
+        self.assertIn("if (spinWave > 0.001) {", self.mesh,
+                      "the radial term must be skipped entirely when nothing is spinning")
 
-    def test_the_nodes_are_lit_by_bass_and_onset(self):
-        node_loop = self.mesh.split("for (row = 0; row < rows; row += 2)", 1)[1]
-        self.assertIn("glowNode(", node_loop)
-        self.assertIn("b.bass * 0.5", node_loop, "the nodes ignore the bass")
-        self.assertIn("b.onset * 0.5", node_loop, "the nodes ignore a piano attack")
-        self.assertIn("row += 2", self.mesh,
-                      "every intersection is drawn; that is ~870 blits a frame")
+    def test_a_committed_contributor_pushes_a_shockwave_ring(self):
+        """Continuous scrolling ripples the mesh through the spin velocity, but a
+        contributor ARRIVING is a different kind of event -- a discrete impact --
+        so it gets a discrete expanding ring instead of a slightly stronger wobble.
+
+        Pushed from showMember's animated path only. showMember(0, false) runs at
+        boot, and detonating a ring on a screen nobody has touched yet would be a
+        lie about what the visitor did."""
+        member = self.app.split("function showMember(index, animate)", 1)[1]
+        member = member.split("\n    function ", 1)[0]
+        self.assertIn("if (!animate) return;", member)
+        head, tail = member.split("if (!animate) return;", 1)
+        self.assertNotIn("pushMeshPulse(", head,
+                         "the boot-time showMember must not detonate a ring")
+        self.assertRegex(tail, r"pushMeshPulse\(0\.55 \+ \(Math\.abs\(state\.rotationVelocity\) "
+                               r"/ MAX_ANGULAR_VELOCITY\)\);",
+                         "the ring's strength must track how hard the wheel was moving on "
+                         "arrival, so a fling lands louder than a gentle snap")
+        calls = [m.start() for m in re.finditer(r"pushMeshPulse\(", self.app)]
+        decls = [m.start() for m in re.finditer(r"function pushMeshPulse\(", self.app)]
+        self.assertEqual(len(decls), 1)
+        self.assertEqual(len(calls) - len(decls), 1,
+                         "exactly one thing in the whole app can detonate a ring")
+        # And the ring has to be READ, or the impact is published into nothing.
+        self.assertIn("var pulses = activePulses(timestamp);", self.mesh)
+        self.assertIn("dy -= lift;", self.draw, "the ring never displaces the field")
+
+    def test_the_shockwave_buffer_is_bounded_and_ages_out(self):
+        """A visitor who flings the wheel twenty times in a second must not get
+        twenty rings, and a ring must not live forever.
+
+        There is no reaper timer, deliberately: the rotary's frame loop STOPS when
+        the wheel settles, so anything that only expired on a frame callback from
+        that loop would freeze on screen. The rings are dropped on read, inside the
+        mesh's own draw loop, which by definition is still running."""
+        self.assertGreaterEqual(self.num("MESH_PULSE_MAX"), 2,
+                                "one ring at a time cannot overlap the next")
+        self.assertLessEqual(self.num("MESH_PULSE_MAX"), 8,
+                             "an unbounded ring list is a per-vertex cost")
+        push = self.app.split("function pushMeshPulse(strength)", 1)[1].split("\n  }", 1)[0]
+        self.assertIn("meshPulses.shift()", push, "the buffer does not evict its oldest ring")
+        self.assertIn("clamp(strength, 0, 1)", push, "an unclamped strength can invert the field")
+        life = self.num("MESH_PULSE_LIFE")
+        self.assertGreater(life, 500, "too brief to read as a shockwave")
+        self.assertLess(life, 2500, "long enough to outlast the scroll that caused it")
+        self.assertGreater(self.num("MESH_PULSE_SPEED"), 300,
+                           "a ring that crawls reads as a blob, not as a shockwave")
+
+        active = self.app.split("function activePulses(now)", 1)[1].split("\n  }", 1)[0]
+        self.assertIn("if (age > MESH_PULSE_LIFE)", active)
+        self.assertIn("meshPulses.splice(i, 1)", active, "expired rings are never dropped")
+        self.assertIn("radius: (age / 1000) * MESH_PULSE_SPEED", active,
+                      "the ring must EXPAND; a stationary blob that fades is not a shockwave")
+        self.assertIn("(1 - t) * MESH_PULSE_LIFT", active, "and fade as it does")
+        self.assertIn("Math.pow(90 + (t * 190), 2)", active,
+                      "the band must widen as it travels, or it stays a hard circle")
+        # The idle path must not allocate. Most frames have no ring in flight, and
+        # 60fps of throwaway objects is needless churn on a phone.
+        self.assertIn("if (!meshPulses.length) return NO_PULSES;", active)
+        self.assertIn("var NO_PULSES = [];", self.app)
+
+    def test_the_ring_is_read_from_the_same_clock_as_the_frame(self):
+        """A ring's age is `now - pulse.at`, and `now` is the rAF timestamp. If
+        `at` were stamped from a different clock the two would disagree -- in a
+        browser by an arbitrary offset, in a test harness by a synthetic one -- and
+        every ring would either be born expired or never expire at all."""
+        push = self.app.split("function pushMeshPulse(strength)", 1)[1].split("\n  }", 1)[0]
+        self.assertIn("window.performance.now()", push)
+        self.assertNotIn("Date.now()", push.replace("? window.performance.now()", "")
+                         .split("at: window.performance", 1)[0],
+                         "the ring's birth is stamped from the wall clock")
+        self.assertIn("activePulses(timestamp)", self.mesh,
+                      "and its age is measured against the frame timestamp")
+
 
 
 class CreditsAudioBands(unittest.TestCase):
     """Bass, mid, treble, onset and pitch -- the analysis that drives both the
     mesh and the wheels -- plus the scroll coupling and the invariant that none
     of it may move the contributor copy.
+
+    The mesh half of this is one canvas now; the reactivity that used to be split
+    across two is asserted against the single AmbientMesh region, and the parts of
+    it that are about the mesh rather than the analysis live in
+    AmbientMeshReactivity.
     """
 
     @classmethod
@@ -3174,13 +3796,16 @@ class CreditsAudioBands(unittest.TestCase):
         cls.css = (ROOT / "style.css").read_text()
         cls.audio = cls.app.split("var SPECTRUM_BANDS =", 1)[1].split(
             "window.AgoraAudio = {", 1)[0]
+        # Bounded by the NEXT SECTION BANNER rather than by the next function:
+        # initCreditsRotary is followed by the download section, and bounding on a
+        # function name that no longer exists silently yields the whole rest of the
+        # file, which makes every "the physics does X" assertion pass on code that
+        # is not the physics.
         cls.physics = cls.app.split("function initCreditsRotary()", 1)[1].split(
-            "function initWaveMatrix()", 1)[0]
+            "     9. DYNAMIC DOWNLOAD LINK", 1)[0]
         cls.wheel = cls.app.split("function initWheelReactivity()", 1)[1].split(
             "function bootPage", 1)[0]
-        cls.mesh = cls.app.split("function initWaveMatrix()", 1)[1].split(
-            "var wheelReactivityCleanup", 1)[0]
-        cls.dots = cls.app.split("function initDotMatrix()", 1)[1].split(
+        cls.mesh = cls.app.split("function initAmbientMesh()", 1)[1].split(
             "\n  function initCreditsRotary", 1)[0]
 
     def num(self, name, region=None):
@@ -3313,13 +3938,17 @@ class CreditsAudioBands(unittest.TestCase):
         # without it the last ripple would freeze on screen forever.
         self.assertGreater(self.num("SPIN_DECAY_MS"), 100,
                            "too fast to read as the wheel calming down")
-        for name, region in (("wave mesh", self.mesh), ("dot matrix", self.dots)):
-            with self.subTest(canvas=name):
-                self.assertIn("readSpin(timestamp)", region)
-                self.assertIn("spinDir = spin < 0 ? -1 : 1", region,
-                              "the ripple must follow the spin's DIRECTION")
-                self.assertIn("clamp(Math.abs(spin) / SPIN_REFERENCE, 0, 1)", region,
-                              "the ripple must scale with the spin's MAGNITUDE")
+        # One canvas now, so one region to check -- but the check is the same pair
+        # it always was, because direction and magnitude are separately breakable:
+        # a ripple that ignores the sign reads as the wheel only ever being spun one
+        # way, and one that ignores the magnitude reads as every scroll being a fling.
+        self.assertIn("readSpin(timestamp)", self.mesh)
+        self.assertIn("spinDir = spin < 0 ? -1 : 1", self.mesh,
+                      "the ripple must follow the spin's DIRECTION")
+        self.assertIn("clamp(Math.abs(spin) / SPIN_REFERENCE, 0, 1)", self.mesh,
+                      "the ripple must scale with the spin's MAGNITUDE")
+        self.assertIn("* spinDir", self.mesh,
+                      "and the direction must actually reach the ripple's phase")
 
     # --- 8. the wheel driver ---------------------------------------------
     def test_the_wheel_driver_outlives_the_physics_loop(self):

@@ -15,10 +15,9 @@
      5. Chrome            — header scroll state, active nav, year
      6. Feedback form     — validation + same-origin API submit
      7. Shared-post       — URL param parsing + post preview stub
-     8. Ambient layer      — custom cursor, soundscape, synced dot matrix
+     8. Ambient layer      — custom cursor, soundscape, the background mesh
      9. Dynamic download  — newest GitHub release APK for every CTA
-     10. Credits wave mesh — audio-reactive sine grid behind the rotary wheels
-     11. Wheel reactivity — bass/onset/treble drive the wheels themselves
+     10. Wheel reactivity — bass/onset/treble drive the wheels themselves
    ============================================================ */
 
 (function agoraApp() {
@@ -29,7 +28,7 @@
     return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   };
 
-  /* Shared by the credits wheel and the credits wave mesh. This used to be a
+  /* Shared by the credits wheel and the background mesh. This used to be a
      private helper inside initCreditsRotary, which is fine until a second
      section needs it: the mesh called clamp() from its own draw loop and threw a
      ReferenceError on every frame, silently killing the animation. `node --check`
@@ -93,9 +92,9 @@
     context.globalAlpha = 1;
   }
 
-  /* ---- the wheel's spin, shared with both canvases -----------------------
+  /* ---- the wheel's spin, published to the background mesh ----------------
      Scrolling has to ripple the mesh even with the music muted or paused, and
-     the canvases live in different sections from the rotary physics -- so the
+     the canvas lives in a different section from the rotary physics -- so the
      angular velocity is published here rather than passed down a call chain
      that does not exist. `at` is the timestamp of the last write: the rotary's
      frame loop STOPS once the wheel settles, which would otherwise freeze the
@@ -110,8 +109,8 @@
     return wheelSpin.velocity * Math.exp(-age / SPIN_DECAY_MS);
   }
 
-  /* One place that asks the audio facade for its band metrics, so the dot
-     matrix, the wave mesh and the wheels all degrade identically when the
+  /* One place that asks the audio facade for its band metrics, so the mesh
+     and the wheels all degrade identically when the
      facade is absent, older than getBands(), or throws. */
   var IDLE_BANDS = { bass: 0, mid: 0, treble: 0, onset: 0, pitch: 0.5, centroid: 0.5 };
 
@@ -123,6 +122,66 @@
     } catch (error) {
       return IDLE_BANDS;
     }
+  }
+
+  /* Deterministic 32-bit hash, used for the mesh's per-vertex jitter and its
+     per-cell diagonal flip. Math.imul keeps the products inside 32-bit integer
+     range; without it they exceed 2^53 and the low bits -- the only ones that
+     look random -- are lost, which shows up as a mesh whose triangles all lean
+     the same way and whose jitter repeats in visible bands. */
+  function hash2(a, b) {
+    var h = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return (h ^ (h >>> 16)) >>> 0;
+  }
+
+  /* ---- scroll shockwaves ----------------------------------------------------
+     Continuous scrolling ripples the mesh through the spin velocity above, but
+     a committed contributor is a discrete impact and deserves a discrete ring.
+     The rings live here, at module scope, because the rotary physics and the
+     canvas are separate sections with no call chain between them -- the same
+     reason wheelSpin lives here. The mesh ages them out; nothing else reads
+     them. Capped so a long fling cannot grow the list without bound. */
+  var MESH_PULSE_MAX = 6;
+  var MESH_PULSE_SPEED = 900;    // px/s the ring expands at
+  var MESH_PULSE_LIFE = 1100;    // ms before a ring is dropped
+  var MESH_PULSE_LIFT = 20;      // px of displacement at full strength
+  var meshPulses = [];
+  var NO_PULSES = [];            // shared empty result: no allocation when idle
+
+  function pushMeshPulse(strength) {
+    if (meshPulses.length >= MESH_PULSE_MAX) meshPulses.shift();
+    meshPulses.push({
+      at: window.performance && window.performance.now
+        ? window.performance.now()
+        : Date.now(),
+      x: window.innerWidth * 0.5,
+      y: window.innerHeight * 0.5,
+      strength: clamp(strength, 0, 1)
+    });
+  }
+
+  function activePulses(now) {
+    if (!meshPulses.length) return NO_PULSES;
+    var out = [];
+    for (var i = meshPulses.length - 1; i >= 0; i -= 1) {
+      var age = now - meshPulses[i].at;
+      if (age > MESH_PULSE_LIFE) {
+        meshPulses.splice(i, 1);   // drop on read: there is no reaper loop
+        continue;
+      }
+      var t = age / MESH_PULSE_LIFE;
+      out.push({
+        x: meshPulses[i].x,
+        y: meshPulses[i].y,
+        radius: (age / 1000) * MESH_PULSE_SPEED,
+        // The band widens as it expands, so the ring smears out rather than
+        // staying a hard circle shrinking to nothing.
+        sigma2: 2 * Math.pow(90 + (t * 190), 2),
+        strength: meshPulses[i].strength * (1 - t) * MESH_PULSE_LIFT
+      });
+    }
+    return out.length ? out : NO_PULSES;
   }
 
   /* ------------------------------------------------------------
@@ -1450,29 +1509,75 @@
       updateSoundButton();
     }
 
-    function initDotMatrix() {
+    /* ---- the one background mesh, for the whole site ----------------------
+       A jittered grid triangulated into a low-poly field, displaced by waves
+       that travel left to right and driven by the audio analysis.
+
+       There used to be two overlapping grids: a square dot matrix on every page
+       and a sine wave mesh on the credits screen alone. On credits they sat on
+       top of each other, doubled the frame cost, and read as moire rather than
+       as depth. This is now the only canvas the site creates.
+
+       A jittered grid rather than a true Delaunay, deliberately. The topology
+       (which diagonal each cell splits along, and how far each vertex is nudged
+       off the lattice) is hashed from its (row, column) once per resize, so it
+       is identical every frame. A triangulation recomputed per frame would boil
+       -- the vertices move, so the triangles would flip constantly -- and
+       re-running Bowyer-Watson on ~900 moving points is not something a phone
+       survives. Visually the two are indistinguishable at this opacity.     */
+    function initAmbientMesh() {
       var canvas = doc.createElement('canvas');
       var context = canvas.getContext('2d');
       if (!context) return;
 
-      canvas.className = 'ambient-dot-matrix';
+      canvas.className = 'ambient-mesh';
       canvas.setAttribute('aria-hidden', 'true');
       doc.body.insertBefore(canvas, doc.body.firstChild);
 
-      // The dots read the dedicated mesh channels rather than the general brand
-      // ones, so the background can be retuned without touching buttons, links or
-      // the wordmark -- and so the light theme can deepen them independently.
-      // Still read back from CSS: a hardcoded literal here would paint dark-theme
-      // neon onto a light page. The fallbacks are the dark theme's real values.
+      // Colours are read back out of the stylesheet's dedicated mesh channels
+      // rather than hardcoded, so the layer tracks the active theme instead of
+      // painting dark-mode indigo onto a light page. The fallbacks are the dark
+      // theme's real values, so an unreadable custom property degrades to the
+      // intended palette rather than to black.
       var FALLBACK_NODE = '147,112,255';
       var FALLBACK_HI = '190,210,255';
       var FALLBACK_GLOW = '124,92,255';
       var FALLBACK_LINE = '120,95,255';
 
-      // The interconnecting lines need the mesh line channel too, so the grid
-      // and its dots are the same material rather than two unrelated colours.
-      var DOT_GLOW_BLOOM = 0.42;    // minimal glow: a soft edge, not a halo
-      var DOT_GLOW_SPREAD = 1.9;    // sprite covers radius * 2 * this
+      var MESH_GLOW_BLOOM = 0.42;   // minimal glow: a soft edge, not a halo
+      var MESH_GLOW_SPREAD = 1.9;   // sprite covers radius * 2 * this
+
+      /* Keeping the lattice from tearing -- a SPATIAL-FREQUENCY budget, not an
+         amplitude one, and the difference is the whole reason the waves can be
+         as large as they are.
+
+         Two neighbouring vertices cross only when their displacements DIFFER by
+         more than the gap between them. A smooth swell cannot do that however
+         large it gets: the Gaussian front has a standard deviation around 230px,
+         four cells wide, so adjacent vertices ride it almost identically and the
+         field is free to heave by a third of a cell. Capping the front's
+         amplitude the way an earlier draft did bought no safety at all and threw
+         away most of the motion.
+
+         What CAN tear the lattice are the sharp terms. The per-vertex jitter's
+         wavelength is exactly one cell, so it spends 2*JITTER of the budget
+         unconditionally. The travelling sine's wavelength shrinks as the dominant
+         pitch rises: a sine of amplitude A and wavenumber k moves one neighbour
+         past the next by at most A*k*spacing, so it is safe while
+         A <= (TEAR_LIMIT - 2*JITTER) / k. k is known per frame, which means the
+         ceiling is computed from the wavelength the audio actually asked for
+         rather than guessed at -- a bright passage gets finer ripples AND a lower
+         amplitude ceiling, which is what a real membrane does.
+
+         Both bounds are verified by running the mesh and measuring the signed
+         area of all ~550 triangles, in silence and at full scale; see
+         test_the_displacement_budget_holds_the_lattice_together. */
+      var JITTER = 0.12;        // per-vertex, fixed at resize
+      var TEAR_LIMIT = 0.45;    // how far a vertex may move past its neighbour
+
+      var WAVE_SPEED = 210;     // px/s phase speed of the travelling sine
+      var FRONT_SPEED = 260;    // px/s: the localized crest sweeping in +x
+      var FRONT_PAD = 420;      // px of off-screen lead-in and lead-out
 
       function readPalette() {
         try {
@@ -1502,27 +1607,31 @@
 
       function buildSprites(p) {
         return {
-          node: makeGlowSprite(p.node, p.glow, DOT_GLOW_BLOOM),
-          hi: makeGlowSprite(p.hi, p.glow, DOT_GLOW_BLOOM)
+          node: makeGlowSprite(p.node, p.glow, MESH_GLOW_BLOOM),
+          hi: makeGlowSprite(p.hi, p.glow, MESH_GLOW_BLOOM)
         };
       }
 
       var width = 0;
       var height = 0;
-      var density = 36;
+      var spacing = 62;
       var columns = 0;
       var rows = 0;
       var pixelRatio = 1;
-      /* Flat x/y pairs for every grid node, filled once per frame. The line
-         passes and the dot pass both read this array, so a node cannot be drawn
-         in two different places in the same frame -- and no per-dot object or
-         closure is allocated while animating. */
-      var pts = null;
+      var pts = null;        // per-frame vertex positions, rows*columns*2
+      var jitterX = null;    // per-vertex, fixed at resize
+      var jitterY = null;
+      var flips = null;      // per-cell: which diagonal that cell splits along
 
       function resize() {
         width = window.innerWidth;
         height = window.innerHeight;
-        density = width < 600 ? 30 : 36;
+        // A triangulated field reads denser than the square grid it replaced --
+        // three edges per cell instead of two -- so the cell is coarser than the
+        // old matrix's 30/36px while carrying MORE structure. At 54px a 1440x900
+        // viewport gets ~600 vertices, ~550 triangles and ~1700 edges, which is
+        // the "richly filled" end of readable without ~2600 blits a frame.
+        spacing = width < 600 ? 38 : 54;
         pixelRatio = Math.min(window.devicePixelRatio || 1, 1.75);
         canvas.width = Math.floor(width * pixelRatio);
         canvas.height = Math.floor(height * pixelRatio);
@@ -1530,9 +1639,32 @@
         canvas.style.height = height + 'px';
         context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
 
-        columns = Math.ceil(width / density) + 2;
-        rows = Math.ceil(height / density) + 2;
-        pts = new Float32Array(rows * columns * 2);
+        // One spare cell each way, so vertices displaced off the edge still have
+        // neighbours to be joined to and the mesh never shows a ragged border.
+        columns = Math.ceil(width / spacing) + 3;
+        rows = Math.ceil(height / spacing) + 3;
+
+        var vertices = rows * columns;
+        var cells = (rows - 1) * (columns - 1);
+        pts = new Float32Array(vertices * 2);
+        jitterX = new Float32Array(vertices);
+        jitterY = new Float32Array(vertices);
+        flips = new Uint8Array(Math.max(0, cells));
+
+        /* Deterministic jitter from a hash of (row, column). Not Math.random():
+           the topology has to survive from frame to frame, and a jitter
+           recomputed per frame would make the whole mesh boil. The high and low
+           halves of the hash drive x and y, so the two axes are uncorrelated. */
+        for (var i = 0; i < vertices; i += 1) {
+          var h = hash2(i % columns, (i - (i % columns)) / columns);
+          jitterX[i] = (((h & 0xffff) / 0xffff) - 0.5) * 2 * JITTER * spacing;
+          jitterY[i] = (((h >>> 16) / 0xffff) - 0.5) * 2 * JITTER * spacing;
+        }
+        // Which diagonal each cell uses, hashed so the lean varies organically
+        // instead of settling into a checkerboard or one uniform lattice.
+        for (var c = 0; c < flips.length; c += 1) {
+          flips[c] = hash2(c, 0x5f3a7c11) & 1;
+        }
       }
 
       function draw(timestamp) {
@@ -1542,64 +1674,131 @@
 
         var time = timestamp / 1000;
         var b = readBands();
-        var spin = readSpin(timestamp);
+
+        /* Scroll coupling is exclusive to the credits screen. Nothing else
+           publishes a spin, so readSpin() would already return ~0 -- but the
+           body class is checked explicitly anyway, because a PJAX swap away from
+           credits leaves the last velocity in the slot and it must not keep
+           rippling a page that has no wheels on it. */
+        var credits = doc.body.classList.contains('credits-rotary-page');
+        var spin = credits ? readSpin(timestamp) : 0;
         var spinWave = clamp(Math.abs(spin) / SPIN_REFERENCE, 0, 1);
         var spinDir = spin < 0 ? -1 : 1;
 
         context.clearRect(0, 0, width, height);
 
-        /* The dominant pitch moves the ripple's spatial frequency and its focal
-           point, so a melody that climbs or drops visibly travels across the
-           grid instead of just getting louder where it already was. */
-        var pitchK = 0.006 + (b.pitch * 0.026);
-        var focusX = width * (0.15 + (b.centroid * 0.7));
-        var focusY = height * (0.2 + (b.pitch * 0.6));
-        var focal = density * 6;
-        var swellK = density * 0.5 * b.bass;
-        var rippleK = density * 0.16 * b.treble;
-        var jumpK = -density * 0.85 * b.onset;   // negative: the jump is UPWARD
-        var swirlK = density * 0.55 * spinWave;
+        /* ---- the left-to-right wave field ---------------------------------
+           Every travelling term here is phased (k*x - w*t). A crest satisfies
+           x = (phase + w*t)/k, so it moves in +x as time grows. The opposite
+           sign is the mistake to avoid: it looks identical frame to frame and
+           sweeps right to left.
+
+           Two components, because one is not enough to read as propagation. A
+           continuous sine gives the whole field a direction of travel, and a
+           localized Gaussian front sweeping the width gives the eye a crest to
+           follow -- that is what makes the motion legible as a wave crossing
+           the screen rather than as surface shimmer.                        */
+        var kx = 0.0062 + (b.pitch * 0.019);   // pitch shifts the wavelength
+        var travel = time * (kx * WAVE_SPEED);
+        var period = width + (FRONT_PAD * 2);
+        var front = ((time * FRONT_SPEED) % period) - FRONT_PAD;
+        var frontSigma = Math.max(120, width * 0.16);
+        var frontSigma2 = 2 * frontSigma * frontSigma;
+
+        /* Amplitudes, split by how sharp each term is.
+
+           The smooth ones are generous precisely because smoothness is what keeps
+           them safe. The front is the term the eye follows: a localized crest
+           crossing the whole width every ~9s, which is what makes the motion read
+           as a wave travelling through the field rather than as the field
+           shimmering in place. It is present at full strength with the music OFF,
+           because the site boots muted and a background that only moves once you
+           press play is a background that looks broken. */
+        var driftAmp = spacing * 0.10;
+        var frontAmp = spacing * (0.20 + (b.bass * 0.18) + (b.onset * 0.24));
+        var spinAmp = spacing * 0.22 * spinWave;
+
+        // The sharp one, capped against its own wavenumber for the reason above.
+        var sineAmp = Math.min((TEAR_LIMIT - (2 * JITTER)) / kx,
+          spacing * ((0.30 * b.bass) + (0.18 * b.treble)));
+
+        // Shockwave rings the credits wheels push on a committed contributor.
+        var pulses = activePulses(timestamp);
+        var pulseCount = pulses.length;
 
         var row;
         var column;
         var index = 0;
         for (row = 0; row < rows; row += 1) {
           for (column = 0; column < columns; column += 1) {
-            var gx = (column * density) - density;
-            var gy = (row * density) - density;
-            var phase = (row * 0.71) + (column * 0.37);
+            var i = (row * columns) + column;
+            var gx = ((column - 1) * spacing) + jitterX[i];
+            var gy = ((row - 1) * spacing) + jitterY[i];
 
-            // Idle breathing: with the music off the grid still moves, so the
-            // background never reads as a frozen screenshot.
-            var ix = Math.sin((time * 0.28) + phase + (row * 0.08)) * 2;
-            var iy = Math.cos((time * 0.19) + phase) * 2;
-            // Bass: wide, deep, rolling vertical swell.
-            var swell = Math.sin((gx * 0.0031) + (time * 0.85))
-              * Math.cos((gy * 0.0022) - (time * 0.55)) * swellK;
-            // Treble: crisp, fast-moving surface ripple along the grid.
-            var ripple = Math.sin((gx * pitchK) + (gy * 0.018) + (time * 6.2)) * rippleK;
-            // Onset: a sharp upward jump, strongest at the ripple's focal point.
-            var dx = gx - focusX;
-            var dy = gy - focusY;
-            var dist = Math.sqrt((dx * dx) + (dy * dy));
-            var jump = jumpK * Math.exp(-dist / focal);
-            // Scroll: a rotational ripple whose direction follows the spin.
-            var swirl = Math.sin((dist * 0.011) - (time * 2.6 * spinDir)) * swirlK;
+            var wave = Math.sin((gx * kx) - travel + (gy * 0.0022));
+            var fd = gx - front;
+            var packet = Math.exp(-(fd * fd) / frontSigma2);
 
-            pts[index] = gx + ix + (ripple * 0.5) + (swirl * 0.35);
-            pts[index + 1] = gy + iy + swell + ripple + jump + swirl;
+            // Idle drift keeps the background alive with the music off; every
+            // audio term below is MULTIPLIED by its band, so silence cancels it
+            // exactly rather than leaving a wobble that ignores the mute button.
+            /* Every phase here is (spatial term) - (time term), the +x
+               convention. The idle drift used to be written the other way round
+               -- sin(time*0.23 + column*0.17) -- which is a crest satisfying
+               column = (C - 0.23*t)/0.17, so it walked LEFT. It was also the
+               loudest term in silence, which is the site's default state, so the
+               one wave every visitor saw with the music off travelled backwards.
+               Measuring the trough's drift over 620 frames is what found it; no
+               amount of reading the source did. */
+            var dy = (Math.sin((column * 0.17) + (row * 0.41) - (time * 0.23)) * driftAmp)
+              + (wave * sineAmp)
+              - (packet * frontAmp);
+            var dx = (Math.cos((column * 0.37) - (time * 0.19)) * driftAmp * 0.5)
+              + (wave * sineAmp * 0.45);
+
+            for (var p = 0; p < pulseCount; p += 1) {
+              var pulse = pulses[p];
+              var pdx = gx - pulse.x;
+              var pdy = gy - pulse.y;
+              var pd = Math.sqrt((pdx * pdx) + (pdy * pdy));
+              var ring = pd - pulse.radius;
+              var lift = Math.exp(-(ring * ring) / pulse.sigma2) * pulse.strength;
+              dy -= lift;
+              if (pd > 0.001) dx += (pdx / pd) * lift * 0.35;
+            }
+
+            if (spinWave > 0.001) {
+              // Radial from the middle of the screen, and the direction follows
+              // the sign of the spin so scrolling up and down travel oppositely.
+              var sx = gx - (width * 0.5);
+              var sy = gy - (height * 0.5);
+              var sd = Math.sqrt((sx * sx) + (sy * sy));
+              var sPhase = (sd * 0.012) - (time * 3.1 * spinDir);
+              dy += Math.sin(sPhase) * spinAmp;
+              dx += Math.cos(sPhase) * spinAmp * 0.4;
+            }
+
+            pts[index] = gx + dx;
+            pts[index + 1] = gy + dy;
             index += 2;
           }
         }
 
-        /* Interconnecting mesh: every node joined to its right and lower
-           neighbour, so the grid is continuous in both directions. Built as ONE
-           path (all rows, then all columns) rather than a segment per pair --
-           a single stroke call instead of several thousand, for the same
-           picture. 0.15 at rest, 0.20 at the very most. */
-        var lineAlpha = Math.min(0.2, 0.15 + (b.treble * 0.03) + (b.onset * 0.02));
+        /* ---- the triangulated wireframe -----------------------------------
+           Three edge families per cell: its top, its left, and one diagonal.
+           Rows and columns are contiguous polylines; the diagonals are not, so
+           they go in as individual segments but share the column pass's single
+           beginPath/stroke.
+
+           Two stroke calls for the whole grid. A stroke per edge would be ~3400
+           of them a frame, and the state changes alone would not survive a
+           phone -- the same reason the vertices are blitted from one sprite
+           instead of being given individual shadowBlur values.            */
+        var rowAlpha = Math.min(0.18, 0.15 + (b.treble * 0.02) + (b.onset * 0.01));
+        var colAlpha = Math.min(0.2, 0.16 + (b.treble * 0.025) + (b.onset * 0.015));
         context.lineWidth = 1;
-        context.strokeStyle = 'rgba(' + palette.line + ',' + lineAlpha.toFixed(4) + ')';
+
+        context.strokeStyle = 'rgba(' + palette.line + ',' + rowAlpha.toFixed(4) + ')';
         context.beginPath();
         for (row = 0; row < rows; row += 1) {
           var rowBase = row * columns * 2;
@@ -1609,31 +1808,57 @@
             else context.lineTo(pts[o], pts[o + 1]);
           }
         }
+        context.stroke();
+
+        // Columns a step brighter than rows, so the field keeps some depth
+        // instead of reading as one flat lattice. Both stay inside 0.15-0.20.
+        context.strokeStyle = 'rgba(' + palette.line + ',' + colAlpha.toFixed(4) + ')';
+        context.beginPath();
         for (column = 0; column < columns; column += 1) {
           for (row = 0; row < rows; row += 1) {
-            var p = ((row * columns) + column) * 2;
-            if (row === 0) context.moveTo(pts[p], pts[p + 1]);
-            else context.lineTo(pts[p], pts[p + 1]);
+            var v = ((row * columns) + column) * 2;
+            if (row === 0) context.moveTo(pts[v], pts[v + 1]);
+            else context.lineTo(pts[v], pts[v + 1]);
+          }
+        }
+        for (row = 0; row < rows - 1; row += 1) {
+          var cellBase = row * (columns - 1);
+          for (column = 0; column < columns - 1; column += 1) {
+            var a = ((row * columns) + column) * 2;
+            var br = ((row * columns) + column + 1) * 2;
+            var bl = (((row + 1) * columns) + column) * 2;
+            var d = (((row + 1) * columns) + column + 1) * 2;
+            if (flips[cellBase + column]) {
+              context.moveTo(pts[a], pts[a + 1]);
+              context.lineTo(pts[d], pts[d + 1]);
+            } else {
+              context.moveTo(pts[br], pts[br + 1]);
+              context.lineTo(pts[bl], pts[bl + 1]);
+            }
           }
         }
         context.stroke();
 
-        /* Dots on top of the mesh: 1.5px at rest to 2.2px, 0.25 alpha at rest to
-           0.30, and up toward 0.35 only on a sharp transient. Both ceilings are
-           the calibration the review asked for so the grid never overpowers the
-           foreground UI. */
+        /* Vertices on top of the wireframe. 1.5px to 2.2px, 0.25 to 0.30 alpha.
+           With the whole field capped that low, the visible contrast has to come
+           from somewhere else -- so a vertex's alpha and radius ride the
+           travelling crest. The wave is legible as a bright band sweeping left
+           to right without any element of it exceeding its ceiling. */
         for (row = 0; row < rows; row += 1) {
           for (column = 0; column < columns; column += 1) {
             var q = ((row * columns) + column) * 2;
-            var w = 0.5 + (0.5 * Math.sin((time * 0.22) + (row * 0.71) + (column * 0.37)));
-            var radius = Math.min(2.2, 1.5 + (w * 0.45) + (b.bass * 0.25));
-            var alpha = Math.min(0.35,
-              0.25 + (w * 0.05) + (b.onset * 0.06) + (b.treble * 0.04));
-            var highlight = ((column + row) % 4) === 0;
+            var x = pts[q];
+            var fx = x - front;
+            var near = Math.exp(-(fx * fx) / frontSigma2);
+            var w = 0.5 + (0.5 * Math.sin((x * kx) - travel));
+            var radius = Math.min(2.2, 1.5 + (w * 0.35) + (b.bass * 0.2) + (near * 0.15));
+            var alpha = Math.min(0.3,
+              0.25 + (w * 0.02) + (near * 0.03) + (b.onset * 0.02) + (b.treble * 0.01));
+            var highlight = ((column + row) % 4) === 0 || near > 0.75;
 
             drawGlow(context, highlight ? sprites.hi : sprites.node,
               highlight ? palette.hi : palette.node,
-              pts[q], pts[q + 1], radius, alpha, DOT_GLOW_SPREAD);
+              x, pts[q + 1], radius, alpha, MESH_GLOW_SPREAD);
           }
         }
 
@@ -1668,17 +1893,25 @@
 
     initCursor();
     initSoundControl();
-    initDotMatrix();
+    initAmbientMesh();
 
-    // Preload bytes without touching the AudioContext. The first click below
-    // resumes/creates the context and starts the already-persistent loop.
-    audio.rawDataPromise = fetch(MUSIC_SRC).then(function (response) {
+    /* Preload bytes without touching the AudioContext. The first click below
+       resumes/creates the context and starts the already-persistent loop.
+
+       The `typeof fetch` guard is less about old browsers than about the SHAPE of
+       the failure. The `.catch()` below can only handle a rejected promise; if
+       `fetch` is not a function the call throws a ReferenceError synchronously,
+       before there is a promise to catch on. And because initAmbientExperience()
+       runs first in boot(), that one throw used to abort boot() outright -- taking
+       routing, the menu, the contact form and the credits screen down with it.
+       A missing decorative layer has to cost the decoration, not the page. */
+    audio.rawDataPromise = typeof fetch === 'function' ? fetch(MUSIC_SRC).then(function (response) {
       if (!response.ok) throw new Error('Music request failed (' + response.status + ').');
       return response.arrayBuffer();
     }).catch(function () {
       audio.rawDataPromise = null;
       return null;
-    });
+    }) : null;
 
     function firstClickStartsAudio() {
       document.removeEventListener('click', firstClickStartsAudio, true);
@@ -1926,6 +2159,14 @@
 
       state.transition += 1;
       var transitionId = state.transition;
+
+      /* A committed contributor is a physical impact, so it drives a shockwave
+         ring into the background mesh. Strength tracks how hard the wheel was
+         moving on arrival: a fling lands louder than a gentle snap. Called only
+         on the animated path, so the initial showMember(0, false) at boot does
+         not detonate a ring on a screen nobody has touched. */
+      pushMeshPulse(0.55 + (Math.abs(state.rotationVelocity) / MAX_ANGULAR_VELOCITY));
+
       allContents.forEach(function (content) { content.classList.remove('is-arriving'); });
 
       var arriving = [topSegments[state.memberIndex], bottomSegments[state.memberIndex]]
@@ -2506,289 +2747,7 @@
   }
 
   /* ------------------------------------------------------------
-     10. CREDITS WAVE MATRIX
-     One animated background layer for the credits screen: a mesh of
-     grid nodes displaced by two out-of-phase sine waves, stroked as
-     whole rows and columns so a frame costs on the order of sixty
-     paths instead of a couple of thousand individual segments.
-
-     The mesh is wired into the site's Web Audio graph through the
-     AgoraAudio facade: the track's log-spaced spectrum drives per-node
-     displacement and its bass energy drives amplitude, stroke alpha and
-     the glow on each node. With the music off -- or on a browser with no
-     AudioContext -- energy and bands are simply zero and the same code
-     falls back to its silent drift, so there is no separate idle path to
-     keep in sync.
-
-     It follows the ambient dot matrix's discipline. Colours are read
-     back out of the stylesheet's --*-rgb channels, so the mesh tracks
-     the active theme rather than painting dark-mode indigo onto a
-     light page; alpha stays low enough that the wheels and the copy
-     keep their contrast; and prefers-reduced-motion gets a single
-     static frame and no loop.
-
-     The layer is page-scoped, not site-scoped. PJAX replaces
-     body.className on every swap, so this runs per page: it removes
-     the canvas and its listeners when the credits screen is left, and
-     the draw loop stops itself the moment the canvas is detached.
-     ------------------------------------------------------------ */
-  var waveMatrixCleanup = null;
-
-  function initWaveMatrix() {
-    var wanted = doc.body.classList.contains('credits-rotary-page');
-
-    if (!wanted) {
-      if (waveMatrixCleanup) {
-        waveMatrixCleanup();
-        waveMatrixCleanup = null;
-      }
-      return;
-    }
-    // Already painting; bootPage re-ran after a PJAX swap that stayed here.
-    if (waveMatrixCleanup) return;
-
-    var canvas = doc.createElement('canvas');
-    var context = canvas.getContext('2d');
-    if (!context) return;
-
-    canvas.className = 'credits-wave-matrix';
-    canvas.setAttribute('aria-hidden', 'true');
-    doc.body.insertBefore(canvas, doc.body.firstChild);
-
-    // Fallbacks only for the unexpected case where the custom properties are
-    // unreadable. They are the dark theme's real channels rather than fresh
-    // numbers, so a failed read degrades to the intended palette instead of
-    // introducing a fourth violet that exists nowhere in the stylesheet.
-    var FALLBACK_LINE = '120,95,255';
-    var FALLBACK_NODE = '147,112,255';
-    var FALLBACK_GLOW = '124,92,255';
-
-    function readPalette() {
-      try {
-        var styles = window.getComputedStyle(doc.documentElement);
-        var line = (styles.getPropertyValue('--mesh-line-rgb') || '').replace(/\s+/g, '');
-        var node = (styles.getPropertyValue('--mesh-node-rgb') || '').replace(/\s+/g, '');
-        var glow = (styles.getPropertyValue('--mesh-glow-rgb') || '').replace(/\s+/g, '');
-        return {
-          line: line || FALLBACK_LINE,
-          node: node || FALLBACK_NODE,
-          glow: glow || FALLBACK_GLOW
-        };
-      } catch (error) {
-        return { line: FALLBACK_LINE, node: FALLBACK_NODE, glow: FALLBACK_GLOW };
-      }
-    }
-
-    var palette = readPalette();
-    // A little more bloom than the matrix dots: these are the mesh's bright
-    // intersections, and they are far fewer of them.
-    var nodeSprite = makeGlowSprite(palette.node, palette.glow, 0.7);
-    var width = 0;
-    var height = 0;
-    var spacing = 54;
-    var columns = 0;
-    var rows = 0;
-    var schemeQuery = null;
-    var pts = null;
-
-    function resize() {
-      width = window.innerWidth;
-      height = window.innerHeight;
-      spacing = width < 600 ? 42 : 54;
-      // Capped like the dot matrix: a 3x retina buffer costs four times the
-      // fill for lines one pixel wide.
-      var pixelRatio = Math.min(window.devicePixelRatio || 1, 1.75);
-      canvas.width = Math.floor(width * pixelRatio);
-      canvas.height = Math.floor(height * pixelRatio);
-      canvas.style.width = width + 'px';
-      canvas.style.height = height + 'px';
-      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-      // Two spare cells each way so the displaced edge nodes stay off-screen.
-      columns = Math.ceil(width / spacing) + 3;
-      rows = Math.ceil(height / spacing) + 3;
-      pts = new Float32Array(rows * columns * 2);
-    }
-
-    /* Every node position is computed ONCE per frame into `pts`, and both the
-       row pass and the column pass then read that same array.
-
-       That replaces the old nodeX()/nodeY()/bandAt() trio, whose entire purpose
-       was to guarantee a node landed in the same place whether it was reached
-       along its row or along its column -- the mesh tears at every intersection
-       if the two passes disagree. Sharing one buffer makes agreement structural
-       instead of something two functions have to be careful about, and it halves
-       the trigonometry: 220 nodes evaluated twice became 220 evaluated once. */
-    function computeGrid(time, b, spinWave, spinDir) {
-      var pitchK = 0.004 + (b.pitch * 0.02);
-      var focusX = width * (0.15 + (b.centroid * 0.7));
-      var focusY = height * (0.2 + (b.pitch * 0.6));
-      var focal = spacing * 7;
-      var swellK = spacing * 0.55 * b.bass;
-      var rippleK = spacing * 0.18 * b.treble;
-      var jumpK = -spacing * 0.95 * b.onset;   // negative: the jump is UPWARD
-      var swirlK = spacing * 0.6 * spinWave;
-      var midK = spacing * 0.3 * b.mid;
-
-      var index = 0;
-      for (var row = 0; row < rows; row += 1) {
-        for (var column = 0; column < columns; column += 1) {
-          var gx = (column - 1) * spacing;
-          var gy = (row - 1) * spacing;
-
-          // Two sine terms per axis, one keyed on the row and one on the column,
-          // so the mesh shears and travels instead of expanding in place. That
-          // shear is what reads as a wave rather than as breathing. It runs at
-          // 0.26 of a cell with the music off, so the background is never dead.
-          var shearX = Math.sin((time * 0.31) + (row * 0.42)) * spacing * 0.26;
-          var shearY = Math.cos((time * 0.24) + (column * 0.37)) * spacing * 0.26;
-          // Mid-range pitch adds a faster travelling term on top of the shear.
-          var midX = Math.sin((time * 0.92) + (row * 0.16) + (b.pitch * 6.28)) * midK;
-          var midY = Math.cos((time * 1.07) + (column * 0.19) + (b.pitch * 6.28)) * midK;
-          // Bass: wide, deep, rolling vertical swell.
-          var swell = Math.sin((gx * 0.0026) + (time * 0.8))
-            * Math.cos((gy * 0.0019) - (time * 0.5)) * swellK;
-          // Treble: crisp, fast surface ripple along the lines.
-          var ripple = Math.sin((gx * pitchK) + (gy * 0.014) + (time * 5.6)) * rippleK;
-          // Onset: sharp upward jump, falling off from the ripple's focal point.
-          var dx = gx - focusX;
-          var dy = gy - focusY;
-          var dist = Math.sqrt((dx * dx) + (dy * dy));
-          var jump = jumpK * Math.exp(-dist / focal);
-          // Scroll: rotational ripple, direction following the wheel's spin.
-          var swirl = Math.sin((dist * 0.009) - (time * 2.4 * spinDir)) * swirlK;
-
-          pts[index] = gx + shearX + midX + (ripple * 0.5) + (swirl * 0.35);
-          pts[index + 1] = gy + shearY + midY + swell + ripple + jump + swirl;
-          index += 2;
-        }
-      }
-    }
-
-    function stroke(points, color, alpha) {
-      context.beginPath();
-      for (var i = 0; i < points.length; i += 2) {
-        if (i === 0) context.moveTo(points[i], points[i + 1]);
-        else context.lineTo(points[i], points[i + 1]);
-      }
-      context.strokeStyle = 'rgba(' + color + ',' + alpha.toFixed(4) + ')';
-      context.stroke();
-    }
-
-    /* A glowing intersection, blitted from the same pre-rendered sprite the dot
-       matrix uses so the two layers read as one material rather than as a grid
-       with unrelated stars on it -- and held to the same calibration: 1.5px to
-       2.2px, 0.25 to 0.35 alpha. */
-    function glowNode(x, y, heat) {
-      drawGlow(context, nodeSprite, palette.node, x, y,
-        Math.min(2.2, 1.5 + (heat * 0.7)),
-        Math.min(0.35, 0.25 + (heat * 0.1)), 1.9);
-    }
-
-    function draw(timestamp) {
-      // A PJAX swap may have detached us between frames. Stop rather than keep
-      // painting an invisible canvas for the rest of the session.
-      if (!canvas.isConnected) return;
-
-      var time = timestamp / 1000;
-      var b = readBands();
-      // Scrolling ripples this mesh even with the music muted or paused: the
-      // wheel's angular velocity is published by the rotary physics and decays
-      // by age once the wheel settles and its own frame loop stops.
-      var spin = readSpin(timestamp);
-      var spinWave = clamp(Math.abs(spin) / SPIN_REFERENCE, 0, 1);
-      var spinDir = spin < 0 ? -1 : 1;
-
-      context.clearRect(0, 0, width, height);
-      context.lineWidth = 1;
-
-      computeGrid(time, b, spinWave, spinDir);
-
-      var points = [];
-      var row;
-      var column;
-
-      for (row = 0; row < rows; row += 1) {
-        points.length = 0;
-        var rowBase = row * columns * 2;
-        for (column = 0; column < columns; column += 1) {
-          var o = rowBase + (column * 2);
-          points.push(pts[o], pts[o + 1]);
-        }
-        var drift = 0.5 + (0.5 * Math.sin((time * 0.18) + (row * 0.55)));
-        // 0.15 at rest, 0.20 at the very most. The ceiling matters more than the
-        // ramp: however hard the track hits, a line cannot exceed it, because
-        // this mesh sits behind the copy rather than beside it.
-        stroke(points, row % 3 === 0 ? palette.node : palette.line,
-          Math.min(0.2, 0.15 + (drift * 0.02) + (b.treble * 0.02) + (b.onset * 0.01)));
-      }
-
-      for (column = 0; column < columns; column += 1) {
-        points.length = 0;
-        for (row = 0; row < rows; row += 1) {
-          var p = ((row * columns) + column) * 2;
-          points.push(pts[p], pts[p + 1]);
-        }
-        var cross = 0.5 + (0.5 * Math.cos((time * 0.15) + (column * 0.47)));
-        // Columns sit a step below rows so the grid keeps some depth instead of
-        // reading as one flat lattice -- still inside the 0.15-0.20 band.
-        stroke(points, palette.line,
-          Math.min(0.18, 0.15 + (cross * 0.015) + (b.treble * 0.015)));
-      }
-
-      // Glowing nodes on every other intersection: ~220 blits a frame instead of
-      // ~870, which is the difference between smooth and stuttered on a phone.
-      for (row = 0; row < rows; row += 2) {
-        for (column = 0; column < columns; column += 2) {
-          var q = ((row * columns) + column) * 2;
-          glowNode(pts[q], pts[q + 1], clamp((b.bass * 0.5) + (b.onset * 0.5), 0, 1));
-        }
-      }
-
-      if (!reduceMotion()) window.requestAnimationFrame(draw);
-    }
-
-    function onSchemeChange() {
-      palette = readPalette();
-      // The glow is baked into the sprite, so a palette change has to rebuild it
-      // or the nodes keep glowing in the old theme's colour -- with the SAME
-      // bloom as the init call, or a scheme flip silently makes them heavier.
-      nodeSprite = makeGlowSprite(palette.node, palette.glow, 0.7);
-      // A paused canvas (reduced motion draws one frame and never loops) will
-      // not repaint by itself, so nudge a single frame through.
-      if (reduceMotion()) {
-        draw(window.performance && window.performance.now ? window.performance.now() : 0);
-      }
-    }
-
-    resize();
-    window.addEventListener('resize', resize, { passive: true });
-
-    if (typeof window.matchMedia === 'function') {
-      schemeQuery = window.matchMedia('(prefers-color-scheme: light)');
-      if (typeof schemeQuery.addEventListener === 'function') {
-        schemeQuery.addEventListener('change', onSchemeChange);
-      } else if (typeof schemeQuery.addListener === 'function') {
-        schemeQuery.addListener(onSchemeChange); // Safari < 14
-      }
-    }
-
-    waveMatrixCleanup = function () {
-      window.removeEventListener('resize', resize);
-      if (schemeQuery) {
-        if (typeof schemeQuery.removeEventListener === 'function') {
-          schemeQuery.removeEventListener('change', onSchemeChange);
-        } else if (typeof schemeQuery.removeListener === 'function') {
-          schemeQuery.removeListener(onSchemeChange);
-        }
-      }
-      if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
-    };
-
-    draw(0);
-  }
-
-  /* ------------------------------------------------------------
-     11. WHEEL REACTIVITY
+     10. WHEEL REACTIVITY
      Bass swells the wheels, a piano onset flares the dashed outer
      ring and the spokes, treble makes the rim ticks and the tags glint.
 
@@ -2868,13 +2827,11 @@
   function bootPage() {
     initImages();
     initCreditsRotary();
-    // After initCreditsRotary: both read the credits screen, and the wave mesh
-    // must be torn down on the way OUT of that page as well as built on the way
-    // in, so it runs on every swap rather than once per session.
-    initWaveMatrix();
-    // After initWaveMatrix: both are torn down on the way OUT of the credits
-    // page and rebuilt on the way in, so the wheels keep pulsing in step with
-    // the mesh across a PJAX swap instead of one of them going stale.
+    // After initCreditsRotary, on every swap rather than once per session: this
+    // is torn down on the way OUT of the credits page as well as rebuilt on the
+    // way in, so the wheels keep pulsing in step with the mesh instead of the
+    // custom properties going stale on a returned-to page. The mesh itself is
+    // NOT here -- it is global and is built once, in initAmbientExperience.
     initWheelReactivity();
     initRouting();
     // After initRouting: syncPageLinks rewrites a[data-page] hrefs, and the
@@ -2889,9 +2846,23 @@
   }
 
   function boot() {
-    // Ambient audio/cursor/dot matrix are initialized once. Everything below
-    // is safe to rerun after the router swaps a page shell.
-    initAmbientExperience();
+    /* Ambient audio/cursor/mesh are initialized once; everything below is safe to
+       rerun after the router swaps a page shell.
+
+       The ambient layer is wrapped because it is DECORATIVE and it runs FIRST.
+       Anything it throws -- a browser without fetch, without AudioContext, without
+       matchMedia, a canvas that refuses a 2D context -- would otherwise abort boot()
+       before bootPage() and leave the visitor with a page whose navigation, menu and
+       credits screen are all dead but whose background is fine. That is precisely
+       backwards. The same reasoning is why initDynamicDownload catches around its own
+       setup; this makes it structural rather than something each section remembers. */
+    try {
+      initAmbientExperience();
+    } catch (error) {
+      if (window.console && window.console.warn) {
+        window.console.warn('Agora: the ambient layer failed to start; the page itself is unaffected.', error);
+      }
+    }
     bootPage();
     scrollToRouteHash(window.location.hash);
   }

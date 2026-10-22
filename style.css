@@ -344,16 +344,43 @@ body {
 }
 
 /* Ambient layer and controls are created by app.js so the same quiet
-   experience follows visitors across every page. */
-.ambient-dot-matrix {
+   experience follows visitors across every page.
+
+   This is the site's ONLY background canvas. The credits screen used to build a
+   second one on top of this, which doubled the frame cost and read as moire
+   where the two lattices crossed; that layer is gone and the mesh now covers
+   every page identically.
+
+   100vw/100vh rather than 100%: the element is position:fixed, so both resolve
+   against the viewport anyway, but the viewport units say it out loud and stay
+   correct if a future parent ever gives the canvas an offset parent's box to
+   percentage against. The canvas element itself is also sized in px from
+   innerWidth/innerHeight in app.js -- these are the CSS box, that is the
+   backing store. */
+.ambient-mesh {
   position: fixed;
   inset: 0;
   z-index: 0;
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
   pointer-events: none;
   opacity: 0.95;
   mix-blend-mode: screen;
+}
+
+/* Screen blending brightens, which is exactly right on the dark theme's
+   near-black background (a 0.20-alpha line lifts it by 18-48 levels) and exactly
+   wrong on off-white: screen can only push a channel UP, and 247/255 has nowhere
+   to go. Measured, the mesh as written renders at 1.003:1 against --bg in light
+   theme -- invisible -- which quietly undid the deepened --mesh-* values above
+   and their "enough ink to read as a line" comment. Multiply takes the same
+   colours the other way and lands at 1.40:1 for lines and 1.68:1 for vertices,
+   a faint-by-design presence that matches the dark theme's rather than vanishing
+   next to it. */
+@media (prefers-color-scheme: light) {
+  .ambient-mesh {
+    mix-blend-mode: multiply;
+  }
 }
 
 main,
@@ -2517,20 +2544,16 @@ h1, h2, h3 {
   background: var(--bg);
 }
 
-/* The credits screen's one animated background layer: a mesh of grid nodes
-   displaced by two out-of-phase sine waves, painted by initWaveMatrix() in
-   app.js. It replaces the fixed grid-and-dot texture this page used to carry,
-   so the wheel composition sits over moving depth instead of a static print --
-   and so there are not two grids on the page fighting each other. */
-.credits-wave-matrix {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
+/* The credits wheel composition, lifted above the global mesh.
 
+   This page deliberately carries NO background layer of its own. It used to paint
+   a second animated grid here, on top of the site-wide one, so the wheels sat over
+   two lattices crossing each other; the mesh in section 2 is now the only thing
+   behind them and it is the same mesh every other page has. What this rule owns is
+   the stacking order -- z-index 1 against the canvas's 0 -- and isolation, so the
+   wheels' own blurs and blend modes composite against the page rather than
+   reaching down into the canvas. touch-action: none because the screen is entirely
+   gesture driven and a browser scroll gesture would fight the wheel. */
 .credits-rotary-page main.credits-rotary {
   position: relative;
   z-index: 1;
