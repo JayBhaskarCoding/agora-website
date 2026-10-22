@@ -912,55 +912,131 @@ reach 64-78 degrees against a 60-degree limit), and a clip-path is invisible in 
 text diff. `.rotary-disc__sector-track::before` is `z-index: 1`, below the detail
 blocks at `4`; at `5` the decorative radial lines drew across the text.
 
-### The backdrop, and the third calibration of it
+### The backdrop: one canvas, triangulated
 
-Two canvas layers sit behind this screen: the site-wide `.ambient-dot-matrix`
-and the credits-only `.credits-wave-matrix`. Both have now been calibrated three
-times, and all three are recorded here because the numbers are load-bearing and
-the direction of travel is not guessable from the end state — the middle row was
-a deliberate over-correction that a second review then pulled back.
+**One** canvas sits behind this screen — and behind every other page on the site.
+There used to be two: the site-wide `.ambient-dot-matrix`, plus a credits-only
+`.credits-wave-matrix` layered on top of it. On this page they occupied the same
+pixels, doubled the frame cost, and where the two lattices crossed they read as
+moiré rather than as depth. `.ambient-mesh` is the single replacement; the credits
+layer, its initialiser and its teardown closure are deleted rather than disabled.
 
-| | dots | mesh lines | idle undulation |
+It is a **jittered grid subdivided into triangles** — not a square lattice, and
+not a true Delaunay. The topology (how far each vertex sits off the lattice, and
+which diagonal each cell splits along) is hashed from `(row, column)` once per
+resize, so it is identical every frame. A triangulation recomputed per frame would
+boil, because the vertices move and the triangles would flip constantly; and
+re-running Bowyer–Watson on ~600 moving points is not something a phone survives.
+At this opacity the two are indistinguishable. Only one of them holds a frame rate.
+
+The diagonals are chosen by hash rather than alternating, because a checkerboard
+of diagonals is as monotonous as no diagonals at all. `test_the_diagonal_choice_actually_varies`
+runs the real constants from `hash2()` over a 40×40 field and fails if they
+collapse to one orientation — the specific shape `Math.imul` losing its low bits
+takes, since the products then exceed 2^53 and only the high bits survive. That
+looks perfectly fine in the source and perfectly uniform on screen.
+
+Cell size is `54px` on desktop and `38px` under 600px: ~600 vertices, ~550
+triangles and ~1700 edges at 1440×900. Coarser than the old matrix's 30/36px, but
+carrying considerably more structure per vertex.
+
+Calibrated four times. All four rows are recorded because the numbers are
+load-bearing and the direction of travel is not guessable from the end state — the
+middle row was a deliberate over-correction that a second review then pulled back.
+
+| | vertices | lines | wave amplitude |
 | --- | --- | --- | --- |
 | original | 0.7-1.25px @ 0.045-0.13 | ≤ 0.13 | 0.12 cell |
 | "too faint" review | 2-4.5px @ 0.75-0.95 | 0.28-0.45 | 0.26 cell |
-| **current** | **1.5-2.2px @ 0.25-0.35** | **0.15-0.20** | **0.26 cell** |
+| one mesh, first pass | 1.5-2.2px @ 0.25-0.35 | 0.15-0.20 | 0.26 cell |
+| **current** | **1.5-2.2px @ 0.25-0.30** | **0.15-0.20** | **up to 0.75 cell** |
 
 Hold the current row. Every one of those numbers is a `Math.min` ceiling rather
-than a target, so however hard the track hits, a dot or a line cannot leave its
+than a target, so however hard the track hits, a vertex or a line cannot leave its
 band and start competing with the copy. `test_the_mesh_lines_are_calibrated_into_their_band`
-and `test_the_dot_matrix_stays_inside_its_calibration` fail if they do.
+and `test_the_vertices_are_calibrated_into_their_band` fail if they do — and both
+also check the ramp can *reach* its ceiling. A `Math.min` that never binds is
+decoration, and a calibration comment describing a range the code does not produce
+is worse than no comment.
 
-**The dot matrix is a mesh, not a scatter.** Every node is joined to its right
-and lower neighbour, and the whole grid is drawn as ONE path — all rows, then all
-columns — rather than a segment per pair. That is a single `stroke()` call
-instead of several thousand for the same picture. Node positions are computed
-once per frame into a shared `Float32Array` that the line passes and the dot pass
-all read, which makes "a node is in exactly one place per frame" structural
-rather than something two passes have to be careful to agree about. The wave mesh
-does the same; it used to need a `bandAt()` helper whose entire job was enforcing
-that agreement.
+Because the whole field is capped that low, the contrast has to come from
+somewhere else: a vertex's alpha and radius **ride the travelling crest**, so the
+wave reads as a bright band sweeping left to right without any single element
+exceeding its ceiling. Measured under load, silence gives 0.2500-0.2995 alpha and
+1.50-2.00px; a full-scale spectrum gives 0.28-0.30 and 1.70-2.17px. Neither
+leaves the band.
 
 Two things keep the backdrop from costing legibility:
 
 **A scrim behind each detail block.** `.rotary-segment__content::before` paints a
 radial gradient of the theme's own `--bg-rgb` at `z-index: -1`, with
 `inset: -24% -18%` so it extends *past* the text box instead of stopping at its
-edge, where the glow would otherwise be most visible. This is the chosen answer
-to "the background is now loud": dim the pixels behind the copy specifically,
-rather than dimming the whole canvas or vignetting the screen edges.
+edge, where the glow would otherwise be most visible. This is the chosen answer to
+"the background is now loud": dim the pixels behind the copy specifically, rather
+than dimming the whole canvas or vignetting the screen edges. The scrim and the
+mesh are **one budget, not two independent choices** — `test_the_scrim_outweighs_the_mesh_at_its_brightest`
+computes the contribution paragraph's contrast against the brightest thing the mesh
+ever paints, in both themes, with and without the scrim. Raising the mesh's alpha
+ceiling lowers that number long before any mesh test notices.
 
 **A pre-rendered glow sprite.** An earlier review asked for `shadowBlur` 8-12 on
-every dot and mesh node. Across the two layers that is on the order of 2000
-`shadowBlur` calls per frame, and it is one of the most expensive things a 2D
-context can do. `makeGlowSprite()` bakes the same radial falloff into an
-off-screen canvas once per colour and `drawGlow()` blits it with `drawImage` —
-the same picture for a fraction of the cost, and the reason no `shadowBlur`
-assignment appears anywhere in `app.js`. `bloom` is now a parameter, and the
-matrix dots use `0.42` of the original spread: a soft edge, not a halo. Both
-canvases rebuild their sprite when the OS flips scheme, because the glow is baked
-together with the palette — and the rebuild has to pass the *same* bloom as the
-init call, which is a drift a test now pins after it happened once.
+every dot and mesh node. At ~600 vertices and 60fps that is 36,000 of the most
+expensive calls a 2D context has, per second. `makeGlowSprite()` bakes the same
+radial falloff into an off-screen canvas once per colour and `drawGlow()` blits it
+with `drawImage` — the same picture for a fraction of the cost, and the reason no
+`shadowBlur` assignment appears anywhere in `app.js`. `bloom` is a parameter and
+the mesh uses `0.42` of the original spread: a soft edge, not a halo. Both sprites
+are rebuilt when the OS flips scheme, because the glow is baked together with the
+palette — and the rebuild has to pass the *same* bloom as the init call, a drift
+that happened once and is now pinned.
+
+### Waves travel left to right, and the lattice must not tear
+
+Every travelling term is phased `(spatial) - (time)`. A crest of `sin(k·x - ω·t)`
+sits at `x = (φ + ω·t)/k`, so it moves in **+x** as time grows. The opposite sign
+looks identical frame to frame and sweeps the other way, which is why each term is
+pinned individually by `test_every_travelling_term_is_phased_left_to_right` rather
+than trusted as a group.
+
+That test exists because the bug was live twice. The layer this replaced used
+`+ time * 6.2`. And after the first rewrite the *idle drift* was still
+`sin(time * 0.23 + column * 0.17)` — a crest at `column = (φ - 0.23·t)/0.17`, so
+it walked **left**, and it was the loudest term in silence, which is the site's
+default state. The one wave every visitor saw with the music off travelled
+backwards. Reading the source did not find it. Measuring the trough's drift over
+620 frames did: **+166 px/s in silence, +140 with moderate music, +198 at full
+scale**, all three positive.
+
+Two components, because one is not enough to read as propagation. A continuous
+sine gives the whole field a direction of travel; a localised Gaussian front
+sweeping the width every ~9s gives the eye a crest to *follow*. The front is at
+full strength with the music off — a background that only moves once you press
+play looks broken rather than calm.
+
+**Displacement is budgeted by spatial frequency, not by amplitude.** Two
+neighbouring vertices cross only when their displacements *differ* by more than the
+gap between them. A smooth swell cannot do that however large it gets: the front's
+Gaussian has a standard deviation around 230px, four cells wide, so adjacent
+vertices ride it almost identically and the field is free to heave by three
+quarters of a cell. Capping the front's amplitude buys no safety at all and throws
+away most of the motion — which is what an earlier draft of this did.
+
+What *can* tear the lattice are the sharp terms:
+
+* the per-vertex jitter, whose wavelength is exactly one cell, so it spends
+  `2 × JITTER = 0.24` of a `TEAR_LIMIT = 0.45` budget unconditionally;
+* the travelling sine, whose wavelength shrinks as the dominant pitch rises. A sine
+  of amplitude `A` and wavenumber `k` moves one neighbour past the next by at most
+  `A·k·spacing`, so it is safe while `A ≤ (TEAR_LIMIT - 2·JITTER) / k`. `k` is
+  known per frame, so the ceiling is computed from the wavelength the audio
+  actually asked for rather than guessed at — a bright passage gets finer ripples
+  *and* a lower amplitude ceiling, which is what a real membrane does.
+
+Verified by running the mesh and measuring the signed area of every triangle on
+every frame: **0 inversions out of 49,590 sampled cells**, minimum area 60% of a
+nominal cell at full-scale audio — while peak wave amplitude went from 15px to
+40px. Both numbers moved the right way at once, which is the whole point of
+budgeting frequency instead of magnitude.
 
 ### What drives the background and the wheels
 
@@ -984,12 +1060,12 @@ consumers ask (an 8ms cache):
 
 | metric | source | drives |
 | --- | --- | --- |
-| `bass` | 20-200Hz | wide rolling vertical swells; the wheels' radial pulse |
-| `mid` | 200-3200Hz | a faster travelling term layered on the idle shear |
-| `treble` | 3200-12000Hz | crisp fast surface ripples; the rim ticks and tags glint |
-| `onset` | frame-over-frame RISE in `mid` | a sharp upward jump; the dashed ring and spokes flare |
-| `pitch` | dominant bin in mid+treble, log-scaled | the ripple's spatial frequency |
-| `centroid` | spectral centroid, log-scaled | the ripple's focal point |
+| `bass` | 20-200Hz | the front's height, the sine's amplitude, vertex size; the wheels' radial pulse |
+| `mid` | 200-3200Hz | `onset`'s source, and 0.35 of `getEnergy()` — no direct mesh term |
+| `treble` | 3200-12000Hz | the sine's amplitude and both line alphas; the rim ticks and tags glint |
+| `onset` | frame-over-frame RISE in `mid` | the front's height and vertex alpha; the dashed ring and spokes flare |
+| `pitch` | dominant bin in mid+treble, log-scaled | the sine's wavenumber — and therefore its tear ceiling |
+| `centroid` | spectral centroid, log-scaled | reported on the facade; nothing consumes it yet |
 
 Band edges are declared in **Hz** and converted using the context's real
 `sampleRate` and `fftSize`. Hardcoding bin indices is how a "bass" band silently
@@ -1010,9 +1086,10 @@ Two details that are easy to lose:
 
 `pitch` and `centroid` are reported 0..1 on a **log** scale because pitch
 perception is logarithmic: a linear map would spend most of its range on the top
-octave and a climbing melody would look pinned near 1. As the melody moves, the
-wave's spatial frequency and the ripple's focal point move with it, so the grid
-travels instead of just getting louder in place.
+octave and a climbing melody would look pinned near 1. As the melody moves the sine's
+wavelength moves with it, so the field changes *character* rather than just
+getting louder in place — and because that same wavenumber sets the amplitude
+ceiling, the change is self-limiting.
 
 ### The wheels breathe; the copy does not
 
@@ -1053,10 +1130,10 @@ setting a custom property invalidates style for the whole subtree, and with the
 music off all three sit at 0, so an unquantified write would cost a style
 recalculation of both wheels every frame forever to set the same numbers again.
 
-### Scrolling ripples the grid, with or without music
+### Scrolling ripples the mesh — on this page only
 
 The wheel's angular velocity drives the mesh even muted or paused. The physics
-loop publishes it and both canvases read it back:
+loop publishes it and the mesh reads it back — **on this page only**:
 
 ```js
 var wheelSpin = { velocity: 0, at: -1e9 };
@@ -1069,13 +1146,50 @@ function readSpin(now) {
 }
 ```
 
-There is no call chain between the rotary physics and the canvases — they are
+There is no call chain between the rotary physics and the mesh — they are
 separate sections — so the velocity goes through a module-level slot. The decay
 by **age** is the part that matters: the physics loop stops as soon as the wheel
 settles, so without it the last ripple would freeze on screen forever. With it,
-the grid returns to calm on its own as the wheel locks onto a contributor, and
-the ripple's direction follows the sign of the spin, so scrolling up and down
-travel opposite ways.
+the mesh returns to calm on its own as the wheel locks onto a contributor, and the
+ripple's direction follows the sign of the spin, so scrolling up and down travel
+opposite ways. Measured, the ripple halves every ~160 frames-ms, which is the
+`260ms` e-folding time doing exactly what it says.
+
+**The exclusivity is now load-bearing in a way it was not before.** The canvas used
+to be page-scoped, so nothing outside credits could see the slot. It is global now
+and outlives the page, so `draw()` gates the read on
+`body.classList.contains('credits-rotary-page')` as well: a PJAX swap away from
+credits leaves the last velocity sitting in the slot, and without the gate a
+visitor would arrive on the home page with the credits wheel still rippling it.
+Every other page is strictly audio-reactive. Proved by running two simulations of
+`index.html` that differ only in whether a wheel event was dispatched — the
+lattices come out **bit-for-bit identical**.
+
+**A committed contributor is a different kind of event.** Continuous scrolling
+ripples the field through the spin velocity above, but a contributor *arriving* is
+a discrete impact, so it gets a discrete expanding ring instead of a slightly
+stronger wobble:
+
+```js
+var MESH_PULSE_MAX = 6;      // a long fling cannot grow the list without bound
+var MESH_PULSE_SPEED = 900;  // px/s the ring expands at
+var MESH_PULSE_LIFE = 1100;  // ms before a ring is dropped
+```
+
+`showMember()` pushes one, on its animated path only — `showMember(0, false)` runs
+at boot, and detonating a ring on a screen nobody has touched yet would be a lie
+about what the visitor did. Strength tracks how hard the wheel was moving on
+arrival, so a fling lands louder than a gentle snap. There is no reaper timer,
+deliberately: the rotary's frame loop stops when the wheel settles, so rings are
+dropped on read inside the *mesh's* loop, which by definition is still running.
+
+The ring is separated from the spin ripple by running **three** simulations rather
+than two, because both are triggered by scrolling and "it moved" proves nothing
+about which one moved it: a fling that commits, a nudge too small to reach the snap
+threshold, and no wheel at all. In the late window, after the spin's e-folding has
+all but expired, the committing fling still displaces the field 3.5px while the
+non-committing nudge displaces it 0.05px — and the disturbance's centroid radius
+grows 520px → 703px, so it expands outward rather than fading in place.
 
 The wheel physics themselves were already exponential: the settle is a critically
 damped spring (`SPRING_DAMPING = 2 * Math.sqrt(SPRING_STIFFNESS)`), which is the
@@ -1086,9 +1200,22 @@ Colours come from four dedicated tokens — `--mesh-node-rgb`, `--mesh-node-hi-r
 `--mesh-glow-rgb`, `--mesh-line-rgb` — declared in `:root` and redefined *deeper*
 under `prefers-color-scheme: light`, since a bright violet reads as a stain on a
 light page. They are separate from the brand channels so the background can be
-retuned without touching buttons, links or the wordmark, and both canvases read
-them back out of CSS rather than hardcoding a triple that would paint dark-theme
-neon onto a light page.
+retuned without touching buttons, links or the wordmark, and the mesh reads them
+back out of CSS rather than hardcoding a triple that would paint dark-theme neon
+onto a light page.
+
+Deepening them is only half of it, though. `.ambient-mesh` blends with
+`mix-blend-mode: screen`, which brightens — correct on near-black, where a
+0.20-alpha line lifts the background by 18-48 levels, and useless on off-white,
+where screen can only push a channel *up* and `247/255` has nowhere to go.
+Measured, the mesh as written rendered at **1.003:1** against `--bg` in light
+theme: invisible, silently undoing the deepened values and their own "enough ink
+to read as a line rather than a haze" comment. Light theme therefore overrides the
+blend to `multiply`, which lands the same colours at **1.40:1** for lines and
+**1.68:1** for vertices. `test_the_light_theme_can_actually_see_the_mesh`
+recomputes the blend instead of grepping for its name, so swapping `screen` for
+`overlay` or `lighten` fails there rather than shipping a layer nobody can see in
+one of the two themes.
 
 ### Scroll physics
 
@@ -1147,67 +1274,86 @@ counter-rotated every frame, so a transform animation on either would fight that
 and smear the wheel into a visible lag. Their children are not frame-driven and
 are safe. Reduced motion suppresses it.
 
-### The wave mesh layer
+### Why there is only one canvas
 
-`.credits-wave-matrix` is a canvas the credits screen owns. It replaced the
-static `.credits-rotary-page::before` grid texture — **on this page only**. The
-site-wide `.ambient-dot-matrix` is untouched and still runs everywhere including
-here, so credits deliberately carries two ambient layers. Both are now calibrated
-to the same numbers (see the table above), which is what stops them reading as
-two unrelated effects stacked on top of each other.
+This page used to carry two animated background layers on purpose, and that was
+wrong. The site-wide matrix and the credits-only wave mesh were calibrated to the
+same numbers specifically so they would not read as two unrelated effects stacked
+on each other — which is a lot of careful work spent making two things behave like
+one thing that could have simply been one thing. They still cost two clear-rects,
+two position buffers and two draw loops a frame, and where their lattices crossed
+at slightly different spacings they produced moiré.
 
-What is specific to this layer, as opposed to the analysis that drives it:
+What is specific to the single layer that replaced them, as opposed to the
+analysis that drives it:
 
-* **One position buffer, three consumers.** `computeGrid()` fills a shared
-  `Float32Array` once per frame; the row pass, the column pass and the node pass
-  all read it. Rows and columns are stroked separately over the same grid, so if
-  displacement depended on which pass reached a node the mesh would tear at every
-  intersection. This used to be enforced by a `bandAt(row, column)` helper that
-  blended the row's band with the column's to make displacement a pure function
-  of `(row, column)`; sharing one buffer makes the agreement structural instead,
-  and halves the trigonometry.
-* **Whole rows and columns are single paths** — ~60 `stroke()` calls a frame
-  rather than ~2000 segments.
-* **Glowing nodes** are blitted from the pre-rendered sprite on every *other*
-  intersection (~220 a frame instead of ~870), which is the difference between
-  smooth and stuttered on a phone.
-* **Silence still moves.** With the music off every band is zero and the idle
-  shear floor (0.26 of a cell) keeps the mesh drifting, so there is no separate
-  idle path to keep in sync. Every audio- and scroll-driven term is *multiplied*
-  by its driver, which is what makes silence cancel them exactly rather than
-  leaving a residual wobble that reads as the mesh ignoring the mute button.
-  Stopping the track decays the bands by `0.9` per frame rather than zeroing them.
-* **`prefers-reduced-motion` gets one static frame and no loop** — audio
-  reactivity is disabled with it, deliberately: the preference is about motion,
-  and a mesh pulsing to a beat is motion. The wheel driver makes the same bargain.
-* **Pixel ratio is capped at `1.75`**, like the dot matrix.
-* **It is page-scoped and removable.** `bootPage()` re-runs per PJAX swap and
-  `body.className` is replaced, so the canvas and its listeners are torn down on
-  the way out and the draw loop stops itself once `!canvas.isConnected`. The dot
-  matrix now carries the same guard.
+* **One position buffer, three consumers.** The vertex loop fills a shared
+  `Float32Array` once per frame; the row pass, the column-and-diagonal pass and the
+  vertex pass all read it. Rows and columns are stroked separately over the same
+  lattice, so if displacement depended on which pass reached a vertex the mesh
+  would tear at every intersection. This used to be enforced by a `bandAt(row,
+  column)` helper that blended the row's band with the column's to make
+  displacement a pure function of `(row, column)`; sharing one buffer makes the
+  agreement structural instead.
+* **Two `stroke()` calls for ~1700 edges.** Rows are one batch of contiguous
+  polylines; columns and every diagonal share a second. The diagonals are not
+  contiguous, so they go in as individual segments — but inside the column pass's
+  single `beginPath`/`stroke`. A stroke per edge would be ~1700 state changes a
+  frame, and that alone would not survive a phone.
+* **Silence still moves.** With the music off every band is zero and the idle drift
+  plus the sweeping front keep the field alive, so there is no separate idle path
+  to keep in sync. Every audio- and scroll-driven term is *multiplied* by its
+  driver, which is what makes silence cancel them exactly rather than leaving a
+  residual wobble that reads as the mesh ignoring the mute button. Stopping the
+  track decays the bands by `0.9` per frame rather than zeroing them.
+* **It is global and session-scoped.** Built once in `initAmbientExperience()`, not
+  in `bootPage()`, so a PJAX swap cannot stack a canvas per navigation — which is
+  also why it needs no teardown closure. The draw loop still stops itself the
+  moment `!canvas.isConnected`.
+* **`prefers-reduced-motion` gets one static frame and no loop** — audio reactivity
+  is disabled with it, deliberately: the preference is about motion, and a mesh
+  pulsing to a beat is motion. The wheel driver makes the same bargain.
+* **Pixel ratio is capped at `1.75`.**
 * **It reads the analysis every frame**, not once at init, and degrades to its
   silent drift if the facade is missing, older than `getBands()`, or throws — a
-  cached `app.js` or a browser with no `AudioContext` must not take the canvas
-  down with it. `readBands()` lives at module scope so the dot matrix and the
-  wheels degrade identically rather than each inventing their own guard.
+  cached `app.js` or a browser with no `AudioContext` must not take the canvas down
+  with it. `readBands()` lives at module scope so the mesh and the wheels degrade
+  identically rather than each inventing their own guard.
 
 `getSpectrum()` (8 log-spaced bands, bin 0 skipped as DC offset) is still on the
-facade and still tested, but the mesh no longer consumes it — the six band
-metrics above replaced it, because "one bass-weighted number per band" cannot
-express an onset or a dominant pitch.
+facade and still tested, but nothing consumes it — the six band metrics above
+replaced it, because "one bass-weighted number per band" cannot express an onset or
+a dominant pitch.
+
+**One boot-resilience fix came out of this work, and it is not about the mesh.**
+`initAmbientExperience()` runs *first* in `boot()`, and it touches every optional
+browser API the site has. The soundscape preload called `fetch(MUSIC_SRC).catch(...)`
+— but `.catch()` can only handle a *rejected promise*, and if `fetch` is not a
+function the call throws a `ReferenceError` synchronously, before there is a promise
+to catch on. That escaped `boot()` entirely: routing, the mobile menu, smooth
+scrolling, the contact form and this credits screen all failed to initialise, on a
+page whose background was fine. Found by a jsdom run, which has no `fetch`. Both
+ends are now guarded — the call checks `typeof fetch === 'function'`, and `boot()`
+wraps the whole ambient layer in a `try` that reports and continues, with
+`bootPage()` deliberately left *outside* it so a real hydration failure is never
+swallowed. A decorative layer has to cost the decoration, not the page.
 
 ### Verifying the screen
 
 There is no browser in CI and jsdom performs no layout, so the screen is proved
-three ways:
+four ways. The `/tmp` harnesses are not checked in — they need `jsdom`, which is
+deliberately not a dependency of a zero-build static site — so they are rebuilt per
+session; what matters is what they assert, and the numbers below are what they
+produced against the current code.
 
 ```bash
-npm test                        # 163 tests, incl. CreditsRotaryGeometry,
-                                # CreditsWaveMatrix, CreditsScrollPhysics,
-                                # CreditsWaveAudioReactivity, CreditsBackdrop,
-                                # CreditsAudioBands
-node /tmp/wh/behaviour.js       # 78 behavioural checks, needs jsdom
-python3 /tmp/_mc4.py            # 54 mutations, all must be killed
+npm test                    # 179 tests, incl. CreditsRotaryGeometry, AmbientMesh,
+                            # AmbientMeshGeometry, AmbientMeshReactivity,
+                            # CreditsScrollPhysics, CreditsBackdrop, CreditsAudioBands
+node /tmp/wh/measure.js     # lattice integrity + calibration, idle and full scale
+node /tmp/wh/direction.js   # which way the wave actually travels
+node /tmp/wh/credits.js     # end to end: one canvas, credits-only scroll coupling
+python3 /tmp/_mc5.py        # 69 mutations, all must be killed
 ```
 
 `CreditsRotaryGeometry` does not eyeball anything: it reads `--segment-angle`,
@@ -1216,53 +1362,86 @@ labels' own `clamp()`/`min()` chains back out of the stylesheet on disk, then
 recomputes every landing box, every rim clearance and the visible wheel fraction
 across 14 viewports.
 
-The behavioural harness runs the real `app.js` in jsdom with a stubbed 2D context
-and a stubbed Web Audio graph — and that stub is **conductable**: loudness, the
-dominant bin and the spectral width are all variables, so the harness can feed a
-bass-heavy spectrum, then move the peak into the treble, then silence it and
-strike a note. That is what lets it assert the analysis rather than merely that
-it ran: `bass` rises on a bass-heavy spectrum, `treble` overtakes it when the
-peak moves, `pitch` follows the dominant bin, an onset spikes and then decays
-while the note sustains, and `fftSize`/`smoothingTimeConstant` really were set on
-the analyser rather than only appearing in the source.
+**The mesh harnesses instrument a stub 2D context and read the geometry back out of
+the recorded draw calls**, which is the only way to test a canvas without a browser.
+The row pass is `rows` contiguous polylines of `columns` points in row-major order,
+so the lattice can be reconstructed from the path alone; the vertex pass is recorded
+from `drawImage` plus the `globalAlpha` in force at the time. From that:
+
+* `measure.js` — 49,590 cell quadrilaterals sampled across 90 frames in two audio
+  states, **0 with an inverted signed area**, minimum area 60% of a nominal cell.
+  Vertex alpha 0.2500-0.2995 idle and 0.28-0.30 at full scale; radius 1.50-2.00px
+  and 1.70-2.17px; lines 0.15-0.16 and 0.18-0.20. Every band respected under load.
+* `direction.js` — tracks the displacement trough on one lattice row over 620 frames
+  and regresses its position against time. **+166 px/s in silence, +140 with
+  moderate music, +198 at full scale.** This is the check that found the idle drift
+  still travelling left to right after the first rewrite, and it is the only check
+  that could: the bug is a sign, and a sign looks the same in every frame.
+* `credits.js` — boots the real `credits.html`, injects the discs' angle tokens, and
+  dispatches real `WheelEvent`s. Exactly one `canvas.ambient-mesh`; a fling moves the
+  lattice 20px and advances the contributor counter to `02`; the same fling on
+  `index.html` produces a **bit-identical** lattice; and a nudge too small to commit
+  diverges 0.05px in the late window against the committing fling's 3.5px, with the
+  disturbance's centroid radius growing 520px → 703px.
 
 Two harness details are load-bearing and non-obvious:
 
-* **`pump()` alone is not enough to watch the bands move.** `computeBands()`
-  caches for 8ms of *real* time so three consumers asking in one tick do not
-  triple the work, so a synchronous pump recomputes the analysis exactly once no
-  matter how many frames it runs and every attack/release coefficient looks like
-  it never fired. Anything measuring change over time goes through `settle()`,
-  which interleaves wall-clock waits.
+* **`pump()` alone is not enough to watch anything move.** `computeBands()` caches
+  for 8ms of *real* time so three consumers asking in one tick do not triple the
+  work, so a synchronous pump recomputes the analysis exactly once no matter how
+  many frames it runs and every attack/release coefficient looks like it never
+  fired. Anything measuring change over time goes through `settle()`, which
+  interleaves wall-clock waits.
+* **One synthetic clock has to drive everything.** `performance.now()`, the rAF
+  timestamp and `setTimeout` are three separate clocks, and the app reads all three.
+  If they disagree, the wheel's 90ms snap delay lands on a different frame than the
+  spin decay expects. Worse: a real `setTimeout` never fires at all inside a
+  synchronous frame pump, which is how the first run of `credits.js` silently
+  measured a wheel that turned the mesh but never committed a contributor — every
+  scroll assertion passed and the shockwave ones failed for a reason that had
+  nothing to do with the shockwave.
 * **Measure row strokes, not all strokes.** A column polyline spans the whole
-  viewport height, so its `minY..maxY` is its own extent and buries any ripple;
-  a row's vertical extent *is* the displacement. Filtering rows is what makes the
-  scroll-ripple check sensitive enough to see a 15% growth. (Path *length* is
-  worse than useless as a proxy: doubling a sine's amplitude lengthens it by only
-  a few percent, because the span dominates.)
+  viewport height, so its `minY..maxY` is its own extent and buries any ripple; a
+  row's vertical extent *is* the displacement. (Path *length* is worse than useless
+  as a proxy: doubling a sine's amplitude lengthens it by only a few percent,
+  because the span dominates.)
 
-The scroll coupling is proved with the music **stopped**: the wheel is flung, and
-the mesh's row spread has to grow and then decay back to calm once the wheel
-locks. The wheel physics are checked separately — the rotation trace lands on an
-exact multiple of 120 for all three contributors and back again.
+Both suites are mutation-tested, and the report names the guard that saw each
+mutation — a mutation killed by an unrelated test is a mutation that is not really
+covered. The 69 in `_mc5.py` cover this round's surface specifically: both cell
+spacings and the edge overhang, the jitter and tear constants, the wavenumber cap,
+the diagonal table flattened to one orientation, `Math.imul` replaced by `*`,
+`Math.random` introduced into the mesh, each of the five travelling phases flipped
+in sign, the front's period, padding and width, every calibration floor and ceiling
+and both ramps made unable to reach theirs, `shadowBlur` restored, the sprite
+rebuild dropped on a scheme flip, the dpr cap, the detached-canvas guard, a second
+canvas attached, the mesh moved into `bootPage()`, the class renamed in one file
+only, `100vw` back to `100%`, `pointer-events` flipped, `z-index` raised, the
+credits gate wrapped around the canvas, the light-theme blend reverted or deleted,
+the light mesh colours un-inverted, an rgba literal inlined, scroll coupling
+enabled on every page, a second writer of the spin slot, the spin's direction or
+magnitude ignored, the physics loop stopped publishing, a ring at boot, a second
+detonation site, an unbounded ring buffer, rings that never expand or never expire
+or are read but never applied, `fetch` left unguarded, the ambient `try` removed,
+and the scrim thinned, lifted above the copy, or hardcoded instead of themed.
 
-Both suites are mutation-tested. The 54 mutations in `_mc4.py` cover this round's
-surface specifically: the fft size and smoothing restored to their old values, a
-band edge moved, the bin maths hardcoded to 44.1kHz, the DC bin read as signal,
-onset turned back into a level, the sensitivity curve removed, pitch mapped
-linearly, the per-frame cache deleted, either canvas's brightness band lifted,
-the column pass dropped, a driven term detached from its driver, the physics loop
-stop publishing its velocity, the ripple's decay or direction removed, the wheel
-driver un-started / double-started / left running on a detached wheel / still
-pulsing under reduced motion, and — the one that matters most — a `transform`
-added to `.rotary-disc__sector-track`, which is how the locked copy coordinates
-would silently start moving.
+Four of those survived the first run and three were real gaps rather than bad
+mutations:
 
-Three of those mutations survived the first run and each one was a real gap, not
-a bad mutation: the dot matrix's driven terms were only asserted on the wave
-mesh, the spoke flare had no assertion at all, and the dashed ring's flare was
-"guarded" by an `assertIn` for a keyword that the same rule's border-color also
-satisfied.
+* **`assertIn` on a statement also matches that statement commented out.** Removing
+  the spin publisher with a `// ` in front of it survived, because the test looked
+  for the substring. Now anchored to a line start with `re.MULTILINE`.
+* **A region-scoped count cannot see a duplicate outside the region.** Counting
+  `wheelSpin.velocity =` inside the rotary physics passed with a second writer added
+  to the ambient section. Now counted across the whole file.
+* **Boot resilience had no test at all**, because nothing had ever asserted that a
+  decorative layer failing is allowed to be only decorative.
+* The fourth was a bad anchor in the sweep itself (`rgba(' + palette.line` appears
+  in both stroke passes), which is the harness's bug and not the suite's.
+
+The light-theme invisibility was not found by mutation testing at all. It was found
+by computing the blend, because "the light theme deepens the mesh colours" was a
+true statement about the stylesheet and a false one about the screen.
 
 
 ## Notes
