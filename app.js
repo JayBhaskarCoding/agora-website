@@ -17,6 +17,7 @@
      7. Shared-post       — URL param parsing + post preview stub
      8. Ambient layer      — custom cursor, soundscape, synced dot matrix
      9. Dynamic download  — newest GitHub release APK for every CTA
+     10. Credits wave mesh — animated sine grid behind the rotary wheels
    ============================================================ */
 
 (function agoraApp() {
@@ -1353,8 +1354,42 @@
     var SNAP_DELAY = 120;
     var SNAP_THRESHOLD = 0.65;
     var teamLength = ROTARY_TEAM.length;
-    var TOP_SEGMENT_ANGLES = [40, 280, 160];
-    var BOTTOM_SEGMENT_ANGLES = [220, 340, 100];
+
+    /* The sector geometry lives in the stylesheet -- --segment-angle on each
+       segment, --sector-offset on each disc -- so read it back from there.
+
+       These were two hardcoded arrays plus two literal centres (40 and 220),
+       i.e. a third and fourth copy of numbers the CSS already owns. Copies
+       drift, and a drifted copy does not throw: it quietly puts the scale and
+       opacity emphasis on the wrong contributor while the wheel still turns,
+       still snaps, and still looks like it works. Deriving them means the CSS
+       is the only place a sector angle can be wrong. */
+    function readAngleDegrees(element, property) {
+      if (!element || typeof window.getComputedStyle !== 'function') return null;
+      var value = parseFloat(window.getComputedStyle(element).getPropertyValue(property));
+      return isFinite(value) ? value : null;
+    }
+
+    function segmentAngles(segments) {
+      return Array.prototype.map.call(segments, function (segment) {
+        return readAngleDegrees(segment, '--segment-angle');
+      });
+    }
+
+    var TOP_SEGMENT_ANGLES = segmentAngles(topSegments);
+    var BOTTOM_SEGMENT_ANGLES = segmentAngles(bottomSegments);
+    var TOP_ACTIVE_CENTER = readAngleDegrees(topDisc, '--sector-offset');
+    var BOTTOM_ACTIVE_CENTER = readAngleDegrees(bottomDisc, '--sector-offset');
+
+    /* If the stylesheet cannot be read (very old engine, computed styles
+       unavailable), skip the JS emphasis entirely rather than guess. The
+       .rotary-segment.is-active rule still scales and fades the settled
+       segment correctly on its own, so this degrades instead of misplacing. */
+    var anglesReadable = TOP_ACTIVE_CENTER !== null
+      && BOTTOM_ACTIVE_CENTER !== null
+      && TOP_SEGMENT_ANGLES.concat(BOTTOM_SEGMENT_ANGLES).every(function (angle) {
+        return angle !== null;
+      });
 
     if (total) total.textContent = String(teamLength).padStart(2, '0');
 
@@ -1464,8 +1499,10 @@
         tag.classList.toggle('is-active', index === state.memberIndex);
       });
 
-      updateSegmentVisuals(topSegments, TOP_SEGMENT_ANGLES, topRotation, 40);
-      updateSegmentVisuals(bottomSegments, BOTTOM_SEGMENT_ANGLES, bottomRotation, 220);
+      if (anglesReadable) {
+        updateSegmentVisuals(topSegments, TOP_SEGMENT_ANGLES, topRotation, TOP_ACTIVE_CENTER);
+        updateSegmentVisuals(bottomSegments, BOTTOM_SEGMENT_ANGLES, bottomRotation, BOTTOM_ACTIVE_CENTER);
+      }
       Array.prototype.forEach.call(tagHangers, function (tag, index) {
         tag.style.setProperty('--tag-swing-angle', state.tagAngles[index].toFixed(3) + 'deg');
         tag.style.setProperty('--tag-scale', index === state.memberIndex ? '1' : '0.76');
@@ -1944,11 +1981,192 @@
   }
 
   /* ------------------------------------------------------------
+     10. CREDITS WAVE MATRIX
+     One animated background layer for the credits screen: a mesh of
+     grid nodes displaced by two out-of-phase sine waves, stroked as
+     whole rows and columns so a frame costs on the order of sixty
+     paths instead of a couple of thousand individual segments.
+
+     It follows the ambient dot matrix's discipline. Colours are read
+     back out of the stylesheet's --*-rgb channels, so the mesh tracks
+     the active theme rather than painting dark-mode indigo onto a
+     light page; alpha stays low enough that the wheels and the copy
+     keep their contrast; and prefers-reduced-motion gets a single
+     static frame and no loop.
+
+     The layer is page-scoped, not site-scoped. PJAX replaces
+     body.className on every swap, so this runs per page: it removes
+     the canvas and its listeners when the credits screen is left, and
+     the draw loop stops itself the moment the canvas is detached.
+     ------------------------------------------------------------ */
+  var waveMatrixCleanup = null;
+
+  function initWaveMatrix() {
+    var wanted = doc.body.classList.contains('credits-rotary-page');
+
+    if (!wanted) {
+      if (waveMatrixCleanup) {
+        waveMatrixCleanup();
+        waveMatrixCleanup = null;
+      }
+      return;
+    }
+    // Already painting; bootPage re-ran after a PJAX swap that stayed here.
+    if (waveMatrixCleanup) return;
+
+    var canvas = doc.createElement('canvas');
+    var context = canvas.getContext('2d');
+    if (!context) return;
+
+    canvas.className = 'credits-wave-matrix';
+    canvas.setAttribute('aria-hidden', 'true');
+    doc.body.insertBefore(canvas, doc.body.firstChild);
+
+    // Fallbacks only for the unexpected case where the custom properties are
+    // unreadable. They are the dark theme's real channels rather than fresh
+    // numbers, so a failed read degrades to the intended palette instead of
+    // introducing a third violet that exists nowhere in the stylesheet.
+    var FALLBACK_VIOLET = '167,139,250';
+    var FALLBACK_BLUE = '96,165,250';
+
+    function readPalette() {
+      try {
+        var styles = window.getComputedStyle(doc.documentElement);
+        var violet = (styles.getPropertyValue('--violet-soft-rgb') || '').replace(/\s+/g, '');
+        var blue = (styles.getPropertyValue('--blue-rgb') || '').replace(/\s+/g, '');
+        return { violet: violet || FALLBACK_VIOLET, blue: blue || FALLBACK_BLUE };
+      } catch (error) {
+        return { violet: FALLBACK_VIOLET, blue: FALLBACK_BLUE };
+      }
+    }
+
+    var palette = readPalette();
+    var width = 0;
+    var height = 0;
+    var spacing = 54;
+    var columns = 0;
+    var rows = 0;
+    var schemeQuery = null;
+
+    function resize() {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      spacing = width < 600 ? 42 : 54;
+      // Capped like the dot matrix: a 3x retina buffer costs four times the
+      // fill for lines one pixel wide.
+      var pixelRatio = Math.min(window.devicePixelRatio || 1, 1.75);
+      canvas.width = Math.floor(width * pixelRatio);
+      canvas.height = Math.floor(height * pixelRatio);
+      canvas.style.width = width + 'px';
+      canvas.style.height = height + 'px';
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      // Two spare cells each way so the displaced edge nodes stay off-screen.
+      columns = Math.ceil(width / spacing) + 3;
+      rows = Math.ceil(height / spacing) + 3;
+    }
+
+    /* Two sine terms per axis -- one keyed on the row, one on the column -- so
+       the mesh shears and travels instead of expanding in place. That shear is
+       what reads as a wave rather than as breathing. Amplitude is 17% of the
+       cell, enough to see the distortion without letting lines cross. */
+    function nodeX(column, row, time) {
+      return ((column - 1) * spacing) + (Math.sin((time * 0.31) + (row * 0.42)) * spacing * 0.17);
+    }
+
+    function nodeY(column, row, time) {
+      return ((row - 1) * spacing) + (Math.cos((time * 0.24) + (column * 0.37)) * spacing * 0.17);
+    }
+
+    function stroke(points, color, alpha) {
+      context.beginPath();
+      for (var i = 0; i < points.length; i += 2) {
+        if (i === 0) context.moveTo(points[i], points[i + 1]);
+        else context.lineTo(points[i], points[i + 1]);
+      }
+      context.strokeStyle = 'rgba(' + color + ',' + alpha.toFixed(4) + ')';
+      context.stroke();
+    }
+
+    function draw(timestamp) {
+      // A PJAX swap may have detached us between frames. Stop rather than keep
+      // painting an invisible canvas for the rest of the session.
+      if (!canvas.isConnected) return;
+
+      var time = timestamp / 1000;
+      context.clearRect(0, 0, width, height);
+      context.lineWidth = 1;
+
+      var points = [];
+      var row;
+      var column;
+
+      for (row = 0; row < rows; row += 1) {
+        points.length = 0;
+        for (column = 0; column < columns; column += 1) {
+          points.push(nodeX(column, row, time), nodeY(column, row, time));
+        }
+        var drift = 0.5 + (0.5 * Math.sin((time * 0.18) + (row * 0.55)));
+        stroke(points, row % 3 === 0 ? palette.blue : palette.violet, 0.045 + (drift * 0.04));
+      }
+
+      for (column = 0; column < columns; column += 1) {
+        points.length = 0;
+        for (row = 0; row < rows; row += 1) {
+          points.push(nodeX(column, row, time), nodeY(column, row, time));
+        }
+        var cross = 0.5 + (0.5 * Math.cos((time * 0.15) + (column * 0.47)));
+        stroke(points, palette.violet, 0.03 + (cross * 0.03));
+      }
+
+      if (!reduceMotion()) window.requestAnimationFrame(draw);
+    }
+
+    function onSchemeChange() {
+      palette = readPalette();
+      // A paused canvas (reduced motion draws one frame and never loops) will
+      // not repaint by itself, so nudge a single frame through.
+      if (reduceMotion()) {
+        draw(window.performance && window.performance.now ? window.performance.now() : 0);
+      }
+    }
+
+    resize();
+    window.addEventListener('resize', resize, { passive: true });
+
+    if (typeof window.matchMedia === 'function') {
+      schemeQuery = window.matchMedia('(prefers-color-scheme: light)');
+      if (typeof schemeQuery.addEventListener === 'function') {
+        schemeQuery.addEventListener('change', onSchemeChange);
+      } else if (typeof schemeQuery.addListener === 'function') {
+        schemeQuery.addListener(onSchemeChange); // Safari < 14
+      }
+    }
+
+    waveMatrixCleanup = function () {
+      window.removeEventListener('resize', resize);
+      if (schemeQuery) {
+        if (typeof schemeQuery.removeEventListener === 'function') {
+          schemeQuery.removeEventListener('change', onSchemeChange);
+        } else if (typeof schemeQuery.removeListener === 'function') {
+          schemeQuery.removeListener(onSchemeChange);
+        }
+      }
+      if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    };
+
+    draw(0);
+  }
+
+  /* ------------------------------------------------------------
      Boot and PJAX page hydration
      ------------------------------------------------------------ */
   function bootPage() {
     initImages();
     initCreditsRotary();
+    // After initCreditsRotary: both read the credits screen, and the wave mesh
+    // must be torn down on the way OUT of that page as well as built on the way
+    // in, so it runs on every swap rather than once per session.
+    initWaveMatrix();
     initRouting();
     // After initRouting: syncPageLinks rewrites a[data-page] hrefs, and the
     // download CTAs must keep the release URL that wins this ordering.

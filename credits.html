@@ -47,7 +47,9 @@
   </header>
 
   <main id="main" class="credits-rotary" aria-labelledby="credits-title">
-    <!-- Three equal sectors rotate as one upper-left contribution wheel. -->
+    <!-- Three equal sectors rotate as one upper-left contribution wheel. Each
+         sector carries its own contribution text AND its own role sign, so the
+         sign always belongs to the sector it hangs from. -->
     <section class="rotary-disc rotary-disc--top" data-rotary-disc="top" aria-label="Team contributions wheel">
       <div class="rotary-disc__plate" data-rotary-plate>
         <span class="rotary-disc__ring rotary-disc__ring--one" aria-hidden="true"></span>
@@ -61,12 +63,28 @@
                 Created the code, engineered the backend, and shaped the calm visual system behind Agora.
               </p>
             </div>
+
+            <!-- The role sign lives INSIDE its own sector, so it inherits
+                 that sector's -\-segment-angle and cannot drift into a
+                 neighbour. This mirrors the profile wheel's name plates. -->
+            <div class="rotary-sign-hanger" data-rotary-tag="0">
+              <span class="rotary-sign-hanger__cord" aria-hidden="true"></span>
+              <span class="rotary-sign" data-rotary-role>Developer</span>
+            </div>
           </article>
           <article class="rotary-segment rotary-segment--contribution" data-rotary-segment="1" aria-label="Contribution segment two">
             <div class="rotary-segment__content rotary-segment__content--contribution">
               <p class="rotary-disc__contributions" data-segment-contributions>
                 Original maker of this credits screen, turning its visual language, motion, and sense of space into something people can feel.
               </p>
+            </div>
+
+            <!-- The role sign lives INSIDE its own sector, so it inherits
+                 that sector's -\-segment-angle and cannot drift into a
+                 neighbour. This mirrors the profile wheel's name plates. -->
+            <div class="rotary-sign-hanger" data-rotary-tag="1">
+              <span class="rotary-sign-hanger__cord" aria-hidden="true"></span>
+              <span class="rotary-sign" data-rotary-role>Design &amp; ideas</span>
             </div>
           </article>
           <article class="rotary-segment rotary-segment--contribution" data-rotary-segment="2" aria-label="Contribution segment three">
@@ -75,23 +93,17 @@
                 For everyone who uses Agora, tests it in the real world, and makes the platform what it is through every visit and conversation.
               </p>
             </div>
+
+            <!-- The role sign lives INSIDE its own sector, so it inherits
+                 that sector's -\-segment-angle and cannot drift into a
+                 neighbour. This mirrors the profile wheel's name plates. -->
+            <div class="rotary-sign-hanger" data-rotary-tag="2">
+              <span class="rotary-sign-hanger__cord" aria-hidden="true"></span>
+              <span class="rotary-sign" data-rotary-role>The public</span>
+            </div>
           </article>
         </div>
 
-        <div class="rotary-tag-track" data-rotary-tags aria-label="Contributor roles">
-          <div class="rotary-sign-hanger" data-rotary-tag="0">
-            <span class="rotary-sign-hanger__cord" aria-hidden="true"></span>
-            <span class="rotary-sign" data-rotary-role>Developer</span>
-          </div>
-          <div class="rotary-sign-hanger" data-rotary-tag="1">
-            <span class="rotary-sign-hanger__cord" aria-hidden="true"></span>
-            <span class="rotary-sign" data-rotary-role>Design &amp; ideas</span>
-          </div>
-          <div class="rotary-sign-hanger" data-rotary-tag="2">
-            <span class="rotary-sign-hanger__cord" aria-hidden="true"></span>
-            <span class="rotary-sign" data-rotary-role>The public</span>
-          </div>
-        </div>
       </div>
     </section>
 

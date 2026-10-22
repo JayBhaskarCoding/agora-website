@@ -2498,20 +2498,18 @@ h1, h2, h3 {
   background: var(--bg);
 }
 
-/* Fixed geometric texture stays behind the wheels, chrome, and ambient layer. */
-.credits-rotary-page::before {
-  content: "";
+/* The credits screen's one animated background layer: a mesh of grid nodes
+   displaced by two out-of-phase sine waves, painted by initWaveMatrix() in
+   app.js. It replaces the fixed grid-and-dot texture this page used to carry,
+   so the wheel composition sits over moving depth instead of a static print --
+   and so there are not two grids on the page fighting each other. */
+.credits-wave-matrix {
   position: fixed;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
-  background-color: var(--bg);
-  background-image:
-    linear-gradient(rgba(var(--overlay-rgb), 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(var(--overlay-rgb), 0.018) 1px, transparent 1px),
-    radial-gradient(circle, rgba(var(--accent-rgb), 0.038) 1px, transparent 1.5px);
-  background-size: 72px 72px, 72px 72px, 28px 28px;
-  background-position: center center, center center, center center;
 }
 
 .credits-rotary-page main.credits-rotary {
@@ -2721,7 +2719,9 @@ h1, h2, h3 {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 5;
+  /* Below the detail blocks (z-index 4). At 5 these decorative radial lines
+     painted straight across the contributor's copy. */
+  z-index: 1;
   border-radius: 50%;
   background: repeating-conic-gradient(
     from calc(var(--sector-offset) - 60deg),
@@ -2734,21 +2734,22 @@ h1, h2, h3 {
   pointer-events: none;
 }
 
+/* Both wheels now share ONE segment model: no clip-path, no overflow hiding.
+
+   The upper wheel used to clip its sectors to a 120-degree wedge. That silently
+   cut the contribution copy on every narrow viewport -- its box corners reach
+   64-78 degrees against a 60-degree limit -- and it would have cut the
+   rim-mounted role sign as well. The wedge is purely decorative and is already
+   drawn twice over, by the plate's repeating-conic-gradient and the sector
+   track's radial lines, so nothing visual is lost by dropping the clip. The
+   three detail blocks cannot collide with each other either: they are always
+   exactly 120 degrees apart around the hub. */
 .rotary-segment {
   position: absolute;
   inset: 0;
-  overflow: hidden;
-  clip-path: polygon(50% 50%, 75% 6.7%, 100% 50%, 75% 93.3%);
   transform: rotate(var(--segment-angle));
   transform-origin: 50% 50%;
   transition: opacity 0.2s ease;
-}
-
-/* Profile labels sit on the rim, so they need to extend beyond the sector
-   clip while their profile content continues to follow the three sectors. */
-.rotary-disc--bottom .rotary-segment {
-  overflow: visible;
-  clip-path: none;
 }
 
 /* Positive top-wheel rotation carries member 1, then member 2, into the
@@ -2781,9 +2782,20 @@ h1, h2, h3 {
   --segment-scale: 0.6;
   --segment-opacity: 0.3;
   position: absolute;
+  /* ONE offset for both wheels. Each block is centred on this point rather than
+     hung from its top-left corner, so where it lands no longer depends on how
+     tall its own copy happens to be -- a longer bio used to push the whole
+     block off its mark, through the viewport edge and into the status bar.
+
+     What separates the two wheels is only --sector-offset (40deg upper,
+     220deg lower), which is what puts one block in the upper-left zone and its
+     mirror in the lower-right. Both values were solved against 14 viewports
+     rather than picked by eye; see "Credits rotary geometry" in the README. */
+  top: 48%;
+  left: 88%;
   z-index: 4;
   opacity: var(--segment-opacity);
-  transform: rotate(calc(0deg - var(--segment-angle) - var(--disc-rotation, 0deg))) scale(var(--segment-scale));
+  transform: translate(-50%, -50%) rotate(calc(0deg - var(--segment-angle) - var(--disc-rotation, 0deg))) scale(var(--segment-scale));
   transform-origin: center;
   transition: opacity 0.18s ease, filter 0.18s ease;
   will-change: transform, opacity;
@@ -2800,8 +2812,6 @@ h1, h2, h3 {
 }
 
 .rotary-segment__content--contribution {
-  top: 42%;
-  left: 55%;
   width: min(30rem, calc(var(--rotary-disc-size) * 0.37));
 }
 
@@ -2820,42 +2830,33 @@ h1, h2, h3 {
   background: linear-gradient(90deg, var(--accent), transparent);
 }
 
-/* Each tag is a ferris-wheel passenger attached to its own circumference
-   point. The plate supplies the wheel rotation; the tag supplies the exact
-   inverse rotation plus the small spring swing from app.js. */
-.rotary-tag-track {
-  position: absolute;
-  inset: 0;
-  z-index: 6;
-  pointer-events: none;
-}
+/* Each role sign is a ferris-wheel passenger hanging from its OWN sector's rim.
 
+   The hanger now lives inside its segment, so it inherits that segment's
+   --segment-angle and orbits with it -- there are no per-index coordinates left
+   to get wrong. Previously three hand-authored top/left pairs placed them, and
+   two of the three were a full 120 degrees away from the sector they belonged
+   to, which is why "Design & ideas" and "The public" read as intermixed while
+   "Developer" looked correct.
+
+   The plate supplies the wheel rotation, the segment supplies its base angle,
+   and the hanger subtracts both before adding app.js's small spring swing, so
+   the sign stays upright and swings from the cord. */
 .rotary-sign-hanger {
   position: absolute;
+  top: 50%;
+  /* 99.7% puts the cord's pivot at 49.7% of the disc out from the hub -- the
+     radius "Developer" already hung at, which was the one that looked right. */
+  left: 99.7%;
+  z-index: 7;
   display: grid;
   justify-items: center;
   width: max-content;
   opacity: 0.82;
-  transform: translate(-50%, 0) rotate(calc(0deg - var(--disc-rotation, 0deg) + var(--tag-swing-angle, 0deg)));
+  transform: translate(-50%, 0) rotate(calc(0deg - var(--segment-angle, 0deg) - var(--disc-rotation, 0deg) + var(--tag-swing-angle, 0deg)));
   transform-origin: 50% 0;
   transition: opacity 0.22s ease;
   will-change: transform;
-}
-
-/* Circumference points for the three 120-degree role sectors. */
-.rotary-sign-hanger[data-rotary-tag="0"] {
-  top: 82%;
-  left: 88%;
-}
-
-.rotary-sign-hanger[data-rotary-tag="1"] {
-  top: 67%;
-  left: 3%;
-}
-
-.rotary-sign-hanger[data-rotary-tag="2"] {
-  top: 2%;
-  left: 59%;
 }
 
 .rotary-sign-hanger.is-active {
@@ -2900,8 +2901,6 @@ h1, h2, h3 {
 }
 
 .rotary-segment__content--profile {
-  top: 45%;
-  left: 56%;
   display: grid;
   justify-items: center;
   gap: clamp(0.9rem, calc(var(--rotary-disc-size) * 0.015), 1.5rem);
@@ -3180,9 +3179,14 @@ h1, h2, h3 {
     font-size: 1.1rem;
   }
 
+  /* Narrow viewports push each hub 15% of the disc OFF-screen, so the detail
+     blocks need a much longer arm to reach the clear band through the middle. */
+  .rotary-segment__content {
+    top: 77.5%;
+    left: 137%;
+  }
+
   .rotary-segment__content--contribution {
-    top: 48%;
-    left: 58%;
     width: min(10.5rem, 32vw);
   }
 
@@ -3192,8 +3196,6 @@ h1, h2, h3 {
   }
 
   .rotary-segment__content--profile {
-    top: 40%;
-    left: 54%;
     gap: 0.45rem;
     width: min(10.5rem, 32vw);
   }
@@ -3234,19 +3236,10 @@ h1, h2, h3 {
     width: 1rem;
   }
 
-  .rotary-sign-hanger[data-rotary-tag="0"] {
-    top: 76%;
-    left: 82%;
-  }
-
-  .rotary-sign-hanger[data-rotary-tag="1"] {
-    top: 63%;
-    left: 12%;
-  }
-
-  .rotary-sign-hanger[data-rotary-tag="2"] {
-    top: 8%;
-    left: 54%;
+  /* One rule for all three signs: 41.2% of the disc out from the hub, which is
+     the radius the "Developer" sign already hung at here. */
+  .rotary-sign-hanger {
+    left: 91.2%;
   }
 
   .credits-rotary-status {
