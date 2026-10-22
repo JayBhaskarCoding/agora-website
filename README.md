@@ -745,6 +745,172 @@ gradient stops at 4.23:1 and 2.54:1). Baseline-locking means the dark palette
 cannot regress unnoticed without redesigning a shipped brand colour as a side
 effect of a theming change.
 
+
+## Credits rotary geometry
+
+`credits.html` is the one screen whose correctness is arithmetic rather than
+markup. Two wheels sit on opposite viewport corners, each carrying three
+contributors in 120-degree sectors. Everything below is load-bearing: change a
+number without re-deriving it and the screen still renders, still animates, and
+silently describes the wrong person or overflows the viewport.
+
+### One equation decides where the copy lands
+
+The plate rotates by `--disc-rotation`, each segment counter-rotates by its own
+`--segment-angle`, and the detail block counter-rotates again. Those cancel, so
+the **settled** block always lands at:
+
+```
+landing = hub + rotate(v, --sector-offset)
+```
+
+where `v` is the block's offset from the disc centre and `hub` is where the
+wheel's centre sits. It does not depend on which member is showing, which is why
+the whole layout is two numbers per breakpoint instead of six per wheel.
+
+`v` is measured from the block's **centre**, not its corner, because
+`.rotary-segment__content` starts its transform with `translate(-50%, -50%)`.
+Hung from a corner, the landing point moves with the block's own height and one
+extra line of bio shoves it through the viewport edge. Centred, it is exact at
+any `--segment-scale`.
+
+| Breakpoint | `top` | `left` |
+| --- | --- | --- |
+| desktop | `48%` | `88%` |
+| `max-width: 768px` | `77.5%` | `137%` |
+
+One shared pair for both wheels. The only thing separating them is
+`--sector-offset` (`40deg` upper, `220deg` lower), which is what puts one block
+in the upper-left zone and its mirror in the lower-right. Both pairs were solved
+against 14 viewports rather than picked by eye; the mobile arm has to be much
+longer because `translate(-65%, -65%)` pushes each narrow-screen hub 15% of the
+disc **off-screen**.
+
+### The sector angles are not in order, on purpose
+
+```
+top    --segment-angle:  40deg, 280deg, 160deg     (= 40  - 120i)
+bottom --segment-angle: 220deg, 340deg, 100deg     (= 220 + 120i)
+```
+
+Read as a list they look shuffled, and the temptation to "tidy" them into
+`40, 160, 280` is exactly the bug. They are dictated by `indexForRotation()`
+(`round(rotation / 120) % 3`) and by the lower wheel turning the other way
+(`bottomRotation = -state.rotation`). The invariant is
+`A_i == --sector-offset -/+ 120i`, and `tests/test_site.py` asserts it for both
+wheels at every index.
+
+### The stylesheet is the only source of those numbers
+
+They used to exist in four places: `--segment-angle` in CSS, two hardcoded JS
+arrays (`TOP_SEGMENT_ANGLES`, `BOTTOM_SEGMENT_ANGLES`), and two literal
+active-centre arguments (`40`, `220`). A drifted copy does not throw — it puts
+the scale-and-opacity emphasis on the wrong contributor while the wheel keeps
+turning and snapping normally.
+
+`initCreditsRotary()` now reads them back with `getComputedStyle`:
+
+```js
+var TOP_SEGMENT_ANGLES = segmentAngles(topSegments);      // --segment-angle each
+var TOP_ACTIVE_CENTER  = readAngleDegrees(topDisc, '--sector-offset');
+```
+
+If the read fails, `anglesReadable` is false and the JS emphasis is skipped
+entirely rather than guessed — the `.rotary-segment.is-active` rule still scales
+and fades the settled segment on its own, so the screen degrades instead of
+misplacing.
+
+### Role signs hang from their own segment
+
+The three upper-wheel signs ("Developer", "Design & ideas", "The public") were
+positioned by hand with per-index `top`/`left`, and two of the three were a full
+120 degrees away from the sector they described — in the base rule **and** in
+the mobile rule. Hand-authored coordinates per index are the bug class, not just
+the bug.
+
+Each sign now lives inside its own `[data-rotary-segment]` and inherits
+`--segment-angle`, the way the lower wheel's name tags always did. One rule
+places all three:
+
+```css
+.rotary-sign-hanger {
+  top: 50%;
+  left: 99.7%;   /* 49.7% of the disc out from the hub */
+  transform: translate(-50%, 0)
+    rotate(calc(0deg - var(--segment-angle, 0deg) - var(--disc-rotation, 0deg)
+              + var(--tag-swing-angle, 0deg)));
+  transform-origin: 50% 0;   /* the pivot is the cord, not the sign */
+}
+```
+
+It has to subtract **both** ancestors' rotations, or it comes out tilted by its
+own sector angle. On narrow screens only `left` changes (`91.2%`, a 41.2% orbit),
+which is the radius the one correctly-placed sign already used. `.rotary-tag-track`
+is gone; a sibling track is what let the signs drift in the first place.
+
+### No clipping, and the decoration paints underneath
+
+`.rotary-segment` no longer sets `overflow: hidden` or a wedge `clip-path`. The
+wedge looked tidy and silently truncated copy: at narrow viewports the
+contribution block's corners reach 64-78 degrees against a 60-degree limit. A
+clip-path is invisible in a text diff, so it survived review while cutting text
+on every phone.
+
+`.rotary-disc__sector-track::before` (the radial sector lines) is `z-index: 1`,
+below the detail blocks at `4`. At `5` it drew straight across the contributor's
+copy.
+
+### The wave mesh
+
+`.credits-wave-matrix` is a canvas the credits screen owns. It replaced the
+static `.credits-rotary-page::before` grid texture — on this page only. The
+site-wide `.ambient-dot-matrix` is untouched and still runs everywhere,
+including here, so credits deliberately carries two ambient layers.
+
+A mesh of grid nodes is displaced by two out-of-phase sine terms per axis, one
+keyed on the row and one on the column, so it shears and travels instead of
+breathing. Whole rows and columns are stroked as single paths (~60 per frame
+rather than ~2000 individual segments).
+
+* **Colours are read from the stylesheet's `--violet-soft-rgb` / `--blue-rgb`**,
+  so the mesh follows the active theme instead of painting dark-mode indigo onto
+  a light page. A `prefers-color-scheme` flip re-reads them, and nudges one frame
+  through if the canvas is paused.
+* **Alpha stays in `0.03-0.085`.** The mesh sits behind the copy; the test suite
+  fails if a stroke exceeds `0.09`.
+* **`prefers-reduced-motion` gets one static frame and no loop.**
+* **Pixel ratio is capped at `1.75`**, like the dot matrix — a 3x retina buffer
+  costs four times the fill for one-pixel lines.
+* **It is page-scoped and removable.** `bootPage()` re-runs on every PJAX swap
+  and line 135 replaces `body.className`, so `initWaveMatrix()` tears the canvas
+  and its listeners down on the way out, and the draw loop stops itself the
+  moment `!canvas.isConnected`. Without that it would keep painting a fixed
+  full-viewport canvas over every other page.
+
+### Verifying the screen
+
+There is no browser in CI, and jsdom performs no layout, so placement is proved
+two ways:
+
+```bash
+npm test                                  # CreditsRotaryGeometry + CreditsWaveMatrix
+node /tmp/waveharness/behaviour.js        # 38 behavioural checks, needs jsdom
+```
+
+`CreditsRotaryGeometry` does not eyeball anything: it reads `--segment-angle`,
+`--sector-offset`, `--rotary-disc-size` and each disc's `translate()` back out of
+the stylesheet, recomputes every detail block's landing box across 14 viewports,
+and fails if a block reaches past an edge, under the header, or into the status
+bar. Before the fix that check failed on 8 of 9 viewports; it now passes on all
+14. The behavioural harness runs the real `app.js` in jsdom with a stubbed 2d
+context and asserts the canvas is created, painted with the theme's channels,
+reduced to one frame under reduced motion, and removed — without stacking a
+second — across a PJAX round trip.
+
+Both suites are mutation-tested: 51 re-introduced regressions (a sign renumbered
+out of its segment, an angle drifted one degree, a hardcoded array restored, a
+hub moved to the wrong corner, the clip restored, a hardcoded stroke colour, the
+teardown removed) are each caught by the guard named for it.
 ## Notes
 
 - The feedback form on `about.html` uses the same-origin `/api/contact`

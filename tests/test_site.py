@@ -3,6 +3,7 @@ from collections import Counter
 from html.parser import HTMLParser
 import html as html_module
 import json
+import math
 from pathlib import Path
 import re
 import unittest
@@ -1890,3 +1891,396 @@ class ReleaseStatusCopy(unittest.TestCase):
         self.assertIn(f"package={ANDROID_PACKAGE}", self.readme,
                       "the documented intent:// example must name the live package")
 
+
+class CreditsRotaryGeometry(unittest.TestCase):
+    """The credits screen is pure geometry, and geometry fails silently.
+
+    A role sign hung from the wrong sector still renders, still swings, still
+    highlights -- it just describes the wrong person. A detail block placed by
+    its top-left corner still renders; it just runs off the viewport when the
+    copy is a line longer than the layout assumed. Neither throws, so both are
+    asserted here rather than left to a visual review.
+    """
+
+    SEGMENT = 120.0
+    PAD = 24
+    # Viewports the layout has to survive, desktop and narrow.
+    DESKTOP = [(1920, 1080), (1600, 900), (1440, 900), (1366, 768), (1280, 800),
+               (1024, 768), (900, 1200), (820, 1180)]
+    MOBILE = [(390, 844), (414, 896), (360, 640), (375, 812), (768, 1024), (480, 800)]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.css = (ROOT / "style.css").read_text()
+        cls.html = (ROOT / "credits.html").read_text()
+        cls.app = (ROOT / "app.js").read_text()
+
+    # --- helpers -------------------------------------------------------
+    def block(self, selector, after=0):
+        """The declaration body of the FIRST rule matching selector at/after
+        `after`, so a mobile override can be read separately from the base."""
+        start = self.css.index(selector, after)
+        brace = self.css.index("{", start)
+        end = self.css.index("}", brace)
+        return self.css[brace + 1:end], end
+
+    def decl(self, body, prop):
+        match = re.search(r"(?:^|[;\s])" + re.escape(prop) + r":\s*([^;]+);", body)
+        return match.group(1).strip() if match else None
+
+    def pct(self, body, prop):
+        value = self.decl(body, prop)
+        self.assertIsNotNone(value, f"{prop} is not declared")
+        return float(value.rstrip("%"))
+
+    def mobile_offset(self):
+        return self.css.index("@media (max-width: 768px)")
+
+    def segment_angle(self, disc, index):
+        body, _ = self.block(
+            f'.rotary-disc--{disc} .rotary-segment[data-rotary-segment="{index}"]')
+        return float(self.decl(body, "--segment-angle").rstrip("deg"))
+
+    def sector_offset(self, disc):
+        body, _ = self.block(f".rotary-disc--{disc} ")
+        return float(self.decl(body, "--sector-offset").rstrip("deg"))
+
+    def disc_rule(self, disc, mobile):
+        selector = f".rotary-disc--{disc} {{"
+        if mobile:
+            try:
+                body, _ = self.block(selector, self.mobile_offset())
+                return body
+            except ValueError:
+                pass          # the narrow block may not override this wheel
+        body, _ = self.block(selector)
+        return body
+
+    def disc_diameter(self, w, h, mobile):
+        """--rotary-disc-size: min(<factor>vmin, <cap>px), read from the sheet.
+
+        Hardcoding `min(140vmin, 1400px)` here would let the CSS resize the
+        wheels and the assertions keep passing against the old numbers."""
+        if mobile:
+            try:
+                body, _ = self.block(".rotary-disc {", self.mobile_offset())
+            except ValueError:
+                body, _ = self.block(".rotary-disc {")
+        else:
+            body, _ = self.block(".rotary-disc {")
+        factor, cap = re.search(
+            r"min\(\s*([\d.]+)vmin,\s*([\d.]+)px\s*\)",
+            self.decl(body, "--rotary-disc-size")).groups()
+        return min(min(w, h) * float(factor) / 100, float(cap))
+
+    def hub(self, disc, w, h, mobile):
+        """Where the wheel's centre actually lands, from its own CSS.
+
+        Each disc is pinned flush to a viewport corner, so its untransformed
+        centre is half a disc in from that corner; the `translate()` then moves
+        it. The corner pinning is declared once on the base rule and inherited
+        by the narrow-screen override, which only re-declares the translate --
+        so the two have to be read from different rules.
+
+        Reading the translate is what makes a hub nudged onto the wrong corner
+        a test failure instead of a silent change in composition."""
+        base = self.disc_rule(disc, False)
+        d = self.disc_diameter(w, h, mobile)
+        if disc == "top":
+            self.assertEqual((self.decl(base, "top"), self.decl(base, "left")), ("0", "0"),
+                             "the upper wheel must stay pinned to the top-left corner")
+            centre_x, centre_y = d / 2, d / 2
+        else:
+            self.assertEqual((self.decl(base, "right"), self.decl(base, "bottom")), ("0", "0"),
+                             "the lower wheel must stay pinned to the bottom-right corner")
+            centre_x, centre_y = w - d / 2, h - d / 2
+
+        body = self.disc_rule(disc, mobile)
+        # decl() returns the VALUE only, so match the translate() itself.
+        tx, ty = re.search(r"translate\(\s*([-\d.]+)%,\s*([-\d.]+)%\s*\)",
+                           self.decl(body, "transform")).groups()
+        return centre_x + float(tx) / 100 * d, centre_y + float(ty) / 100 * d
+
+    # --- 1. the sector geometry -----------------------------------------
+    def test_segment_angles_are_exactly_120_apart_and_match_the_active_sector(self):
+        """The wheel settles one 120-degree step per member, so segment i must
+        sit at sector_offset -/+ 120i (minus on the upper wheel, which turns the
+        other way). Get this wrong and the snap lands between two contributors,
+        or the emphasis fades in on the wrong one."""
+        for disc, direction in (("top", -1), ("bottom", +1)):
+            offset = self.sector_offset(disc)
+            for i in range(3):
+                with self.subTest(disc=disc, segment=i):
+                    want = (offset + direction * self.SEGMENT * i) % 360
+                    self.assertAlmostEqual(self.segment_angle(disc, i), want, places=2)
+
+    def test_the_two_wheels_share_their_step_and_differ_only_by_direction(self):
+        self.assertEqual(self.sector_offset("top"), 40.0)
+        self.assertEqual(self.sector_offset("bottom"), 220.0)
+        self.assertAlmostEqual((self.sector_offset("bottom") - self.sector_offset("top")) % 360,
+                               180.0, places=2,
+                               msg="the hubs are opposite corners, so the active "
+                                   "sectors must be opposite too or the two "
+                                   "detail blocks land on the same side")
+
+    def test_app_js_reads_the_geometry_from_css_instead_of_duplicating_it(self):
+        """The angles used to exist in four places: --segment-angle in the CSS,
+        two hardcoded JS arrays, and two literal active-centre arguments. A
+        drifted copy does not throw -- it just emphasises the wrong
+        contributor."""
+        for stale in ("TOP_SEGMENT_ANGLES = [", "BOTTOM_SEGMENT_ANGLES = [",
+                      "topRotation, 40)", "bottomRotation, 220)"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, self.app,
+                                 "the geometry must come from the stylesheet")
+        self.assertIn("readAngleDegrees(segment, '--segment-angle')", self.app)
+        self.assertIn("readAngleDegrees(topDisc, '--sector-offset')", self.app)
+        self.assertIn("readAngleDegrees(bottomDisc, '--sector-offset')", self.app)
+        gate = re.search(r"if \(anglesReadable\) \{([\s\S]*?)\n      \}", self.app)
+        self.assertIsNotNone(gate,
+                         "the emphasis calls must be gated on the read succeeding")
+        for call in ("updateSegmentVisuals(topSegments, TOP_SEGMENT_ANGLES, "
+                     "topRotation, TOP_ACTIVE_CENTER);",
+                     "updateSegmentVisuals(bottomSegments, BOTTOM_SEGMENT_ANGLES, "
+                     "bottomRotation, BOTTOM_ACTIVE_CENTER);"):
+            self.assertIn(call, gate.group(1),
+                          f"{call} escaped the guard")
+        self.assertIn("var anglesReadable = TOP_ACTIVE_CENTER !== null\n"
+                      "      && BOTTOM_ACTIVE_CENTER !== null", self.app,
+                      "the guard must actually test the values it reads")
+
+    # --- 2. role signs belong to their own sector ------------------------
+    def test_each_role_sign_lives_inside_its_own_segment(self):
+        """The structural fix. Two of the three signs used to be authored a full
+        120 degrees away from the sector they described. Hanging each sign from
+        its own segment makes that impossible: it inherits --segment-angle."""
+        for i in range(3):
+            article = re.search(
+                r'<article[^>]*data-rotary-segment="%d"[^>]*>([\s\S]*?)</article>' % i,
+                self.html)
+            self.assertIsNotNone(article, f"segment {i} vanished")
+            self.assertIn(f'data-rotary-tag="{i}"', article.group(1),
+                          f"the role sign for index {i} is not inside segment {i}")
+            for other in range(3):
+                if other != i:
+                    self.assertNotIn(f'data-rotary-tag="{other}"', article.group(1),
+                                     "a sign crossed over into another sector")
+        self.assertNotIn("rotary-tag-track", self.html,
+                         "the sibling track that let them drift is gone")
+        self.assertNotIn("rotary-tag-track", self.css, "and so is its dead rule")
+
+    def test_no_per_index_hanger_coordinates_survive(self):
+        """Hand-authored top/left per sign is the bug class, not just the bug."""
+        self.assertNotRegex(self.css, r"\.rotary-sign-hanger\[data-rotary-tag=")
+        body, _ = self.block(".rotary-sign-hanger {")
+        self.assertEqual(self.decl(body, "top"), "50%")
+        # The sign hangs out along its sector's own 0-degree axis, so a single
+        # `left` is the whole orbit radius.
+        self.assertAlmostEqual(self.pct(body, "left") - 50, 49.7, delta=0.2,
+                               msg="base orbit radius moved off the rim the one "
+                                   "correctly-placed sign already used")
+        mobile, _ = self.block(".rotary-sign-hanger {", self.mobile_offset())
+        self.assertAlmostEqual(self.pct(mobile, "left") - 50, 41.2, delta=0.2)
+
+    def test_the_sign_counter_rotates_both_ancestors(self):
+        """It sits inside a rotated segment inside a rotated plate. Subtracting
+        only the plate leaves it tilted by its own sector angle."""
+        body, _ = self.block(".rotary-sign-hanger {")
+        transform = self.decl(body, "transform")
+        self.assertIn("--segment-angle", transform)
+        self.assertIn("--disc-rotation", transform)
+        self.assertIn("--tag-swing-angle", transform, "the pendulum swing must survive")
+        self.assertEqual(self.decl(body, "transform-origin"), "50% 0",
+                         "the pivot is the cord, not the sign's centre")
+
+    # --- 3. detail blocks are centre-anchored ---------------------------
+    def test_detail_blocks_are_centre_anchored_not_corner_hung(self):
+        """A corner-hung block lands wherever its own height puts it, so one
+        extra line of bio shoves the whole block into the status bar. Centring
+        it makes the landing point a function of two numbers only."""
+        body, _ = self.block(".rotary-segment__content {")
+        transform = self.decl(body, "transform")
+        self.assertTrue(transform.startswith("translate(-50%, -50%)"),
+                        f"the centring translate must come first, got: {transform}")
+        self.assertIn("--segment-angle", transform)
+        self.assertIn("--disc-rotation", transform)
+        self.assertEqual(self.decl(body, "transform-origin"), "center")
+
+    def test_both_wheels_share_one_detail_block_offset(self):
+        """The only thing that should separate the two blocks is the wheel's own
+        --sector-offset. Two independently tuned offsets is how they ended up on
+        the same side of the screen."""
+        base, _ = self.block(".rotary-segment__content {")
+        for modifier in (".rotary-segment__content--contribution {",
+                         ".rotary-segment__content--profile {"):
+            body, _ = self.block(modifier)
+            self.assertIsNone(self.decl(body, "top"), f"{modifier} re-tunes top")
+            self.assertIsNone(self.decl(body, "left"), f"{modifier} re-tunes left")
+        self.assertEqual((self.pct(base, "left"), self.pct(base, "top")), (88.0, 48.0))
+
+    def test_segments_no_longer_clip_their_content(self):
+        """The upper wheel clipped its sectors to a 120-degree wedge, which cut
+        the contribution copy on every narrow viewport (its corners reach 64-78
+        degrees against a 60-degree limit) and would have cut the rim-mounted
+        sign too."""
+        body, _ = self.block(".rotary-segment {")
+        self.assertNotIn("clip-path", body)
+        self.assertNotIn("overflow: hidden", body)
+        self.assertNotIn(".rotary-disc--bottom .rotary-segment {", self.css,
+                         "the bottom wheel's clip-cancel override is now redundant")
+
+    def test_the_sector_lines_do_not_paint_over_the_copy(self):
+        lines, _ = self.block(".rotary-disc__sector-track::before {")
+        content, _ = self.block(".rotary-segment__content {")
+        self.assertLess(int(self.decl(lines, "z-index")), int(self.decl(content, "z-index")),
+                        "decorative radial lines were drawing across the text")
+
+    # --- 4. the solved placement, re-derived -----------------------------
+    def _metrics(self, w, h, d, mobile):
+        """Block sizes modelled from the authored clamp() chains, with the text
+        heights rounded UP so a passing assertion still has margin."""
+        if mobile:
+            cw = min(168, 0.32 * w)
+            ch = math.ceil(152 / max(1, cw / 5.4)) * 17.6 + 8
+            pw = min(168, 0.32 * w)
+            ph = max(70, min(0.15 * d, 100)) + 12 + math.ceil(96 / max(1, pw / 5.2)) * 16.0
+        else:
+            cw = min(480, 0.37 * d)
+            fs = max(15.2, min(0.018 * d, 21.6))
+            ch = math.ceil(152 / max(1, cw / (fs * 0.505))) * fs * 1.65 + 8
+            pw = min(336, 0.30 * d)
+            bfs = max(13.1, min(0.012 * d, 16.8))
+            ph = (max(110, min(0.14 * d, 210)) + min(24, max(14.4, 0.015 * d))
+                  + math.ceil(96 / max(1, pw / (bfs * 0.505))) * bfs * 1.55)
+        return (cw, ch), (pw, ph)
+
+    def _landing(self, w, h, mobile, which, left, top, bw, bh):
+        d = self.disc_diameter(w, h, mobile)
+        hub_x, hub_y = self.hub(which, w, h, mobile)
+        hub = (hub_x, hub_y)
+        sector = math.radians(self.sector_offset(which))
+        vx, vy = (left - 50) / 100 * d, (top - 50) / 100 * d
+        cx = hub[0] + vx * math.cos(sector) - vy * math.sin(sector)
+        cy = hub[1] + vx * math.sin(sector) + vy * math.cos(sector)
+        return cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2
+
+    def test_detail_blocks_land_inside_the_safe_area_on_every_viewport(self):
+        """The whole point of solving for the offsets instead of eyeballing them.
+        Recomputes each block's landing box from the CSS actually on disk and
+        fails if it reaches past an edge, under the header, or into the status
+        bar. Before the fix this failed on 8 of 9 viewports."""
+        base, _ = self.block(".rotary-segment__content {")
+        mobile, _ = self.block(".rotary-segment__content {", self.mobile_offset())
+        cases = [(w, h, False, self.pct(base, "left"), self.pct(base, "top"), 68, 76)
+                 for w, h in self.DESKTOP]
+        cases += [(w, h, True, self.pct(mobile, "left"), self.pct(mobile, "top"), 58, 100)
+                  for w, h in self.MOBILE]
+        for w, h, mob, left, top, header, status in cases:
+            d = self.disc_diameter(w, h, mob)
+            (cw, chh), (pw, phh) = self._metrics(w, h, d, mob)
+            for which, bw, bh in (("top", cw, chh), ("bottom", pw, phh)):
+                x0, y0, x1, y1 = self._landing(w, h, mob, which, left, top, bw, bh)
+                with self.subTest(viewport=f"{w}x{h}", mobile=mob, block=which):
+                    self.assertGreaterEqual(x0, self.PAD, "runs off the left edge")
+                    self.assertLessEqual(x1, w - self.PAD, "runs off the right edge")
+                    self.assertGreaterEqual(y0, header + 10, "collides with the header")
+                    self.assertLessEqual(y1, h - status - 10, "collides with the status bar")
+
+    def test_the_two_blocks_occupy_opposite_zones(self):
+        """Descriptions belong to the upper-left hub, photo and bio to the
+        lower-right. If both landed on the same side the composition would read
+        as one crowded corner."""
+        base, _ = self.block(".rotary-segment__content {")
+        w, h = 1440, 900
+        d = self.disc_diameter(w, h, False)
+        (cw, chh), (pw, phh) = self._metrics(w, h, d, False)
+        tx, ty, _, _ = self._landing(w, h, False, "top", self.pct(base, "left"),
+                                     self.pct(base, "top"), cw, chh)
+        bx, by, _, _ = self._landing(w, h, False, "bottom", self.pct(base, "left"),
+                                     self.pct(base, "top"), pw, phh)
+        self.assertLess(tx + cw / 2, w / 2, "the description block is not upper-left")
+        self.assertLess(ty + chh / 2, h / 2, "the description block is not upper-left")
+        self.assertGreater(bx + pw / 2, w / 2, "the profile block is not lower-right")
+        self.assertGreater(by + phh / 2, h / 2, "the profile block is not lower-right")
+
+
+class CreditsWaveMatrix(unittest.TestCase):
+    """The credits screen's one animated background layer."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.css = (ROOT / "style.css").read_text()
+        cls.app = (ROOT / "app.js").read_text()
+        cls.body = cls.app.split("function initWaveMatrix()", 1)[1].split("\n  function bootPage", 1)[0]
+
+    def test_the_static_texture_it_replaces_is_gone(self):
+        self.assertNotIn(".credits-rotary-page::before", self.css,
+                         "two grids on one page is exactly the noise this replaced")
+        self.assertIn(".credits-wave-matrix {", self.css)
+        body = self.css.split(".credits-wave-matrix {", 1)[1].split("}", 1)[0]
+        self.assertIn("position: fixed", body)
+        self.assertIn("pointer-events: none", body, "it must never eat a wheel event")
+        self.assertNotIn("pointer-events: auto", body,
+                         "an earlier `auto` in the same block wins the cascade")
+        self.assertLessEqual(int(re.search(r"z-index:\s*(\d+)", body).group(1)), 0,
+                             "it has to sit under main.credits-rotary (z-index 1)")
+
+    def test_it_only_exists_on_the_credits_screen(self):
+        self.assertIn("doc.body.classList.contains('credits-rotary-page')", self.body)
+        boot = self.app.split("function bootPage()", 1)[1].split("\n  }", 1)[0]
+        calls = [line.strip() for line in boot.split("\n")
+                 if "initWaveMatrix();" in line]
+        self.assertEqual(len(calls), 1,
+                         f"expected exactly one live call, got {calls}")
+        self.assertFalse(calls[0].startswith("//"),
+                         "the call is commented out; counting a substring "
+                         "counts a comment")
+
+    def test_it_is_torn_down_when_the_page_is_left(self):
+        """A fixed full-viewport canvas that survives the swap would paint over
+        every other page."""
+        self.assertIn("waveMatrixCleanup()", self.body)
+        self.assertIn("removeEventListener('resize'", self.body)
+        self.assertIn("removeChild(canvas)", self.body)
+        self.assertIn("canvas.isConnected", self.body,
+                      "the draw loop must stop itself once detached")
+        self.assertIn("if (waveMatrixCleanup) return;", self.body,
+                      "and must not stack a second canvas on a re-run")
+
+    def test_it_follows_the_theme_instead_of_hardcoding_colour(self):
+        self.assertIn("getPropertyValue('--violet-soft-rgb')", self.body)
+        self.assertIn("getPropertyValue('--blue-rgb')", self.body)
+        self.assertIn("prefers-color-scheme: light", self.body,
+                      "a mid-session scheme flip has to re-read the palette")
+        # Assert on the PAINT CALL SITES. The regex has to exclude the helper's
+        # own declaration -- `function stroke(points, color, alpha)` matches the
+        # same shape as a call and its `color` parameter is not a channel.
+        declaration = "function stroke(points, color, alpha) {"
+        self.assertIn(declaration, self.body)
+        call_body = self.body.replace(declaration, "")
+        callsites = re.findall(r"stroke\(points,\s*([^,]+),", call_body)
+        self.assertEqual(len(callsites), 2,
+                         f"expected a row pass and a column pass, got {callsites}")
+        for expression in callsites:
+            self.assertIn("palette.", expression,
+                          f"painted with {expression!r}, not a theme channel")
+        self.assertIn("context.strokeStyle = 'rgba(' + color + ','", self.body,
+                      "the helper must build its colour from the channel it is given")
+
+    def test_it_stays_subtle_enough_to_read_through(self):
+        alphas = [float(a) for a in re.findall(r"(0\.\d+) \+ \((?:drift|cross) \* (0\.\d+)\)", self.body)
+                  for a in a]
+        self.assertTrue(alphas, "no alpha ramps found; the parser is stale")
+        self.assertLessEqual(max(alphas), 0.09,
+                             "the mesh must sit behind the copy, not compete with it")
+
+    def test_reduced_motion_gets_one_frame_and_no_loop(self):
+        self.assertIn("if (!reduceMotion()) window.requestAnimationFrame(draw);", self.body,
+                      "the loop must be gated on reduced motion")
+        self.assertIn("if (reduceMotion()) {", self.body,
+                      "and a paused canvas still needs one frame on a scheme change")
+
+    def test_the_buffer_is_capped_like_the_other_canvas(self):
+        self.assertIn("Math.min(window.devicePixelRatio || 1, 1.75)", self.body)
+        self.assertIn("context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)", self.body)
+        self.assertIn("addEventListener('resize', resize", self.body)
