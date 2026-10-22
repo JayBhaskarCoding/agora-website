@@ -2680,6 +2680,24 @@ h1, h2, h3 {
   will-change: transform;
 }
 
+/* ------------------------------------------------------------------------
+   AUDIO-REACTIVE WHEEL LAYERS
+
+   initWheelReactivity() writes three normalised custom properties onto each
+   .rotary-disc every frame the music is playing: --wheel-bass, --wheel-onset
+   and --wheel-treble. All three default to 0 here, so the wheels are static
+   and correct with the script absent, the music off, or reduced motion
+   requested (in that last case the script deliberately writes nothing).
+
+   The scale lands ONLY on layers that have no descendants: the rim ticks and
+   the dashed outer ring are pseudo-elements, and the three concentric rings are
+   empty <span>s. The contributor copy, the avatars and the rim tags all live
+   under .rotary-disc__sector-track, which is NOT scaled -- their coordinates
+   are solved against 14 viewports and locked, and a bass pulse that shifted
+   them by 3.5% of a 1260px disc would move the text 44px and break that.
+   The wheels breathe; the copy does not.
+   ------------------------------------------------------------------------ */
+
 /* A repeating conic ring supplies the cog silhouette without an image asset. */
 .rotary-disc__plate::before {
   content: "";
@@ -2694,7 +2712,14 @@ h1, h2, h3 {
   );
   -webkit-mask: radial-gradient(transparent 0 68%, var(--mask-solid) 68.5% 76%, transparent 76.5%);
   mask: radial-gradient(transparent 0 68%, var(--mask-solid) 68.5% 76%, transparent 76.5%);
-  opacity: 0.78;
+  /* Bass swells the rim ticks outward by up to 3.5%; treble brightens them, so
+     high notes read as a glint travelling the cog rather than as a change in
+     size. The drop-shadow filter is deliberately left alone -- recalculating a
+     filter on a 1300px element every frame is far more expensive than the
+     opacity change that achieves the same glint. */
+  transform: scale(calc(1 + (var(--wheel-bass, 0) * 0.035)));
+  transform-origin: 50% 50%;
+  opacity: calc(0.78 + (var(--wheel-treble, 0) * 0.22));
   filter: drop-shadow(0 0 12px rgba(var(--glow-rgb), 0.32));
 }
 
@@ -2702,9 +2727,19 @@ h1, h2, h3 {
   content: "";
   position: absolute;
   inset: 8%;
-  border: 1px dashed rgba(var(--violet-soft-rgb), 0.28);
+  border: 1px dashed rgba(var(--violet-soft-rgb), calc(0.28 + (var(--wheel-onset, 0) * 0.42)));
   border-radius: 50%;
-  box-shadow: 0 0 0 1px rgba(var(--glow-blue-rgb), 0.08);
+  /* The dashed outer segment. A piano onset flares it from a resting 0.6 to
+     fully opaque -- resting slightly dim is what makes the flare readable, and
+     it keeps the ring from competing with the copy while nothing is happening.
+     The second shadow is the bass glow: it grows and brightens with the low
+     end, which is the "glow" half of the radial scale/glow pulse. */
+  box-shadow:
+    0 0 0 1px rgba(var(--glow-blue-rgb), 0.08),
+    0 0 calc(16px + (var(--wheel-bass, 0) * 34px)) rgba(var(--glow-rgb), calc(0.08 + (var(--wheel-bass, 0) * 0.26)));
+  opacity: calc(0.6 + (var(--wheel-onset, 0) * 0.4));
+  transform: scale(calc(1 + (var(--wheel-bass, 0) * 0.035)));
+  transform-origin: 50% 50%;
   z-index: 1;
   pointer-events: none;
 }
@@ -2714,6 +2749,11 @@ h1, h2, h3 {
   display: block;
   border: 1px dashed rgba(var(--muted-rgb), 0.2);
   border-radius: 50%;
+  /* Empty <span>s, concentric with the disc, so scaling about their own centre
+     is a pure radial pulse with nothing inside them to displace. */
+  transform: scale(calc(1 + (var(--wheel-bass, 0) * 0.035)));
+  transform-origin: 50% 50%;
+  opacity: calc(0.72 + (var(--wheel-onset, 0) * 0.28));
   z-index: 2;
   pointer-events: none;
 }
@@ -2759,7 +2799,10 @@ h1, h2, h3 {
   );
   -webkit-mask: radial-gradient(transparent 0 7%, var(--mask-solid) 7.2% 100%);
   mask: radial-gradient(transparent 0 7%, var(--mask-solid) 7.2% 100%);
-  opacity: 0.48;
+  /* The spokes flare with a piano onset. Opacity only, never a transform: this
+     pseudo-element belongs to the sector track, which is the subtree the
+     contributor copy lives in. */
+  opacity: calc(0.4 + (var(--wheel-onset, 0) * 0.35));
   pointer-events: none;
 }
 
@@ -2986,11 +3029,18 @@ h1, h2, h3 {
   height: 2.5rem;
   min-width: clamp(8rem, calc(var(--rotary-disc-size) * 0.14), 11rem);
   padding: 8px 16px;
-  border: 1px solid rgba(var(--rim-rgb), 0.88);
+  /* Treble glints the rim tags: the border tightens toward full opacity and
+     the glow widens with high notes. Not the element's own `opacity` -- that is
+     carrying the active/inactive emphasis on a 0.22s transition, and an
+     audio-driven value fighting a transition is how a glint turns into a
+     stutter. */
+  border: 1px solid rgba(var(--rim-rgb), calc(0.88 + (var(--wheel-treble, 0) * 0.12)));
   border-radius: 0.25rem;
   color: var(--on-gradient);
   background: var(--brand-gradient-ink);
-  box-shadow: 0 10px 28px -14px rgba(var(--glow-blue-rgb), 0.88), 0 0 24px rgba(var(--glow-rgb), 0.34);
+  box-shadow:
+    0 10px 28px -14px rgba(var(--glow-blue-rgb), 0.88),
+    0 0 calc(24px + (var(--wheel-treble, 0) * 16px)) rgba(var(--glow-rgb), calc(0.34 + (var(--wheel-treble, 0) * 0.3)));
   font-family: var(--font-mono);
   font-size: clamp(0.67rem, calc(var(--rotary-disc-size) * 0.011), 0.95rem);
   font-weight: 600;
@@ -3948,9 +3998,12 @@ h1, h2, h3 {
     color: var(--text-faint);
   }
 
-  /* The hanging role sign kept a 0.88 blue bloom under it. */
+  /* The hanging role sign kept a 0.88 blue bloom under it. The treble glint is
+     carried here too: this rule sits later in the cascade than the shared one,
+     so without it the tag would never react in light mode while its sibling
+     .rotary-sign still did. */
   .rotary-name-tag {
     box-shadow: 0 10px 28px -14px rgba(var(--glow-blue-rgb), 0.4),
-      0 0 24px rgba(var(--glow-rgb), 0.16);
+      0 0 calc(24px + (var(--wheel-treble, 0) * 16px)) rgba(var(--glow-rgb), calc(0.16 + (var(--wheel-treble, 0) * 0.2)));
   }
 }

@@ -912,16 +912,36 @@ reach 64-78 degrees against a 60-degree limit), and a clip-path is invisible in 
 text diff. `.rotary-disc__sector-track::before` is `z-index: 1`, below the detail
 blocks at `4`; at `5` the decorative radial lines drew across the text.
 
-### The backdrop is deliberately bright, and the copy gets a scrim
+### The backdrop, and the third calibration of it
 
 Two canvas layers sit behind this screen: the site-wide `.ambient-dot-matrix`
-and the credits-only `.credits-wave-matrix`. Both were tuned faint, a design
-review called the result close to invisible, and both now paint at the values it
-specified — dots from 2px at rest to 4.5px on an audio peak at 0.75-0.95 alpha,
-mesh lines from 0.28 up to 0.45 on a crest, idle undulation 0.26 of a cell where
-it used to be 0.12.
+and the credits-only `.credits-wave-matrix`. Both have now been calibrated three
+times, and all three are recorded here because the numbers are load-bearing and
+the direction of travel is not guessable from the end state — the middle row was
+a deliberate over-correction that a second review then pulled back.
 
-Two things make that survivable:
+| | dots | mesh lines | idle undulation |
+| --- | --- | --- | --- |
+| original | 0.7-1.25px @ 0.045-0.13 | ≤ 0.13 | 0.12 cell |
+| "too faint" review | 2-4.5px @ 0.75-0.95 | 0.28-0.45 | 0.26 cell |
+| **current** | **1.5-2.2px @ 0.25-0.35** | **0.15-0.20** | **0.26 cell** |
+
+Hold the current row. Every one of those numbers is a `Math.min` ceiling rather
+than a target, so however hard the track hits, a dot or a line cannot leave its
+band and start competing with the copy. `test_the_mesh_lines_are_calibrated_into_their_band`
+and `test_the_dot_matrix_stays_inside_its_calibration` fail if they do.
+
+**The dot matrix is a mesh, not a scatter.** Every node is joined to its right
+and lower neighbour, and the whole grid is drawn as ONE path — all rows, then all
+columns — rather than a segment per pair. That is a single `stroke()` call
+instead of several thousand for the same picture. Node positions are computed
+once per frame into a shared `Float32Array` that the line passes and the dot pass
+all read, which makes "a node is in exactly one place per frame" structural
+rather than something two passes have to be careful to agree about. The wave mesh
+does the same; it used to need a `bandAt()` helper whose entire job was enforcing
+that agreement.
+
+Two things keep the backdrop from costing legibility:
 
 **A scrim behind each detail block.** `.rotary-segment__content::before` paints a
 radial gradient of the theme's own `--bg-rgb` at `z-index: -1`, with
@@ -930,14 +950,137 @@ edge, where the glow would otherwise be most visible. This is the chosen answer
 to "the background is now loud": dim the pixels behind the copy specifically,
 rather than dimming the whole canvas or vignetting the screen edges.
 
-**A pre-rendered glow sprite.** The review asked for `shadowBlur` 8-12 on every
-dot and mesh node. Across the two layers that is on the order of 2000 `shadowBlur`
-calls per frame, and it is one of the most expensive things a 2D context can do.
-`makeGlowSprite()` bakes the same radial falloff into an off-screen canvas once
-per colour and `drawGlow()` blits it with `drawImage` — the same picture for a
-fraction of the cost, and the reason no `shadowBlur` assignment appears anywhere
-in `app.js`. Both canvases rebuild their sprite when the OS flips scheme, because
-the glow is baked together with the palette.
+**A pre-rendered glow sprite.** An earlier review asked for `shadowBlur` 8-12 on
+every dot and mesh node. Across the two layers that is on the order of 2000
+`shadowBlur` calls per frame, and it is one of the most expensive things a 2D
+context can do. `makeGlowSprite()` bakes the same radial falloff into an
+off-screen canvas once per colour and `drawGlow()` blits it with `drawImage` —
+the same picture for a fraction of the cost, and the reason no `shadowBlur`
+assignment appears anywhere in `app.js`. `bloom` is now a parameter, and the
+matrix dots use `0.42` of the original spread: a soft edge, not a halo. Both
+canvases rebuild their sprite when the OS flips scheme, because the glow is baked
+together with the palette — and the rebuild has to pass the *same* bloom as the
+init call, which is a drift a test now pins after it happened once.
+
+### What drives the background and the wheels
+
+`initAmbientExperience()` owns one `AnalyserNode`, configured for two things at
+once:
+
+```js
+analyser.fftSize = 2048;               // ~21.5Hz bins at 44.1kHz
+analyser.smoothingTimeConstant = 0.35; // a keystroke lands on the next frame
+```
+
+At the old `fftSize` of 128 a bin was ~344Hz wide, so the entire 20-200Hz bass
+band was ONE bin and a dominant-pitch reading was meaningless. And the
+analyser's smoothing is a running average over previous frames, which is exactly
+what turns a piano keystroke into a slow swell — 0.9 meant a strike arrived
+several frames late. It is not 0 either; that would make the visuals jitter per
+sample instead of tracking notes.
+
+`computeBands()` derives six metrics from it, **once per frame** however many
+consumers ask (an 8ms cache):
+
+| metric | source | drives |
+| --- | --- | --- |
+| `bass` | 20-200Hz | wide rolling vertical swells; the wheels' radial pulse |
+| `mid` | 200-3200Hz | a faster travelling term layered on the idle shear |
+| `treble` | 3200-12000Hz | crisp fast surface ripples; the rim ticks and tags glint |
+| `onset` | frame-over-frame RISE in `mid` | a sharp upward jump; the dashed ring and spokes flare |
+| `pitch` | dominant bin in mid+treble, log-scaled | the ripple's spatial frequency |
+| `centroid` | spectral centroid, log-scaled | the ripple's focal point |
+
+Band edges are declared in **Hz** and converted using the context's real
+`sampleRate` and `fftSize`. Hardcoding bin indices is how a "bass" band silently
+becomes a low-mid band: bin 9 is 194Hz at 44.1kHz and 211Hz at 48kHz, and nothing
+about the visuals would tell you the difference.
+
+Two details that are easy to lose:
+
+- **`onset` is a rise, not a level.** `Math.max(0, rawMid - previousMid)`, so a
+  note *decaying* is never mistaken for a note striking. The result is held by an
+  envelope (`ONSET_DECAY = 0.86`) because a single frame is shorter than the eye
+  can register.
+- **The sensitivity curve lifts quiet passages.** Music sits far below full scale
+  in a byte spectrum — a quiet piano passage averages around 0.1 — so a linear
+  mapping produces almost no movement and reads as broken rather than quiet.
+  `Math.pow(v, 0.6) * gain` takes 0.1 to 0.25 before the per-band gain, and
+  treble gets the most gain because it carries the least energy.
+
+`pitch` and `centroid` are reported 0..1 on a **log** scale because pitch
+perception is logarithmic: a linear map would spend most of its range on the top
+octave and a climbing melody would look pinned near 1. As the melody moves, the
+wave's spatial frequency and the ripple's focal point move with it, so the grid
+travels instead of just getting louder in place.
+
+### The wheels breathe; the copy does not
+
+`initWheelReactivity()` writes three normalised custom properties onto each
+`.rotary-disc` — `--wheel-bass`, `--wheel-onset`, `--wheel-treble` — and the
+stylesheet turns them into a bass scale, an onset flare and a treble glint.
+
+It needs its own loop. The rotary's frame loop stops the instant the wheel
+settles, which is right for the physics and useless for a bass pulse that has to
+keep breathing on a stationary wheel.
+
+The scale is the part that has to be handled carefully, because the contributor
+text and avatar coordinates are solved against 14 viewports and locked. A bass
+scale on any **ancestor** of them would move the text by 3.5% of a 1260px disc —
+44px — and silently break that solve. So it is only permitted on layers with no
+descendants:
+
+| layer | reacts to | how |
+| --- | --- | --- |
+| `.rotary-disc__plate::before` (rim ticks) | bass, treble | scale + opacity |
+| `.rotary-disc__plate::after` (dashed outer ring) | bass, onset | scale + glow + opacity |
+| `.rotary-disc__ring` ×3 (empty spans) | bass, onset | scale + opacity |
+| `.rotary-disc__sector-track::before` (spokes) | onset | opacity only |
+| `.rotary-sign, .rotary-name-tag` | treble | border + glow |
+
+The two pseudo-elements and the ring spans hold nothing; the spokes and the tags
+change opacity and colour only. `.rotary-disc__sector-track` — the subtree that
+carries every piece of copy — is never transformed at all.
+`test_the_wheel_pulse_cannot_move_the_copy` asserts exactly that, by enumerating
+every rule that scales with `--wheel-bass` and failing on any selector outside
+the allowed set.
+
+Every use carries a `var(--wheel-x, 0)` fallback, so the wheels are static and
+correct with the script absent, the music off, or reduced motion requested (in
+that last case the driver writes the zeros once and starts no loop — a
+bass-driven scale *is* motion). Writes are quantised to 1/255th before comparing:
+setting a custom property invalidates style for the whole subtree, and with the
+music off all three sit at 0, so an unquantified write would cost a style
+recalculation of both wheels every frame forever to set the same numbers again.
+
+### Scrolling ripples the grid, with or without music
+
+The wheel's angular velocity drives the mesh even muted or paused. The physics
+loop publishes it and both canvases read it back:
+
+```js
+var wheelSpin = { velocity: 0, at: -1e9 };
+var SPIN_DECAY_MS = 260;    // e-folding time for a ripple dying away
+var SPIN_REFERENCE = 420;   // deg/s that counts as a full-strength ripple
+
+function readSpin(now) {
+  var age = Math.max(0, now - wheelSpin.at);
+  return wheelSpin.velocity * Math.exp(-age / SPIN_DECAY_MS);
+}
+```
+
+There is no call chain between the rotary physics and the canvases — they are
+separate sections — so the velocity goes through a module-level slot. The decay
+by **age** is the part that matters: the physics loop stops as soon as the wheel
+settles, so without it the last ripple would freeze on screen forever. With it,
+the grid returns to calm on its own as the wheel locks onto a contributor, and
+the ripple's direction follows the sign of the spin, so scrolling up and down
+travel opposite ways.
+
+The wheel physics themselves were already exponential: the settle is a critically
+damped spring (`SPRING_DAMPING = 2 * Math.sqrt(SPRING_STIFFNESS)`), which is the
+exact boundary at which the error decays exponentially with no overshoot — fast
+while the gap is large, easing itself into the sector as it closes.
 
 Colours come from four dedicated tokens — `--mesh-node-rgb`, `--mesh-node-hi-rgb`,
 `--mesh-glow-rgb`, `--mesh-line-rgb` — declared in `:root` and redefined *deeper*
@@ -1004,92 +1147,122 @@ counter-rotated every frame, so a transform animation on either would fight that
 and smear the wheel into a visible lag. Their children are not frame-driven and
 are safe. Reduced motion suppresses it.
 
-### The audio-reactive wave mesh
+### The wave mesh layer
 
 `.credits-wave-matrix` is a canvas the credits screen owns. It replaced the
-static `.credits-rotary-page::before` grid texture — on this page only. The
-site-wide `.ambient-dot-matrix` is untouched and still runs everywhere,
-including here, so credits deliberately carries two ambient layers.
+static `.credits-rotary-page::before` grid texture — **on this page only**. The
+site-wide `.ambient-dot-matrix` is untouched and still runs everywhere including
+here, so credits deliberately carries two ambient layers. Both are now calibrated
+to the same numbers (see the table above), which is what stops them reading as
+two unrelated effects stacked on top of each other.
 
-A mesh of grid nodes is displaced by two out-of-phase sine terms per axis, one
-keyed on the row and one on the column, so it shears and travels instead of
-breathing. Whole rows and columns are stroked as single paths (~60 per frame
-rather than ~2000 segments).
+What is specific to this layer, as opposed to the analysis that drives it:
 
-It is driven by the site's real Web Audio graph through the `AgoraAudio` facade,
-which now also exposes `getEnergy`, `getPulse`, `getSpectrum` and
-`SPECTRUM_BANDS`:
-
-* **`getSpectrum()`** splits the same `AnalyserNode` FFT into 8 log-spaced bands.
-  `getEnergy()` alone reduces the track to one bass-weighted number, which is
-  right for the dot matrix but too coarse for a mesh — every row would move
-  together and nothing would read as frequency. Log spacing because the
-  analyser's bins are linear in Hz while music is not. Bin 0 is skipped: it is DC
-  offset, not signal.
-* **Bass energy** drives amplitude (`spacing * (0.12 + energy * 0.22)`), stroke
-  alpha, and the glow on each node.
-* **Attack is faster than release** (`0.42` vs `0.11`) so the mesh snaps onto a
-  beat and eases off it — that asymmetry is what makes a visual read as driven by
-  sound rather than merely moving at the same time as it.
-* **A node must land in the same place from either pass.** Rows and columns are
-  stroked separately over the same grid, so if displacement depended on which
-  pass reached it, the mesh would tear at every intersection. `bandAt(row, column)`
-  blends the row's band with the column's, making displacement a pure function of
-  `(row, column)`.
-* **Glowing nodes** are a wide faint halo plus a tight bright core — two cheap
-  arcs. `shadowBlur` reads better and costs far too much at ~220 nodes a frame,
-  which is why nodes are drawn on every *other* intersection rather than every one.
-* **Silence still moves.** With the music off, energy and bands are zero and the
-  amplitude floor (`0.12`) keeps the mesh drifting, so there is no separate idle
-  path to keep in sync. Stopping the track decays the bands by `0.9` per frame
-  rather than zeroing them.
-* **Colours come from `--violet-soft-rgb` / `--blue-rgb`**, so the mesh follows
-  the active theme; a `prefers-color-scheme` flip re-reads them. Alpha is capped
-  by `Math.min` per pass (0.13 strokes, 0.10 cross-strokes, 0.22 node peak)
-  because however hard the track hits, the mesh sits *behind* the copy.
+* **One position buffer, three consumers.** `computeGrid()` fills a shared
+  `Float32Array` once per frame; the row pass, the column pass and the node pass
+  all read it. Rows and columns are stroked separately over the same grid, so if
+  displacement depended on which pass reached a node the mesh would tear at every
+  intersection. This used to be enforced by a `bandAt(row, column)` helper that
+  blended the row's band with the column's to make displacement a pure function
+  of `(row, column)`; sharing one buffer makes the agreement structural instead,
+  and halves the trigonometry.
+* **Whole rows and columns are single paths** — ~60 `stroke()` calls a frame
+  rather than ~2000 segments.
+* **Glowing nodes** are blitted from the pre-rendered sprite on every *other*
+  intersection (~220 a frame instead of ~870), which is the difference between
+  smooth and stuttered on a phone.
+* **Silence still moves.** With the music off every band is zero and the idle
+  shear floor (0.26 of a cell) keeps the mesh drifting, so there is no separate
+  idle path to keep in sync. Every audio- and scroll-driven term is *multiplied*
+  by its driver, which is what makes silence cancel them exactly rather than
+  leaving a residual wobble that reads as the mesh ignoring the mute button.
+  Stopping the track decays the bands by `0.9` per frame rather than zeroing them.
 * **`prefers-reduced-motion` gets one static frame and no loop** — audio
   reactivity is disabled with it, deliberately: the preference is about motion,
-  and a mesh pulsing to a beat is motion.
+  and a mesh pulsing to a beat is motion. The wheel driver makes the same bargain.
 * **Pixel ratio is capped at `1.75`**, like the dot matrix.
 * **It is page-scoped and removable.** `bootPage()` re-runs per PJAX swap and
   `body.className` is replaced, so the canvas and its listeners are torn down on
-  the way out and the draw loop stops itself once `!canvas.isConnected`.
-* **It reads the facade every frame**, not once at init, and degrades to its
-  silent drift if the facade is missing or an older shape — a cached `app.js` or
-  a browser with no `AudioContext` must not throw.
+  the way out and the draw loop stops itself once `!canvas.isConnected`. The dot
+  matrix now carries the same guard.
+* **It reads the analysis every frame**, not once at init, and degrades to its
+  silent drift if the facade is missing, older than `getBands()`, or throws — a
+  cached `app.js` or a browser with no `AudioContext` must not take the canvas
+  down with it. `readBands()` lives at module scope so the dot matrix and the
+  wheels degrade identically rather than each inventing their own guard.
+
+`getSpectrum()` (8 log-spaced bands, bin 0 skipped as DC offset) is still on the
+facade and still tested, but the mesh no longer consumes it — the six band
+metrics above replaced it, because "one bass-weighted number per band" cannot
+express an onset or a dominant pitch.
 
 ### Verifying the screen
 
-There is no browser in CI and jsdom performs no layout, so placement is proved
-two ways:
+There is no browser in CI and jsdom performs no layout, so the screen is proved
+three ways:
 
 ```bash
-npm test                        # 138 tests, incl. CreditsRotaryGeometry,
+npm test                        # 163 tests, incl. CreditsRotaryGeometry,
                                 # CreditsWaveMatrix, CreditsScrollPhysics,
-                                # CreditsWaveAudioReactivity
-node /tmp/wh/behaviour.js       # 71 behavioural checks, needs jsdom
+                                # CreditsWaveAudioReactivity, CreditsBackdrop,
+                                # CreditsAudioBands
+node /tmp/wh/behaviour.js       # 78 behavioural checks, needs jsdom
+python3 /tmp/_mc4.py            # 54 mutations, all must be killed
 ```
 
 `CreditsRotaryGeometry` does not eyeball anything: it reads `--segment-angle`,
 `--sector-offset`, `--rotary-disc-size`, each disc's `translate()`, and the rim
 labels' own `clamp()`/`min()` chains back out of the stylesheet on disk, then
 recomputes every landing box, every rim clearance and the visible wheel fraction
-across 14 viewports. The behavioural harness runs the real `app.js` in jsdom with
-a stubbed 2d context **and a stubbed Web Audio graph**, so it exercises
-`AnalyserNode` -> `getSpectrum()` -> mesh displacement end to end: it starts the
-track, feeds a bass-heavy FFT, and measures that the mesh's y-spread grows (path
-*length* is a useless proxy — doubling a sine's amplitude lengthens the path by
-only a few percent), that the nodes brighten, that the strokes stay under their
-ceiling, and that stopping the track decays the bands. It also flings the wheel
-and asserts the rotation trace never reverses direction, peaks under the velocity
-ceiling, and lands on an exact multiple of 120.
+across 14 viewports.
 
-Both suites are mutation-tested: re-introduced regressions — a sign renumbered
-out of its segment, an angle drifted one degree, a hardcoded array restored, a
-hub moved to the wrong corner, the wheels made to intersect, the clip restored, a
-hardcoded stroke colour, the damping detuned from critical, the settle lock
-reverted to the pre-integration error, the teardown removed — are each caught by
-the guard named for it.
+The behavioural harness runs the real `app.js` in jsdom with a stubbed 2D context
+and a stubbed Web Audio graph — and that stub is **conductable**: loudness, the
+dominant bin and the spectral width are all variables, so the harness can feed a
+bass-heavy spectrum, then move the peak into the treble, then silence it and
+strike a note. That is what lets it assert the analysis rather than merely that
+it ran: `bass` rises on a bass-heavy spectrum, `treble` overtakes it when the
+peak moves, `pitch` follows the dominant bin, an onset spikes and then decays
+while the note sustains, and `fftSize`/`smoothingTimeConstant` really were set on
+the analyser rather than only appearing in the source.
+
+Two harness details are load-bearing and non-obvious:
+
+* **`pump()` alone is not enough to watch the bands move.** `computeBands()`
+  caches for 8ms of *real* time so three consumers asking in one tick do not
+  triple the work, so a synchronous pump recomputes the analysis exactly once no
+  matter how many frames it runs and every attack/release coefficient looks like
+  it never fired. Anything measuring change over time goes through `settle()`,
+  which interleaves wall-clock waits.
+* **Measure row strokes, not all strokes.** A column polyline spans the whole
+  viewport height, so its `minY..maxY` is its own extent and buries any ripple;
+  a row's vertical extent *is* the displacement. Filtering rows is what makes the
+  scroll-ripple check sensitive enough to see a 15% growth. (Path *length* is
+  worse than useless as a proxy: doubling a sine's amplitude lengthens it by only
+  a few percent, because the span dominates.)
+
+The scroll coupling is proved with the music **stopped**: the wheel is flung, and
+the mesh's row spread has to grow and then decay back to calm once the wheel
+locks. The wheel physics are checked separately — the rotation trace lands on an
+exact multiple of 120 for all three contributors and back again.
+
+Both suites are mutation-tested. The 54 mutations in `_mc4.py` cover this round's
+surface specifically: the fft size and smoothing restored to their old values, a
+band edge moved, the bin maths hardcoded to 44.1kHz, the DC bin read as signal,
+onset turned back into a level, the sensitivity curve removed, pitch mapped
+linearly, the per-frame cache deleted, either canvas's brightness band lifted,
+the column pass dropped, a driven term detached from its driver, the physics loop
+stop publishing its velocity, the ripple's decay or direction removed, the wheel
+driver un-started / double-started / left running on a detached wheel / still
+pulsing under reduced motion, and — the one that matters most — a `transform`
+added to `.rotary-disc__sector-track`, which is how the locked copy coordinates
+would silently start moving.
+
+Three of those mutations survived the first run and each one was a real gap, not
+a bad mutation: the dot matrix's driven terms were only asserted on the wave
+mesh, the spoke flare had no assertion at all, and the dashed ring's flare was
+"guarded" by an `assertIn` for a keyword that the same rule's border-color also
+satisfied.
 
 
 ## Notes

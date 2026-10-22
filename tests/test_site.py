@@ -763,7 +763,18 @@ class ThemeContrast(unittest.TestCase):
         1.32:1 as shipped and that palette is pinned by test_theme_contract.
         """
         floors = {"dark": 1.25, "light": 3.0}
-        alpha = 0.88  # as authored on .rotary-sign / .rotary-name-tag
+        # Parsed from the rule instead of hardcoded. The resting alpha is now the
+        # floor of a calc() that an audio-driven treble glint lifts, and a literal
+        # 0.88 here would keep passing if someone lowered the resting value --
+        # which is the whole thing this test exists to catch.
+        sign_rule = re.search(r"\.rotary-sign,\s*\.rotary-name-tag \{([^}]+)\}", self.css)[1]
+        authored = re.search(r"border: 1px solid rgba\(var\(--rim-rgb\),\s*calc\(([\d.]+)",
+                             sign_rule)
+        self.assertIsNotNone(authored,
+                             "the rim border is no longer a calc() off --rim-rgb")
+        alpha = float(authored.group(1))
+        self.assertGreaterEqual(alpha, 0.88,
+                                "the RESTING rim dropped below its measured contrast")
         for name, theme in (("dark", self.dark), ("light", self.light)):
             self.assertIn("--rim-rgb", theme, f"{name}: rim channel missing")
             rim = tuple(int(x) for x in theme["--rim-rgb"].split(","))
@@ -782,10 +793,8 @@ class ThemeContrast(unittest.TestCase):
 
         # And the component must consume the channel, not a colour token that
         # would invert underneath it.
-        sign = re.search(r"\.rotary-sign,\s*\.rotary-name-tag \{([^}]+)\}",
-                         self.css)[1]
-        self.assertIn("border: 1px solid rgba(var(--rim-rgb), 0.88)", sign)
-        self.assertNotIn("var(--lavender-rgb)", sign)
+        self.assertIn("rgba(var(--rim-rgb)", sign_rule)
+        self.assertNotIn("var(--lavender-rgb)", sign_rule)
 
     def test_select_chevron_clears_non_text_minimum(self):
         """The chevron is an inline SVG, so its stroke cannot hold var() and the
@@ -2659,46 +2668,40 @@ class CreditsWaveMatrix(unittest.TestCase):
                          "every stroke pass must be capped, one Math.min each")
         return caps
 
-    def test_the_mesh_is_prominent_by_design(self):
-        """This is the inverse of the rule this file used to assert.
+    def test_the_mesh_lines_are_calibrated_into_their_band(self):
+        """0.15 at rest, 0.20 at the very most.
 
-        The previous contract was "stay under 0.13 alpha because it sits behind
-        the copy". The review looked at that and called it too faint, so the
-        FLOOR is now the interesting number: a silent mesh has to read at 0.28,
-        and a crest may go to 0.45. The ceiling still exists -- a loud track
-        must not be able to push a line past it -- it just moved up.
+        This is the third contract this file has carried for the same two
+        numbers: first "under 0.13, stay subtle", then "at least 0.28, be
+        prominent", now a narrow calibrated band between them. The ceiling is
+        what makes it safe to drive the mesh from audio at all -- however hard
+        the track hits, a line cannot leave the band and compete with the copy.
         """
         caps = self._stroke_caps()
         rows = max(caps)                      # the brighter of the two passes
-        self.assertGreaterEqual(rows[1], 0.28,
-                                "a silent mesh must still read as present")
-        self.assertLessEqual(rows[0], 0.45,
-                             "a loud track must not blow the mesh past its cap")
-        self.assertLessEqual(min(caps)[0], 0.38,
-                             "columns sit a step below rows so the grid keeps depth")
-        amp = re.search(r"spacing \* \((0\.\d+) \+ \(energy \* (0\.\d+)\)\)",
-                        self.body)
-        self.assertIsNotNone(amp, "the idle amplitude is no longer expressed in cells")
-        self.assertGreaterEqual(float(amp.group(1)), 0.26,
-                                "the undulation must be obvious with the music paused")
-        self.assertLess(float(amp.group(1)) + float(amp.group(2)), 1.0,
-                        "past one cell the lines cross and read as tearing")
+        self.assertEqual(rows[1], 0.15, "a resting line must read at 0.15")
+        self.assertEqual(rows[0], 0.2, "and can never exceed 0.20")
+        columns = min(caps)
+        self.assertEqual(columns[1], 0.15)
+        self.assertLessEqual(columns[0], 0.2, "columns stay inside the same band")
+        self.assertLess(columns[0], rows[0],
+                        "columns sit a step below rows so the grid keeps depth")
 
-    def test_the_glowing_nodes_use_the_requested_size_ramp(self):
-        """Nodes follow the same ramp the dot matrix does -- 2px at rest up to
-        4.5px at full audio heat -- so the two layers read as one material
-        rather than as a grid with unrelated stars on it."""
-        radius = re.search(r"Math\.min\((4\.\d+), 2 \+ \(heat \* (\d+\.\d+)\)\)",
+    def test_the_glowing_nodes_share_the_matrix_calibration(self):
+        """Nodes follow the same ramp the dot matrix does -- 1.5px at rest up to
+        2.2px, 0.25 to 0.35 alpha -- so the two layers read as one material rather
+        than as a grid with unrelated stars on it."""
+        radius = re.search(r"Math\.min\(([\d.]+), 1\.5 \+ \(heat \* ([\d.]+)\)\)",
                            self.body)
         self.assertIsNotNone(radius, "the node radius ramp changed shape")
-        self.assertEqual(float(radius.group(1)), 4.5)
-        # Full heat has to actually REACH that ceiling, or the cap is decoration.
-        self.assertGreaterEqual(2 + float(radius.group(2)), 4.5,
-                                "a node at full audio heat never reaches 4.5px")
-        alpha = re.search(r"Math\.min\((0\.\d+), 0\.7 \+ \(heat \* (0\.\d+)\)\)",
+        self.assertEqual(float(radius.group(1)), 2.2)
+        # Full heat has to actually REACH the ceiling, or the cap is decoration.
+        self.assertGreaterEqual(1.5 + float(radius.group(2)), 2.2 - 1e-9,
+                                "a node at full heat never reaches 2.2px")
+        alpha = re.search(r"Math\.min\(([\d.]+), 0\.25 \+ \(heat \* ([\d.]+)\)\)",
                           self.body)
         self.assertIsNotNone(alpha, "the node alpha ramp changed shape")
-        self.assertGreaterEqual(float(alpha.group(1)), 0.9)
+        self.assertEqual(float(alpha.group(1)), 0.35)
         self.assertIn("drawGlow(context, nodeSprite, palette.node", self.body,
                       "nodes must be blitted from the shared sprite")
 
@@ -2714,14 +2717,20 @@ class CreditsWaveMatrix(unittest.TestCase):
         self.assertIn("createRadialGradient(", self.app)
         # Both canvases must rebuild their sprite when the palette does, or the
         # nodes keep glowing in the previous theme's colour after a scheme flip.
-        self.assertIn("nodeSprite = makeGlowSprite(palette.node, palette.glow);", self.app)
-        # A COUNT, not assertIn: the dot matrix also builds its sprites once at
-        # init, and that line alone satisfies a substring check -- so deleting
-        # only the rebuild-on-scheme-flip used to survive.
+        self.assertIn("nodeSprite = makeGlowSprite(palette.node, palette.glow, 0.7);", self.app)
         self.assertEqual(self.app.count("sprites = buildSprites(palette);"), 2,
                          "one build at init and one on every scheme flip")
-        self.assertEqual(self.app.count("makeGlowSprite(palette.node, palette.glow)"), 2,
-                         "one rebuild per canvas")
+        self.assertEqual(self.app.count(", DOT_GLOW_BLOOM)"), 2,
+                         "one sprite per dot colour")
+        # Both the init call and the scheme-flip rebuild must carry the SAME
+        # bloom. This caught a real drift: the rebuild had lost its third
+        # argument, so flipping light/dark silently gave the mesh nodes a much
+        # heavier glow than they were calibrated for.
+        self.assertEqual(self.app.count("makeGlowSprite(palette.node, palette.glow, 0.7)"), 2,
+                         "the sprite's init and its rebuild disagree about bloom")
+        self.assertIn("function makeGlowSprite(coreRgb, glowRgb, bloom)", self.app)
+        bloom = float(re.search(r"var DOT_GLOW_BLOOM = ([\d.]+);", self.app).group(1))
+        self.assertLess(bloom, 1.0, "the matrix dots are calibrated for minimal glow")
 
     def test_reduced_motion_gets_one_frame_and_no_loop(self):
         self.assertIn("if (!reduceMotion()) window.requestAnimationFrame(draw);", self.body,
@@ -2753,6 +2762,8 @@ class CreditsBackdrop(unittest.TestCase):
         cls.css = (ROOT / "style.css").read_text()
         cls.app = (ROOT / "app.js").read_text()
         cls.root = cls.css.split(":root {", 1)[1].split("\n}", 1)[0]
+        cls.dots = cls.app.split("function initDotMatrix()", 1)[1].split(
+            "\n  function initCreditsRotary", 1)[0]
         i = cls.css.index("@media (prefers-color-scheme: light) {")
         cls.light = cls.css[i:].split("\n}", 1)[0]
 
@@ -2824,23 +2835,41 @@ class CreditsBackdrop(unittest.TestCase):
             self.assertIn(name, self.app)
 
     # --- the size and brightness contract -------------------------------
-    def test_the_dot_matrix_uses_the_requested_size_ramp(self):
-        """2px at rest, 3.5px across the wave, 4.5px on an audio peak, and alpha
-        0.75 to 0.95 -- the review's numbers. Both are ceilinged, so a loud track
-        cannot grow a dot past the range it was designed for."""
+    def test_the_dot_matrix_stays_inside_its_calibration(self):
+        """1.5px at rest to 2.2px, 0.25 alpha at rest to 0.30, nudging toward 0.35
+        only on a sharp transient. Both are ceilinged with Math.min so a loud
+        track cannot grow a dot past the range it was calibrated for -- the point
+        of the ceiling is that the grid never overpowers the foreground UI."""
         radius = re.search(
-            r"Math\.min\((4\.\d+), 2 \+ \(wave \* (\d+\.\d+)\) \+ \(pulse \* (\d+)\)\)",
-            self.app)
+            r"Math\.min\(([\d.]+), 1\.5 \+ \(w \* ([\d.]+)\) \+ \(b\.bass \* ([\d.]+)\)\)",
+            self.dots)
         self.assertIsNotNone(radius, "the dot radius ramp changed shape")
-        self.assertEqual(float(radius.group(1)), 4.5)
-        self.assertEqual(2 + float(radius.group(2)), 3.5,
-                         "a full wave should reach 3.5px before any audio")
+        self.assertEqual(float(radius.group(1)), 2.2)
+        self.assertLessEqual(1.5 + float(radius.group(2)) + float(radius.group(3)),
+                             2.2 + 1e-9, "the ramp can overshoot its own ceiling")
         alpha = re.search(
-            r"Math\.min\((0\.\d+), (0\.\d+) \+ \(wave \* (0\.\d+)\) \+ \(pulse \* (0\.\d+)\)\)",
-            self.app)
+            r"Math\.min\(([\d.]+),\s*0\.25 \+ \(w \* ([\d.]+)\) \+ \(b\.onset \* ([\d.]+)\)"
+            r" \+ \(b\.treble \* ([\d.]+)\)\)", self.dots)
         self.assertIsNotNone(alpha, "the dot alpha ramp changed shape")
-        self.assertEqual(float(alpha.group(1)), 0.95)
-        self.assertEqual(float(alpha.group(2)), 0.75, "a resting dot must read at 0.75")
+        self.assertEqual(float(alpha.group(1)), 0.35, "the transient ceiling moved")
+        self.assertEqual(float(alpha.group(2)), 0.05,
+                         "the idle wave alone should only reach 0.30")
+
+    def test_the_dot_matrix_interconnects_every_node(self):
+        """Every dot is joined to its right and lower neighbour so the grid is
+        continuous in both directions -- built as ONE path (all rows, then all
+        columns) rather than a segment per pair, which is a single stroke call
+        instead of several thousand for the same picture."""
+        draw = self.dots.split("function draw(timestamp)", 1)[1]
+        self.assertEqual(draw.count("context.beginPath();"), 1)
+        self.assertEqual(draw.count("context.stroke();"), 1)
+        self.assertEqual(draw.count("context.moveTo("), 2, "a row pass and a column pass")
+        self.assertEqual(draw.count("context.lineTo("), 2)
+        line = re.search(r"Math\.min\(([\d.]+), ([\d.]+) \+ \(b\.treble", draw)
+        self.assertIsNotNone(line, "the mesh line opacity changed shape")
+        self.assertEqual(float(line.group(2)), 0.15, "a resting line must read at 0.15")
+        self.assertEqual(float(line.group(1)), 0.2, "and can never exceed 0.20")
+        self.assertIn("palette.line", draw, "the lines must use the mesh line channel")
 
     def test_both_canvases_stay_passive_fixed_layers(self):
         """However bright they get, they must cover the viewport and never eat a
@@ -3000,7 +3029,13 @@ class CreditsWaveAudioReactivity(unittest.TestCase):
     def setUpClass(cls):
         cls.app = (ROOT / "app.js").read_text()
         cls.audio = cls.app.split("var SPECTRUM_BANDS =", 1)[1].split("window.AgoraAudio = {", 1)[0]
-        cls.mesh = cls.app.split("function initWaveMatrix()", 1)[1].split("\n  function bootPage", 1)[0]
+        # Bounded by initWheelReactivity, not bootPage: the wheel driver was
+        # inserted between them, and letting it leak into cls.mesh would make
+        # every "the mesh does X" assertion pass on the wrong function.
+        cls.mesh = cls.app.split("function initWaveMatrix()", 1)[1].split("var wheelReactivityCleanup", 1)[0]
+        cls.wheel = cls.app.split("function initWheelReactivity()", 1)[1].split("function bootPage", 1)[0]
+        cls.dots = cls.app.split("function initDotMatrix()", 1)[1].split(
+            "\n  function initCreditsRotary", 1)[0]
         cls.facade = cls.app.split("window.AgoraAudio = {", 1)[1].split("};", 1)[0]
 
     def test_the_facade_exposes_a_spectrum_tap(self):
@@ -3008,7 +3043,8 @@ class CreditsWaveAudioReactivity(unittest.TestCase):
         the audio graph, and a second graph would drift out of sync with the track
         that is actually playing."""
         for member in ("getEnergy: getEnergy", "getPulse: getPulse",
-                       "getSpectrum: getSpectrum", "SPECTRUM_BANDS: SPECTRUM_BANDS"):
+                       "getSpectrum: getSpectrum", "getBands: getBands",
+                       "SPECTRUM_BANDS: SPECTRUM_BANDS"):
             with self.subTest(member=member):
                 self.assertIn(member, self.facade)
         self.assertIn("get isPlaying()", self.facade, "the existing facade lost a member")
@@ -3046,51 +3082,376 @@ class CreditsWaveAudioReactivity(unittest.TestCase):
         """The mesh is rebuilt on each PJAX swap while the audio graph is built
         once per session, and the track can start or stop at any moment."""
         draw = self.mesh.split("function draw(timestamp)", 1)[1]
-        self.assertIn("readAudio()", draw, "the draw loop never consults the audio")
-        self.assertIn("api.getEnergy()", draw)
-        self.assertIn("api.getSpectrum()", draw)
-        self.assertNotIn("readAudio();\n    resize();", self.mesh,
+        self.assertIn("readBands()", draw, "the draw loop never consults the audio")
+        self.assertIn("readSpin(timestamp)", draw, "the draw loop never consults the wheel")
+        self.assertIn("computeGrid(time, b, spinWave, spinDir);", draw,
+                      "positions must be rebuilt every frame, not cached at init")
+        self.assertNotIn("readBands();\n    resize();", self.mesh,
                          "audio is being sampled once at init")
 
     def test_the_mesh_degrades_when_the_facade_is_missing_or_older(self):
-        """A browser with no AudioContext, or a cached older app.js, must not
-        throw -- the mesh just keeps breathing on its own."""
-        guard = self.mesh.split("function readAudio()", 1)[1].split("\n    }", 1)[0]
-        self.assertIn("typeof api.getEnergy !== 'function'", guard)
-        self.assertIn("typeof api.getSpectrum !== 'function'", guard)
-        self.assertIn("return null", guard)
-        self.assertIn("api ? clamp(api.getEnergy(), 0, 1) : 0", self.mesh)
-        self.assertIn("api ? api.getSpectrum() : null", self.mesh)
+        """A browser with no AudioContext, or a cached older app.js that predates
+        getBands(), must not throw -- the mesh just keeps breathing on its own.
+        The guard moved out of the mesh to module scope so the dot matrix and the
+        wheels degrade the same way instead of each inventing their own."""
+        guard = self.app.split("function readBands()", 1)[1].split("\n  }", 1)[0]
+        self.assertIn("typeof api.getBands !== 'function'", guard,
+                      "an older facade without getBands would throw")
+        self.assertIn("return IDLE_BANDS", guard)
+        self.assertIn("catch (error)", guard,
+                      "a throwing facade must not take the canvas down with it")
+        # The idle object has to carry every key the consumers read, or a silent
+        # page throws on the first frame instead of drawing a calm grid.
+        idle = self.app.split("var IDLE_BANDS = {", 1)[1].split("};", 1)[0]
+        for key in ("bass", "mid", "treble", "onset", "pitch", "centroid"):
+            with self.subTest(key=key):
+                self.assertIn(key, idle, f"IDLE_BANDS is missing {key}")
 
     def test_silence_still_moves_the_mesh(self):
         """With the music off, energy and bands are zero -- the amplitude floor is
         what keeps the background alive instead of frozen."""
-        floor = float(re.search(r"spacing \* \(([\d.]+) \+ \(energy", self.mesh).group(1))
-        self.assertGreater(floor, 0, "the mesh is static until the music starts")
-        # This used to assert "stay subtle" (< 0.2 of a cell). The review called
-        # the result too faint, so the silent drift is now deliberately obvious;
-        # the ceiling that matters is one full cell, past which the lines cross.
-        self.assertGreaterEqual(floor, 0.26, "the silent mesh must visibly undulate")
-        self.assertLess(floor, 1.0, "past one cell the lines cross and read as tearing")
+        shears = [float(x) for x in re.findall(r"\* spacing \* ([\d.]+);", self.mesh)]
+        self.assertTrue(shears, "the idle shear disappeared")
+        self.assertGreaterEqual(min(shears), 0.26, "the silent mesh must visibly undulate")
+        self.assertLess(min(shears), 1.0, "past one cell the lines cross and read as tearing")
+        # Every audio- and scroll-driven term must be MULTIPLIED by its driver, so
+        # silence cancels it exactly instead of leaving a residual wobble that
+        # reads as the mesh ignoring the mute button.
+        # Checked in BOTH canvases: the dot matrix has its own set of these
+        # terms, and asserting only the wave mesh let its bass coupling be
+        # deleted without any test noticing.
+        for term, driver in (("swellK", "b.bass"), ("midK", "b.mid"),
+                             ("rippleK", "b.treble"), ("jumpK", "b.onset"),
+                             ("swirlK", "spinWave")):
+            for name, region in (("wave mesh", self.mesh), ("dot matrix", self.dots)):
+                if term == "midK" and region is self.dots:
+                    continue          # the matrix has no separate mid term
+                with self.subTest(term=term, canvas=name):
+                    self.assertRegex(region, term + r" = [^;]*\* " + re.escape(driver),
+                                     f"{name}: {term} is no longer driven by {driver}")
 
     def test_a_grid_node_lands_in_the_same_place_from_either_pass(self):
         """Rows and columns are stroked as separate passes over the same nodes. If
         the displacement depended on which pass reached it, the mesh would tear at
-        every intersection -- so both passes (and the node pass) must go through
-        one shared function of (row, column)."""
-        # Count the CALL form: `function bandAt(row, column, bands)` is itself a
-        # match for the bare pattern, which is how this asserted 4 instead of 3.
-        self.assertEqual(self.mesh.count("= bandAt(row, column, bands);"), 3,
-                         "row pass, column pass and node pass must all agree")
-        body = self.mesh.split("function bandAt(row, column, bands)", 1)[1].split("\n    }", 1)[0]
-        self.assertIn("bands[row % bands.length]", body)
-        self.assertIn("bands[column % bands.length]", body)
-        self.assertIn("if (!bands || !bands.length) return 0;", body,
-                      "the silent case must not divide by an empty spectrum")
+        every intersection.
 
-    def test_the_nodes_are_lit_by_the_spectrum(self):
+        This used to be enforced by bandAt(), a function whose entire job was to
+        make the displacement a pure function of (row, column) so the two passes
+        agreed. Positions are now computed ONCE per frame into a shared
+        Float32Array that the row pass, the column pass and the node pass all
+        read, which makes agreement structural rather than something two
+        functions have to be careful about -- so assert the structure.
+        """
+        self.assertEqual(self.mesh.count("computeGrid(time, b, spinWave, spinDir);"), 1,
+                         "positions must be computed exactly once per frame")
+        self.assertIn("pts = new Float32Array(rows * columns * 2);", self.mesh)
+        self.assertGreaterEqual(self.mesh.count("points.push(pts["), 2,
+                                "both stroke passes must read the shared buffer")
+        self.assertIn("glowNode(pts[q], pts[q + 1]", self.mesh,
+                      "the node pass must read the same buffer too")
+        prose = "nodeX()/nodeY()/bandAt()"
+        self.assertNotIn("bandAt(", self.mesh.replace(prose, ""),
+                         "the agreement helper is back; the shared buffer replaced it")
+
+    def test_the_nodes_are_lit_by_bass_and_onset(self):
         node_loop = self.mesh.split("for (row = 0; row < rows; row += 2)", 1)[1]
         self.assertIn("glowNode(", node_loop)
-        self.assertIn("band * 0.7", node_loop, "the nodes ignore the spectrum")
-        self.assertIn("energy * 0.45", node_loop, "the nodes ignore the bass energy")
-        self.assertIn("row += 2", self.mesh, "every intersection is drawn; that is ~900 arcs a frame")
+        self.assertIn("b.bass * 0.5", node_loop, "the nodes ignore the bass")
+        self.assertIn("b.onset * 0.5", node_loop, "the nodes ignore a piano attack")
+        self.assertIn("row += 2", self.mesh,
+                      "every intersection is drawn; that is ~870 blits a frame")
+
+
+class CreditsAudioBands(unittest.TestCase):
+    """Bass, mid, treble, onset and pitch -- the analysis that drives both the
+    mesh and the wheels -- plus the scroll coupling and the invariant that none
+    of it may move the contributor copy.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = (ROOT / "app.js").read_text()
+        cls.css = (ROOT / "style.css").read_text()
+        cls.audio = cls.app.split("var SPECTRUM_BANDS =", 1)[1].split(
+            "window.AgoraAudio = {", 1)[0]
+        cls.physics = cls.app.split("function initCreditsRotary()", 1)[1].split(
+            "function initWaveMatrix()", 1)[0]
+        cls.wheel = cls.app.split("function initWheelReactivity()", 1)[1].split(
+            "function bootPage", 1)[0]
+        cls.mesh = cls.app.split("function initWaveMatrix()", 1)[1].split(
+            "var wheelReactivityCleanup", 1)[0]
+        cls.dots = cls.app.split("function initDotMatrix()", 1)[1].split(
+            "\n  function initCreditsRotary", 1)[0]
+
+    def num(self, name, region=None):
+        m = re.search(r"var " + name + r" = (-?[\d.]+);", region or self.app)
+        self.assertIsNotNone(m, f"{name} is gone")
+        return float(m.group(1))
+
+    # --- 1. the analyser itself ------------------------------------------
+    def test_the_analyser_is_tuned_for_pitch_and_transients(self):
+        """2048 for pitch resolution and 0.35 smoothing for transients.
+
+        At the old fftSize 128 a bin was ~344Hz wide, so the whole 20-200Hz bass
+        band was a single bin and a dominant-pitch reading was meaningless. And
+        the analyser's smoothing is a running average over previous frames, which
+        is exactly what turns a piano keystroke into a slow swell -- 0.9 meant a
+        strike arrived several frames late.
+        """
+        self.assertIn("analyser.fftSize = 2048;", self.app)
+        smoothing = float(re.search(
+            r"analyser\.smoothingTimeConstant = ([\d.]+);", self.app).group(1))
+        self.assertEqual(smoothing, 0.35)
+        self.assertLess(smoothing, 0.5, "a keystroke would arrive frames late")
+        self.assertGreater(smoothing, 0.0,
+                           "zero makes the visuals jitter per sample, not per note")
+        # The data array is sized from the analyser, so the fftSize change cannot
+        # leave it reading half a spectrum or overrunning.
+        self.assertIn("new Uint8Array(analyser.frequencyBinCount)", self.app)
+
+    # --- 2. band edges ----------------------------------------------------
+    def test_band_edges_are_hz_converted_from_the_real_sample_rate(self):
+        """Declared in Hz and converted using the context's actual sample rate.
+
+        Hardcoding bin indices is how a "bass" band silently becomes a low-mid
+        band: bin 9 is 194Hz at 44.1kHz and 211Hz at 48kHz, and nothing about the
+        visuals would tell you the difference.
+        """
+        want = {"BAND_BASS_HZ": (20, 200), "BAND_MID_HZ": (200, 3200),
+                "BAND_TREBLE_HZ": (3200, 12000)}
+        edges = {}
+        for name, expected in want.items():
+            m = re.search(name + r" = \[(\d+), (\d+)\];", self.app)
+            self.assertIsNotNone(m, f"{name} is gone")
+            edges[name] = (int(m.group(1)), int(m.group(2)))
+            self.assertEqual(edges[name], expected, f"{name} moved off spec")
+        # Contiguous: no gap and no double-counted overlap between bands.
+        self.assertEqual(edges["BAND_BASS_HZ"][1], edges["BAND_MID_HZ"][0])
+        self.assertEqual(edges["BAND_MID_HZ"][1], edges["BAND_TREBLE_HZ"][0])
+
+        builder = self.app.split("function buildBandBins(binCount)", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("audio.context.sampleRate", builder, "the rate is assumed, not read")
+        self.assertIn("audio.analyser.fftSize", builder, "the fft size is assumed, not read")
+        self.assertIn("Math.round((hz * fft) / rate)", builder)
+        self.assertIn("if (b < 1) return 1;", builder, "bin 0 is DC offset, not signal")
+
+    # --- 3. onset ---------------------------------------------------------
+    def test_onset_is_a_rise_not_a_level(self):
+        """A piano note striking is a CHANGE in mid energy, not a level. Reading
+        the level would make a sustained chord look like a permanent attack and a
+        soft keystroke look like nothing at all."""
+        self.assertIn("Math.max(0, rawMid - previousMid)", self.audio,
+                      "a decaying note must never read as an attack")
+        self.assertIn("previousMid = rawMid;", self.audio, "the previous frame is never stored")
+        self.assertGreaterEqual(self.num("ONSET_GAIN", self.audio), 4.0,
+                                "a soft keystroke has to register")
+        decay = self.num("ONSET_DECAY", self.audio)
+        self.assertLess(decay, 1.0, "the spike would never fade")
+        self.assertGreater(decay, 0.5, "one frame is shorter than the eye can register")
+        # Held by an envelope, so the spike outlasts the sample window that saw it.
+        self.assertIn("bands.onset = Math.max(clamp(rise * ONSET_GAIN, 0, 1),"
+                      " bands.onset * ONSET_DECAY)", self.audio)
+
+    # --- 4. the sensitivity curve ----------------------------------------
+    def test_the_sensitivity_curve_lifts_quiet_passages(self):
+        """Music sits far below full scale in a byte spectrum: a quiet piano
+        passage averages around 0.1, which mapped linearly produces almost no
+        movement and reads as broken rather than quiet."""
+        exponent = self.num("SENSITIVITY_EXPONENT", self.audio)
+        self.assertLess(exponent, 1.0, "an exponent >= 1 would not lift the low end")
+        self.assertGreater(exponent, 0.3, "below this everything saturates")
+        # The curve has to actually do the job it is here for.
+        self.assertGreater(0.1 ** exponent, 0.2,
+                           "a quiet passage at 0.1 still maps to almost nothing")
+        self.assertIn("Math.pow(clamp(value, 0, 1), SENSITIVITY_EXPONENT)", self.audio)
+        for name in ("BASS_GAIN", "MID_GAIN", "TREBLE_GAIN"):
+            self.assertGreater(self.num(name, self.audio), 1.0, f"{name} is not a gain")
+        # Treble carries the least energy, so it needs the most gain.
+        self.assertGreater(self.num("TREBLE_GAIN", self.audio),
+                           self.num("BASS_GAIN", self.audio))
+
+    # --- 5. pitch ---------------------------------------------------------
+    def test_pitch_is_the_dominant_bin_and_both_measures_are_log_scaled(self):
+        """The dominant bin makes the wave frequency and the ripple focal point
+        follow the melody. Both it and the centroid are reported on a log scale
+        because pitch perception is logarithmic -- a linear map would spend most
+        of its range on the top octave and a climbing melody would look pinned."""
+        self.assertIn("if (v > peak) { peak = v; peakBin = b; }", self.audio)
+        self.assertIn("Math.log(peakBin + 1)", self.audio)
+        self.assertIn("Math.exp(weighted / totalEnergy) - 1", self.audio,
+                      "the spectral centroid is gone")
+        self.assertIn("var logSpan = Math.log(hi + 1) - logLo;", self.audio)
+        self.assertIn("bands.pitch = clamp(", self.audio)
+        self.assertIn("bands.centroid = clamp(", self.audio)
+        # Both are normalised, so the canvas maths cannot be fed an out-of-range
+        # focal point by an unusual sample rate.
+        for out in ("bands.pitch", "bands.centroid"):
+            self.assertRegex(self.audio, out + r" = clamp\([^;]*, 0, 1\)")
+
+    # --- 6. once per frame ------------------------------------------------
+    def test_the_bands_are_computed_once_per_frame(self):
+        """Three consumers ask in the same tick. Recomputing would be wasteful,
+        but worse: the onset delta is frame-over-frame, so a second computation
+        in one tick would see a zero rise and halve the spike the mesh draws."""
+        self.assertIn("if (stamp - bands.computedAt < 8) return bands;", self.audio)
+        self.assertIn("bands.computedAt = stamp;", self.audio)
+        self.assertEqual(self.audio.count("getByteFrequencyData(audio.data)"), 2,
+                         "expected one call in computeBands and one in getSpectrum")
+
+    # --- 7. scroll coupling ----------------------------------------------
+    def test_scrolling_ripples_the_mesh_with_no_music_at_all(self):
+        """The wheel's angular velocity drives the grid even muted or paused. The
+        physics loop publishes it and the canvases read it back through a
+        module-level slot, because there is no call chain between the sections."""
+        self.assertIn("wheelSpin.velocity = state.rotationVelocity;", self.physics)
+        self.assertIn("wheelSpin.at = timestamp;", self.physics)
+        reader = self.app.split("function readSpin(now)", 1)[1].split("\n  }", 1)[0]
+        self.assertIn("Math.max(0, now - wheelSpin.at)", reader)
+        self.assertIn("Math.exp(-age / SPIN_DECAY_MS)", reader,
+                      "the ripple must decay smoothly, not stop dead")
+        # The decay exists because the physics loop STOPS when the wheel settles;
+        # without it the last ripple would freeze on screen forever.
+        self.assertGreater(self.num("SPIN_DECAY_MS"), 100,
+                           "too fast to read as the wheel calming down")
+        for name, region in (("wave mesh", self.mesh), ("dot matrix", self.dots)):
+            with self.subTest(canvas=name):
+                self.assertIn("readSpin(timestamp)", region)
+                self.assertIn("spinDir = spin < 0 ? -1 : 1", region,
+                              "the ripple must follow the spin's DIRECTION")
+                self.assertIn("clamp(Math.abs(spin) / SPIN_REFERENCE, 0, 1)", region,
+                              "the ripple must scale with the spin's MAGNITUDE")
+
+    # --- 8. the wheel driver ---------------------------------------------
+    def test_the_wheel_driver_outlives_the_physics_loop(self):
+        """The rotary's frame loop stops the instant the wheel settles, which is
+        right for the physics and useless for a bass pulse that has to keep
+        breathing on a stationary wheel. So the driver is its own loop."""
+        self.assertIn("function initWheelReactivity()", self.app)
+        self.assertIn("initWheelReactivity();", self.app, "never called from bootPage")
+        self.assertIn("doc.body.classList.contains('credits-rotary-page')", self.wheel)
+        self.assertIn("if (wheelReactivityCleanup) return;", self.wheel,
+                      "a PJAX swap that stays here must not stack a second loop")
+        self.assertIn("if (!doc.body.contains(discs[0])) { alive = false; return; }",
+                      self.wheel, "a detached wheel would be driven forever")
+        # Reduced motion: a bass-driven scale IS motion, so it gets the zeros
+        # written once and no loop at all.
+        quiet = self.wheel.split("if (reduceMotion()) {", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("write('0', '0', '0');", quiet)
+        self.assertIn("return;", quiet, "reduced motion must not start the loop")
+        # Teardown leaves the wheels static rather than frozen mid-pulse.
+        cleanup = self.wheel.split("wheelReactivityCleanup = function () {", 1)[1].split("\n    };", 1)[0]
+        self.assertIn("alive = false;", cleanup)
+        self.assertIn("write('0', '0', '0');", cleanup)
+        # Quantised. With the music off all three sit at 0, and an unquantified
+        # write would invalidate style on both wheels every frame forever.
+        self.assertIn("Math.round(b.bass * 255) / 255", self.wheel)
+        self.assertIn("if (bass !== last.bass || onset !== last.onset"
+                      " || treble !== last.treble)", self.wheel)
+
+    # --- 9. the invariant that protects the locked layout -----------------
+    @staticmethod
+    def rules(css):
+        out = []
+        for chunk in css.split("}"):
+            if "{" not in chunk:
+                continue
+            head, body = chunk.rsplit("{", 1)
+            # Drop any comment that precedes the selector, and keep only the last
+            # line of it: a selector list can span several.
+            head = re.sub(r".*\*/", "", head, flags=re.DOTALL)
+            out.append((head.strip(), body))
+        return out
+
+    def test_the_wheel_pulse_cannot_move_the_copy(self):
+        """The contributor text and avatar coordinates are solved against 14
+        viewports and locked. A bass scale on any ancestor of them would move the
+        text by 3.5% of a 1260px disc -- 44px -- and silently break that solve.
+
+        So the scale is only permitted on layers with no descendants: the two
+        plate pseudo-elements and the empty ring spans. Everything that holds copy
+        lives under .rotary-disc__sector-track, which is never transformed.
+        """
+        allowed = {".rotary-disc__plate::before", ".rotary-disc__plate::after",
+                   ".rotary-disc__ring"}
+        scaling = [sel for sel, body in self.rules(self.css)
+                   if "transform:" in body and "--wheel-bass" in body]
+        self.assertTrue(scaling, "nothing scales with the bass any more")
+        for sel in scaling:
+            with self.subTest(selector=sel):
+                self.assertIn(sel, allowed,
+                              f"{sel} scales with the bass but has descendants")
+
+        track = self.css.split(".rotary-disc__sector-track {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("transform", track,
+                         "the subtree holding the copy must never be transformed")
+        for selector in (".rotary-segment__content {", ".rotary-sign-hanger {",
+                         ".rotary-segment {", ".rotary-disc {"):
+            body = self.css.split(selector, 1)[1].split("}", 1)[0]
+            with self.subTest(selector=selector):
+                self.assertNotIn("--wheel-", body,
+                                 f"{selector} reacts to the audio vars directly")
+
+    def test_each_specified_reaction_is_wired_to_its_layer(self):
+        """The brief named which layer reacts to which band: bass swells the
+        wheels, an onset flares the dashed outer segment and the spokes, treble
+        makes the rim ticks and the tags glint. Asserting the wiring means
+        dropping one of them fails loudly instead of leaving a wheel that
+        quietly reacts to two bands out of three."""
+        def body(selector):
+            return self.css.split(selector, 1)[1].split("}", 1)[0]
+
+        for sel in (".rotary-disc__plate::before {", ".rotary-disc__plate::after {",
+                    ".rotary-disc__ring {"):
+            with self.subTest(layer=sel):
+                self.assertIn("var(--wheel-bass", body(sel),
+                              f"{sel} no longer swells with the bass")
+        self.assertIn("scale(calc(1 + (var(--wheel-bass, 0) * 0.035)))",
+                      body(".rotary-disc__plate::after {"))
+        # The DECLARATION, not just the keyword: this rule also drives its
+        # border-color from --wheel-onset, so a bare `assertIn("var(--wheel-onset")`
+        # stayed green when the opacity flare was deleted outright.
+        self.assertIn("opacity: calc(0.6 + (var(--wheel-onset, 0) * 0.4));",
+                      body(".rotary-disc__plate::after {"),
+                      "the dashed outer segment no longer flares on an attack")
+        self.assertIn("opacity: calc(0.4 + (var(--wheel-onset, 0) * 0.35))",
+                      body(".rotary-disc__sector-track::before {"),
+                      "the spokes no longer flare on an attack")
+        self.assertIn("var(--wheel-treble", body(".rotary-disc__plate::before {"),
+                      "the rim ticks no longer glint with treble")
+        tags = re.search(r"\.rotary-sign,\s*\.rotary-name-tag \{([^}]+)\}", self.css)[1]
+        self.assertIn("var(--wheel-treble", tags, "the rim tags no longer glint")
+
+    def test_the_wheel_reactions_top_out_sane(self):
+        """Every alpha and opacity driven by a wheel var must peak at exactly 1.0
+        with the var at full drive. A calc that overshoots is silently clamped, so
+        the top of the range does nothing; one whose resting value already sits at
+        the ceiling has nowhere to flare to, which is how a "reaction" ends up
+        being a constant. The scale coefficient is pinned to the specified 0.035
+        because much above that stops reading as a pulse and starts reading as the
+        wheel changing size."""
+        pairs = re.findall(
+            r"calc\((0\.\d+) \+ \(var\(--wheel-\w+, 0\) \* (0\.\d+)\)\)", self.css)
+        self.assertTrue(pairs, "no alpha is driven by the wheel vars any more")
+        for rest, drive in pairs:
+            with self.subTest(rest=rest, drive=drive):
+                self.assertGreater(float(drive), 0, "a drive of 0 is a dead reaction")
+                self.assertLessEqual(float(rest) + float(drive), 1.0 + 1e-9,
+                                     "overshoots 1.0 and gets clamped away")
+        scales = re.findall(
+            r"scale\(calc\(1 \+ \(var\(--wheel-bass, 0\) \* ([\d.]+)\)\)\)", self.css)
+        self.assertEqual(len(scales), 3,
+                         "the rim ticks, the dashed outer ring and the three rings")
+        for coeff in scales:
+            self.assertEqual(float(coeff), 0.035, "scale(1 + bass * 0.035) was specified")
+
+    def test_every_wheel_var_defaults_to_zero(self):
+        """With the script absent, the music off, or reduced motion requested,
+        nothing is written -- so every use must carry its own fallback or the
+        calc() becomes invalid and the declaration is dropped entirely."""
+        uses = re.findall(r"var\(--wheel-(bass|onset|treble)([^)]*)\)", self.css)
+        self.assertTrue(uses, "no audio-reactive wheel properties are left")
+        for name, rest in uses:
+            with self.subTest(var="--wheel-" + name):
+                self.assertTrue(rest.startswith(", "),
+                                f"--wheel-{name} is used without a fallback: "
+                                f"var(--wheel-{name}{rest})")

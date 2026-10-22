@@ -18,6 +18,7 @@
      8. Ambient layer      — custom cursor, soundscape, synced dot matrix
      9. Dynamic download  — newest GitHub release APK for every CTA
      10. Credits wave mesh — audio-reactive sine grid behind the rotary wheels
+     11. Wheel reactivity — bass/onset/treble drive the wheels themselves
    ============================================================ */
 
 (function agoraApp() {
@@ -51,7 +52,7 @@
   var GLOW_SPRITE_SIZE = 64;
   var GLOW_SPREAD = 3.4;
 
-  function makeGlowSprite(coreRgb, glowRgb) {
+  function makeGlowSprite(coreRgb, glowRgb, bloom) {
     var sprite = doc.createElement('canvas');
     sprite.width = GLOW_SPRITE_SIZE;
     sprite.height = GLOW_SPRITE_SIZE;
@@ -59,19 +60,26 @@
     if (!ctx) return null;
     var c = GLOW_SPRITE_SIZE / 2;
     var gradient = ctx.createRadialGradient(c, c, 0, c, c, c);
-    // The dot's own disc occupies the middle ~17% once the sprite is scaled to
-    // radius * 2 * GLOW_SPREAD; everything outside that is bloom.
+    /* `bloom` scales how far the halo reaches past the dot's own disc, and how
+       bright it is. 1 is the original shadowBlur 8-12 look; the calibrated
+       value the matrix now uses is well under that, because a dot that lights
+       up its whole neighbourhood reads as glare and competes with the copy.
+       The stops are clamped ascending -- a compressed bloom must never produce
+       an out-of-order addColorStop, which browsers silently ignore. */
+    var k = typeof bloom === 'number' ? bloom : 1;
     gradient.addColorStop(0, 'rgba(' + coreRgb + ',1)');
-    gradient.addColorStop(0.1, 'rgba(' + coreRgb + ',0.94)');
-    gradient.addColorStop(0.17, 'rgba(' + glowRgb + ',0.6)');
-    gradient.addColorStop(0.5, 'rgba(' + glowRgb + ',0.14)');
+    gradient.addColorStop(Math.min(0.9, 0.06 + (0.1 * k)), 'rgba(' + coreRgb + ',0.92)');
+    gradient.addColorStop(Math.min(0.94, 0.08 + (0.17 * k)),
+      'rgba(' + glowRgb + ',' + (0.6 * k).toFixed(3) + ')');
+    gradient.addColorStop(Math.min(0.97, 0.12 + (0.5 * k)),
+      'rgba(' + glowRgb + ',' + (0.14 * k).toFixed(3) + ')');
     gradient.addColorStop(1, 'rgba(' + glowRgb + ',0)');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, GLOW_SPRITE_SIZE, GLOW_SPRITE_SIZE);
     return sprite;
   }
 
-  function drawGlow(context, sprite, coreRgb, x, y, radius, alpha) {
+  function drawGlow(context, sprite, coreRgb, x, y, radius, alpha, spread) {
     if (!sprite) {          // no 2D context for the sprite: fall back to a dot
       context.beginPath();
       context.fillStyle = 'rgba(' + coreRgb + ',' + alpha.toFixed(4) + ')';
@@ -79,10 +87,42 @@
       context.fill();
       return;
     }
-    var size = radius * 2 * GLOW_SPREAD;
+    var size = radius * 2 * (typeof spread === 'number' ? spread : GLOW_SPREAD);
     context.globalAlpha = alpha;
     context.drawImage(sprite, x - (size / 2), y - (size / 2), size, size);
     context.globalAlpha = 1;
+  }
+
+  /* ---- the wheel's spin, shared with both canvases -----------------------
+     Scrolling has to ripple the mesh even with the music muted or paused, and
+     the canvases live in different sections from the rotary physics -- so the
+     angular velocity is published here rather than passed down a call chain
+     that does not exist. `at` is the timestamp of the last write: the rotary's
+     frame loop STOPS once the wheel settles, which would otherwise freeze the
+     last ripple on screen forever. readSpin() decays by age instead, so the
+     mesh returns to calm on its own as the wheel locks onto a contributor. */
+  var wheelSpin = { velocity: 0, at: -1e9 };
+  var SPIN_DECAY_MS = 260;      // e-folding time for a ripple dying away
+  var SPIN_REFERENCE = 420;     // deg/s that counts as a full-strength ripple
+
+  function readSpin(now) {
+    var age = Math.max(0, now - wheelSpin.at);
+    return wheelSpin.velocity * Math.exp(-age / SPIN_DECAY_MS);
+  }
+
+  /* One place that asks the audio facade for its band metrics, so the dot
+     matrix, the wave mesh and the wheels all degrade identically when the
+     facade is absent, older than getBands(), or throws. */
+  var IDLE_BANDS = { bass: 0, mid: 0, treble: 0, onset: 0, pitch: 0.5, centroid: 0.5 };
+
+  function readBands() {
+    var api = window.AgoraAudio;
+    if (!api || typeof api.getBands !== 'function') return IDLE_BANDS;
+    try {
+      return api.getBands() || IDLE_BANDS;
+    } catch (error) {
+      return IDLE_BANDS;
+    }
   }
 
   /* ------------------------------------------------------------
@@ -1027,8 +1067,17 @@
         compressor.ratio.setValueAtTime(3, now);
         compressor.attack.setValueAtTime(0.035, now);
         compressor.release.setValueAtTime(0.45, now);
-        analyser.fftSize = 128;
-        analyser.smoothingTimeConstant = 0.9;
+        /* 2048 rather than 128: bin width drops from ~344Hz to ~21.5Hz at
+           44.1kHz, which is what makes a 20-200Hz bass band and a dominant-pitch
+           reading meaningful at all -- at 128 the whole bass band was one bin.
+
+           Smoothing 0.35 rather than 0.9. The analyser's smoothing is a running
+           average over previous frames, so a high value is exactly what turns a
+           piano keystroke into a slow swell; at 0.35 a strike registers on the
+           next animation frame. It is not 0 -- that would make the visuals
+           jitter on every sample instead of tracking notes. */
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.35;
 
         master.connect(filter);
         filter.connect(compressor);
@@ -1178,6 +1227,140 @@
       return bins;
     }
 
+    /* ---- bass / mid / treble / onset / pitch -----------------------------
+       Band edges are declared in HZ and converted to bins from the context's
+       real sample rate and fftSize. Hardcoding indices is how a "bass" band
+       silently becomes a low-mid band: bin 9 is 194Hz at 44.1kHz and 211Hz at
+       48kHz, and nothing about the visuals would tell you the difference. */
+    var BAND_BASS_HZ = [20, 200];
+    var BAND_MID_HZ = [200, 3200];
+    var BAND_TREBLE_HZ = [3200, 12000];
+
+    /* Music sits far below full scale in a byte spectrum -- a quiet piano
+       passage averages around 0.1 -- so a linear mapping produces almost no
+       movement and the canvas looks broken rather than quiet. pow(v, 0.6)
+       lifts the low end hard (0.1 becomes 0.25) while still compressing peaks,
+       and the per-band gain brings a normal passage into the visible range.
+       Treble gets the most gain because it carries the least energy. */
+    var SENSITIVITY_EXPONENT = 0.6;
+    var BASS_GAIN = 1.55;
+    var MID_GAIN = 1.9;
+    var TREBLE_GAIN = 2.7;
+    var ONSET_GAIN = 7.5;
+    var ONSET_DECAY = 0.86;     // per frame: a strike spikes, then fades fast
+
+    var bandBins = null;
+    var previousMid = 0;
+    var bands = {
+      bass: 0, mid: 0, treble: 0, onset: 0,
+      pitch: 0.5, centroid: 0.5, computedAt: -1e9
+    };
+
+    function buildBandBins(binCount) {
+      var rate = (audio.context && audio.context.sampleRate) || 44100;
+      var fft = (audio.analyser && audio.analyser.fftSize) || 2048;
+      function binFor(hz) {
+        var b = Math.round((hz * fft) / rate);
+        if (b < 1) return 1;                       // bin 0 is DC offset
+        return b > binCount - 1 ? binCount - 1 : b;
+      }
+      return {
+        bass: [binFor(BAND_BASS_HZ[0]), binFor(BAND_BASS_HZ[1])],
+        mid: [binFor(BAND_MID_HZ[0]), binFor(BAND_MID_HZ[1])],
+        treble: [binFor(BAND_TREBLE_HZ[0]), binFor(BAND_TREBLE_HZ[1])]
+      };
+    }
+
+    function shape(value, gain) {
+      return clamp(Math.pow(clamp(value, 0, 1), SENSITIVITY_EXPONENT) * gain, 0, 1);
+    }
+
+    function bandAverage(data, range) {
+      var total = 0;
+      var count = 0;
+      for (var i = range[0]; i < range[1]; i += 1) { total += data[i]; count += 1; }
+      return count ? (total / count) / 255 : 0;
+    }
+
+    function computeBands() {
+      /* Once per frame however many consumers ask. Three canvases each calling
+         getByteFrequencyData would be wasteful, but worse: the onset delta is
+         frame-over-frame, so computing it twice in one tick would halve the
+         spike the second caller sees. */
+      var stamp = window.performance && window.performance.now
+        ? window.performance.now() : Date.now();
+      if (stamp - bands.computedAt < 8) return bands;
+      bands.computedAt = stamp;
+
+      if (!audio.isPlaying || !audio.analyser || !audio.data) {
+        bands.bass *= 0.9; bands.mid *= 0.9; bands.treble *= 0.9;
+        bands.onset *= ONSET_DECAY;
+        previousMid *= 0.9;
+        return bands;
+      }
+
+      audio.analyser.getByteFrequencyData(audio.data);
+      if (!bandBins) bandBins = buildBandBins(audio.data.length);
+      var data = audio.data;
+
+      var rawBass = bandAverage(data, bandBins.bass);
+      var rawMid = bandAverage(data, bandBins.mid);
+      var rawTreble = bandAverage(data, bandBins.treble);
+
+      /* Onset is the frame-over-frame RISE in mid energy, floored at zero so a
+         note decaying is never mistaken for a note striking. The envelope holds
+         the spike for a few frames: one frame is shorter than the eye can
+         register, and a keystroke's visual should outlast the sample window. */
+      var rise = Math.max(0, rawMid - previousMid);
+      previousMid = rawMid;
+      bands.onset = Math.max(clamp(rise * ONSET_GAIN, 0, 1), bands.onset * ONSET_DECAY);
+
+      // Attack fast, release slower: snap onto a note, ease off it.
+      bands.bass += (shape(rawBass, BASS_GAIN) - bands.bass)
+        * (shape(rawBass, BASS_GAIN) > bands.bass ? 0.5 : 0.14);
+      bands.mid += (shape(rawMid, MID_GAIN) - bands.mid)
+        * (shape(rawMid, MID_GAIN) > bands.mid ? 0.5 : 0.14);
+      bands.treble += (shape(rawTreble, TREBLE_GAIN) - bands.treble)
+        * (shape(rawTreble, TREBLE_GAIN) > bands.treble ? 0.55 : 0.16);
+
+      /* Dominant pitch and spectral centroid, over the mid+treble range. Both
+         are reported 0..1 on a LOG scale because pitch perception is
+         logarithmic: a linear map would spend most of its range on the top
+         octave and a climbing melody would look pinned near 1. */
+      var lo = bandBins.mid[0];
+      var hi = bandBins.treble[1];
+      var peak = -1;
+      var peakBin = lo;
+      var weighted = 0;
+      var totalEnergy = 0;
+      for (var b = lo; b < hi; b += 1) {
+        var v = data[b];
+        if (v > peak) { peak = v; peakBin = b; }
+        weighted += v * Math.log(b + 1);
+        totalEnergy += v;
+      }
+      var logLo = Math.log(lo + 1);
+      var logSpan = Math.log(hi + 1) - logLo;
+      bands.pitch = clamp((Math.log(peakBin + 1) - logLo) / logSpan, 0, 1);
+      var centroidBin = totalEnergy ? Math.exp(weighted / totalEnergy) - 1 : lo;
+      bands.centroid = clamp((Math.log(centroidBin + 1) - logLo) / logSpan, 0, 1);
+      return bands;
+    }
+
+    function getBands() {
+      var b = computeBands();
+      /* A copy, not the live object. computeBands mutates ONE instance in place
+         -- that is what makes the per-frame cache work -- so returning it would
+         let a caller's snapshot silently change underneath them between reads.
+         Internal callers go through readBands() once per frame and use it
+         immediately, so the copy costs three small objects a frame and removes
+         a footgun from the public facade. */
+      return {
+        bass: b.bass, mid: b.mid, treble: b.treble,
+        onset: b.onset, pitch: b.pitch, centroid: b.centroid
+      };
+    }
+
     function getSpectrum() {
       var i;
       if (!audio.isPlaying || !audio.analyser || !audio.data) {
@@ -1213,24 +1396,23 @@
       getEnergy: getEnergy,
       getPulse: getPulse,
       getSpectrum: getSpectrum,
+      getBands: getBands,
       SPECTRUM_BANDS: SPECTRUM_BANDS
     };
 
+    /* Broadband loudness, for consumers that want one number. Derived from the
+       same shaped bands everything else uses rather than from a second pass over
+       raw bins: at fftSize 128 the old bin 2-17 window covered roughly
+       0.7-5.8kHz, and at 2048 the same indices would cover 43-366Hz. Keeping the
+       indices would have silently turned "energy" into "bass". */
     function getEnergy() {
       if (!audio.isPlaying || !audio.analyser || !audio.data) {
         audio.energy *= 0.94;
         return audio.energy;
       }
-
-      audio.analyser.getByteFrequencyData(audio.data);
-      var total = 0;
-      var count = 0;
-      for (var index = 2; index < Math.min(audio.data.length, 18); index += 1) {
-        total += audio.data[index];
-        count += 1;
-      }
-      var next = count ? total / count / 255 : 0;
-      audio.energy += (next - audio.energy) * 0.08;
+      var b = computeBands();
+      var next = (b.bass * 0.5) + (b.mid * 0.35) + (b.treble * 0.15);
+      audio.energy += (next - audio.energy) * 0.12;
       return audio.energy;
     }
 
@@ -1285,6 +1467,12 @@
       var FALLBACK_NODE = '147,112,255';
       var FALLBACK_HI = '190,210,255';
       var FALLBACK_GLOW = '124,92,255';
+      var FALLBACK_LINE = '120,95,255';
+
+      // The interconnecting lines need the mesh line channel too, so the grid
+      // and its dots are the same material rather than two unrelated colours.
+      var DOT_GLOW_BLOOM = 0.42;    // minimal glow: a soft edge, not a halo
+      var DOT_GLOW_SPREAD = 1.9;    // sprite covers radius * 2 * this
 
       function readPalette() {
         try {
@@ -1294,13 +1482,18 @@
           var node = (styles.getPropertyValue('--mesh-node-rgb') || '').replace(/\s+/g, '');
           var hi = (styles.getPropertyValue('--mesh-node-hi-rgb') || '').replace(/\s+/g, '');
           var glow = (styles.getPropertyValue('--mesh-glow-rgb') || '').replace(/\s+/g, '');
+          var line = (styles.getPropertyValue('--mesh-line-rgb') || '').replace(/\s+/g, '');
           return {
             node: node || FALLBACK_NODE,
             hi: hi || FALLBACK_HI,
-            glow: glow || FALLBACK_GLOW
+            glow: glow || FALLBACK_GLOW,
+            line: line || FALLBACK_LINE
           };
         } catch (error) {
-          return { node: FALLBACK_NODE, hi: FALLBACK_HI, glow: FALLBACK_GLOW };
+          return {
+            node: FALLBACK_NODE, hi: FALLBACK_HI,
+            glow: FALLBACK_GLOW, line: FALLBACK_LINE
+          };
         }
       }
 
@@ -1309,8 +1502,8 @@
 
       function buildSprites(p) {
         return {
-          node: makeGlowSprite(p.node, p.glow),
-          hi: makeGlowSprite(p.hi, p.glow)
+          node: makeGlowSprite(p.node, p.glow, DOT_GLOW_BLOOM),
+          hi: makeGlowSprite(p.hi, p.glow, DOT_GLOW_BLOOM)
         };
       }
 
@@ -1319,8 +1512,12 @@
       var density = 36;
       var columns = 0;
       var rows = 0;
-      var dots = [];
       var pixelRatio = 1;
+      /* Flat x/y pairs for every grid node, filled once per frame. The line
+         passes and the dot pass both read this array, so a node cannot be drawn
+         in two different places in the same frame -- and no per-dot object or
+         closure is allocated while animating. */
+      var pts = null;
 
       function resize() {
         width = window.innerWidth;
@@ -1335,41 +1532,110 @@
 
         columns = Math.ceil(width / density) + 2;
         rows = Math.ceil(height / density) + 2;
-        dots = [];
-        for (var row = 0; row < rows; row += 1) {
-          for (var column = 0; column < columns; column += 1) {
-            dots.push({
-              row: row,
-              column: column,
-              phase: (row * 0.71) + (column * 0.37)
-            });
-          }
-        }
+        pts = new Float32Array(rows * columns * 2);
       }
 
       function draw(timestamp) {
+        // A PJAX swap may have detached us between frames; stop rather than keep
+        // painting an invisible canvas for the rest of the session.
+        if (!canvas.isConnected) return;
+
         var time = timestamp / 1000;
-        var energy = getEnergy();
-        var pulse = getPulse(timestamp);
+        var b = readBands();
+        var spin = readSpin(timestamp);
+        var spinWave = clamp(Math.abs(spin) / SPIN_REFERENCE, 0, 1);
+        var spinDir = spin < 0 ? -1 : 1;
+
         context.clearRect(0, 0, width, height);
 
-        dots.forEach(function (dot) {
-          var wave = 0.5 + (0.5 * Math.sin((time * 0.22) + dot.phase));
-          var driftX = Math.sin((time * 0.28) + dot.phase + dot.row * 0.08) * (2 + energy * 9);
-          var driftY = Math.cos((time * 0.19) + dot.phase) * (2 + energy * 7);
-          var x = (dot.column * density) + driftX - density;
-          var y = (dot.row * density) + driftY - density;
-          /* 2px at rest, 3.5px across the wave, 4.5px on an audio peak. Alpha
-             0.75 to 0.95. This is a background, but it is meant to read as
-             present rather than as a texture; what protects the copy is the
-             scrim behind each credits block, not a faint canvas. */
-          var radius = Math.min(4.5, 2 + (wave * 1.5) + (pulse * 1));
-          var alpha = Math.min(0.95, 0.75 + (wave * 0.14) + (pulse * 0.06));
-          var highlight = (dot.column + dot.row) % 4 === 0;
+        /* The dominant pitch moves the ripple's spatial frequency and its focal
+           point, so a melody that climbs or drops visibly travels across the
+           grid instead of just getting louder where it already was. */
+        var pitchK = 0.006 + (b.pitch * 0.026);
+        var focusX = width * (0.15 + (b.centroid * 0.7));
+        var focusY = height * (0.2 + (b.pitch * 0.6));
+        var focal = density * 6;
+        var swellK = density * 0.5 * b.bass;
+        var rippleK = density * 0.16 * b.treble;
+        var jumpK = -density * 0.85 * b.onset;   // negative: the jump is UPWARD
+        var swirlK = density * 0.55 * spinWave;
 
-          drawGlow(context, highlight ? sprites.hi : sprites.node,
-            highlight ? palette.hi : palette.node, x, y, radius, alpha);
-        });
+        var row;
+        var column;
+        var index = 0;
+        for (row = 0; row < rows; row += 1) {
+          for (column = 0; column < columns; column += 1) {
+            var gx = (column * density) - density;
+            var gy = (row * density) - density;
+            var phase = (row * 0.71) + (column * 0.37);
+
+            // Idle breathing: with the music off the grid still moves, so the
+            // background never reads as a frozen screenshot.
+            var ix = Math.sin((time * 0.28) + phase + (row * 0.08)) * 2;
+            var iy = Math.cos((time * 0.19) + phase) * 2;
+            // Bass: wide, deep, rolling vertical swell.
+            var swell = Math.sin((gx * 0.0031) + (time * 0.85))
+              * Math.cos((gy * 0.0022) - (time * 0.55)) * swellK;
+            // Treble: crisp, fast-moving surface ripple along the grid.
+            var ripple = Math.sin((gx * pitchK) + (gy * 0.018) + (time * 6.2)) * rippleK;
+            // Onset: a sharp upward jump, strongest at the ripple's focal point.
+            var dx = gx - focusX;
+            var dy = gy - focusY;
+            var dist = Math.sqrt((dx * dx) + (dy * dy));
+            var jump = jumpK * Math.exp(-dist / focal);
+            // Scroll: a rotational ripple whose direction follows the spin.
+            var swirl = Math.sin((dist * 0.011) - (time * 2.6 * spinDir)) * swirlK;
+
+            pts[index] = gx + ix + (ripple * 0.5) + (swirl * 0.35);
+            pts[index + 1] = gy + iy + swell + ripple + jump + swirl;
+            index += 2;
+          }
+        }
+
+        /* Interconnecting mesh: every node joined to its right and lower
+           neighbour, so the grid is continuous in both directions. Built as ONE
+           path (all rows, then all columns) rather than a segment per pair --
+           a single stroke call instead of several thousand, for the same
+           picture. 0.15 at rest, 0.20 at the very most. */
+        var lineAlpha = Math.min(0.2, 0.15 + (b.treble * 0.03) + (b.onset * 0.02));
+        context.lineWidth = 1;
+        context.strokeStyle = 'rgba(' + palette.line + ',' + lineAlpha.toFixed(4) + ')';
+        context.beginPath();
+        for (row = 0; row < rows; row += 1) {
+          var rowBase = row * columns * 2;
+          for (column = 0; column < columns; column += 1) {
+            var o = rowBase + (column * 2);
+            if (column === 0) context.moveTo(pts[o], pts[o + 1]);
+            else context.lineTo(pts[o], pts[o + 1]);
+          }
+        }
+        for (column = 0; column < columns; column += 1) {
+          for (row = 0; row < rows; row += 1) {
+            var p = ((row * columns) + column) * 2;
+            if (row === 0) context.moveTo(pts[p], pts[p + 1]);
+            else context.lineTo(pts[p], pts[p + 1]);
+          }
+        }
+        context.stroke();
+
+        /* Dots on top of the mesh: 1.5px at rest to 2.2px, 0.25 alpha at rest to
+           0.30, and up toward 0.35 only on a sharp transient. Both ceilings are
+           the calibration the review asked for so the grid never overpowers the
+           foreground UI. */
+        for (row = 0; row < rows; row += 1) {
+          for (column = 0; column < columns; column += 1) {
+            var q = ((row * columns) + column) * 2;
+            var w = 0.5 + (0.5 * Math.sin((time * 0.22) + (row * 0.71) + (column * 0.37)));
+            var radius = Math.min(2.2, 1.5 + (w * 0.45) + (b.bass * 0.25));
+            var alpha = Math.min(0.35,
+              0.25 + (w * 0.05) + (b.onset * 0.06) + (b.treble * 0.04));
+            var highlight = ((column + row) % 4) === 0;
+
+            drawGlow(context, highlight ? sprites.hi : sprites.node,
+              highlight ? palette.hi : palette.node,
+              pts[q], pts[q + 1], radius, alpha, DOT_GLOW_SPREAD);
+          }
+        }
 
         if (!reduceMotion()) window.requestAnimationFrame(draw);
       }
@@ -1783,6 +2049,15 @@
         -MAX_ANGULAR_VELOCITY, MAX_ANGULAR_VELOCITY
       );
       state.rotation += state.rotationVelocity * dt;
+
+      /* Publish the spin so both canvases can ripple from it. Scrolling has to
+         move the mesh with the music muted or paused, and the canvases are not
+         reachable from here through any call chain -- so the velocity goes via a
+         module-level slot. readSpin() decays it by AGE, which matters because
+         this loop stops the moment the wheel settles and would otherwise leave
+         the last ripple frozen on screen forever. */
+      wheelSpin.velocity = state.rotationVelocity;
+      wheelSpin.at = timestamp;
 
       /* Lock exactly onto the target once it is close and slow, so the spring
          does not asymptote forever and idle a hair off-sector.
@@ -2305,13 +2580,16 @@
     }
 
     var palette = readPalette();
-    var nodeSprite = makeGlowSprite(palette.node, palette.glow);
+    // A little more bloom than the matrix dots: these are the mesh's bright
+    // intersections, and they are far fewer of them.
+    var nodeSprite = makeGlowSprite(palette.node, palette.glow, 0.7);
     var width = 0;
     var height = 0;
     var spacing = 54;
     var columns = 0;
     var rows = 0;
     var schemeQuery = null;
+    var pts = null;
 
     function resize() {
       width = window.innerWidth;
@@ -2328,47 +2606,62 @@
       // Two spare cells each way so the displaced edge nodes stay off-screen.
       columns = Math.ceil(width / spacing) + 3;
       rows = Math.ceil(height / spacing) + 3;
+      pts = new Float32Array(rows * columns * 2);
     }
 
-    /* Two sine terms per axis -- one keyed on the row, one on the column -- so
-       the mesh shears and travels instead of expanding in place. That shear is
-       what reads as a wave rather than as breathing.
+    /* Every node position is computed ONCE per frame into `pts`, and both the
+       row pass and the column pass then read that same array.
 
-       `amp` is the base displacement and `band` is this node's share of the live
-       spectrum. One function serves both states: with no music, energy and band
-       are 0 and the mesh keeps breathing on its own at 12% of a cell, so the
-       background is never dead. At full tilt the track roughly triples it.   */
-    function nodeX(column, row, time, amp, band) {
-      return ((column - 1) * spacing)
-        + (Math.sin((time * 0.31) + (row * 0.42)) * amp)
-        + (Math.sin((time * 0.92) + (row * 0.16)) * amp * band);
-    }
+       That replaces the old nodeX()/nodeY()/bandAt() trio, whose entire purpose
+       was to guarantee a node landed in the same place whether it was reached
+       along its row or along its column -- the mesh tears at every intersection
+       if the two passes disagree. Sharing one buffer makes agreement structural
+       instead of something two functions have to be careful about, and it halves
+       the trigonometry: 220 nodes evaluated twice became 220 evaluated once. */
+    function computeGrid(time, b, spinWave, spinDir) {
+      var pitchK = 0.004 + (b.pitch * 0.02);
+      var focusX = width * (0.15 + (b.centroid * 0.7));
+      var focusY = height * (0.2 + (b.pitch * 0.6));
+      var focal = spacing * 7;
+      var swellK = spacing * 0.55 * b.bass;
+      var rippleK = spacing * 0.18 * b.treble;
+      var jumpK = -spacing * 0.95 * b.onset;   // negative: the jump is UPWARD
+      var swirlK = spacing * 0.6 * spinWave;
+      var midK = spacing * 0.3 * b.mid;
 
-    function nodeY(column, row, time, amp, band) {
-      return ((row - 1) * spacing)
-        + (Math.cos((time * 0.24) + (column * 0.37)) * amp)
-        + (Math.cos((time * 1.07) + (column * 0.19)) * amp * band);
-    }
+      var index = 0;
+      for (var row = 0; row < rows; row += 1) {
+        for (var column = 0; column < columns; column += 1) {
+          var gx = (column - 1) * spacing;
+          var gy = (row - 1) * spacing;
 
-    /* A node must land in the SAME place whether it is reached along its row or
-       along its column, or the mesh tears at every intersection -- two passes
-       drawing the same grid point in two different spots. Blending the row's
-       band with the column's makes the displacement a pure function of
-       (row, column), which is what keeps the passes stitched together. */
-    function bandAt(row, column, bands) {
-      if (!bands || !bands.length) return 0;
-      return (bands[row % bands.length] + bands[column % bands.length]) * 0.5;
-    }
+          // Two sine terms per axis, one keyed on the row and one on the column,
+          // so the mesh shears and travels instead of expanding in place. That
+          // shear is what reads as a wave rather than as breathing. It runs at
+          // 0.26 of a cell with the music off, so the background is never dead.
+          var shearX = Math.sin((time * 0.31) + (row * 0.42)) * spacing * 0.26;
+          var shearY = Math.cos((time * 0.24) + (column * 0.37)) * spacing * 0.26;
+          // Mid-range pitch adds a faster travelling term on top of the shear.
+          var midX = Math.sin((time * 0.92) + (row * 0.16) + (b.pitch * 6.28)) * midK;
+          var midY = Math.cos((time * 1.07) + (column * 0.19) + (b.pitch * 6.28)) * midK;
+          // Bass: wide, deep, rolling vertical swell.
+          var swell = Math.sin((gx * 0.0026) + (time * 0.8))
+            * Math.cos((gy * 0.0019) - (time * 0.5)) * swellK;
+          // Treble: crisp, fast surface ripple along the lines.
+          var ripple = Math.sin((gx * pitchK) + (gy * 0.014) + (time * 5.6)) * rippleK;
+          // Onset: sharp upward jump, falling off from the ripple's focal point.
+          var dx = gx - focusX;
+          var dy = gy - focusY;
+          var dist = Math.sqrt((dx * dx) + (dy * dy));
+          var jump = jumpK * Math.exp(-dist / focal);
+          // Scroll: rotational ripple, direction following the wheel's spin.
+          var swirl = Math.sin((dist * 0.009) - (time * 2.4 * spinDir)) * swirlK;
 
-    /* Read every frame rather than once at init: the mesh is rebuilt on each PJAX
-       swap while the audio graph is built once per session, and the track can
-       start or stop at any moment. A missing or older facade must degrade to the
-       silent drift, never throw. */
-    function readAudio() {
-      var api = window.AgoraAudio;
-      if (!api || typeof api.getEnergy !== 'function'
-        || typeof api.getSpectrum !== 'function') return null;
-      return api;
+          pts[index] = gx + shearX + midX + (ripple * 0.5) + (swirl * 0.35);
+          pts[index + 1] = gy + shearY + midY + swell + ripple + jump + swirl;
+          index += 2;
+        }
+      }
     }
 
     function stroke(points, color, alpha) {
@@ -2383,12 +2676,12 @@
 
     /* A glowing intersection, blitted from the same pre-rendered sprite the dot
        matrix uses so the two layers read as one material rather than as a grid
-       with unrelated stars on it. Same size ramp: 2px at rest, 4.5px at full
-       audio heat. */
+       with unrelated stars on it -- and held to the same calibration: 1.5px to
+       2.2px, 0.25 to 0.35 alpha. */
     function glowNode(x, y, heat) {
       drawGlow(context, nodeSprite, palette.node, x, y,
-        Math.min(4.5, 2 + (heat * 2.5)),
-        Math.min(0.95, 0.7 + (heat * 0.25)));
+        Math.min(2.2, 1.5 + (heat * 0.7)),
+        Math.min(0.35, 0.25 + (heat * 0.1)), 1.9);
     }
 
     function draw(timestamp) {
@@ -2397,60 +2690,57 @@
       if (!canvas.isConnected) return;
 
       var time = timestamp / 1000;
-      var api = readAudio();
-      var energy = api ? clamp(api.getEnergy(), 0, 1) : 0;
-      var bands = api ? api.getSpectrum() : null;
-      // Idle displacement is deliberately obvious: the review wants the
-      // undulation visible with the music paused, not something you have to look
-      // for. 0.26 of a cell at rest, up to 0.68 at full tilt -- still under one
-      // cell, which is the point where lines would cross and read as tearing
-      // rather than as a wave.
-      var amp = spacing * (0.26 + (energy * 0.42));
+      var b = readBands();
+      // Scrolling ripples this mesh even with the music muted or paused: the
+      // wheel's angular velocity is published by the rotary physics and decays
+      // by age once the wheel settles and its own frame loop stops.
+      var spin = readSpin(timestamp);
+      var spinWave = clamp(Math.abs(spin) / SPIN_REFERENCE, 0, 1);
+      var spinDir = spin < 0 ? -1 : 1;
 
       context.clearRect(0, 0, width, height);
       context.lineWidth = 1;
 
+      computeGrid(time, b, spinWave, spinDir);
+
       var points = [];
       var row;
       var column;
-      var band;
 
       for (row = 0; row < rows; row += 1) {
         points.length = 0;
+        var rowBase = row * columns * 2;
         for (column = 0; column < columns; column += 1) {
-          band = bandAt(row, column, bands);
-          points.push(nodeX(column, row, time, amp, band), nodeY(column, row, time, amp, band));
+          var o = rowBase + (column * 2);
+          points.push(pts[o], pts[o + 1]);
         }
         var drift = 0.5 + (0.5 * Math.sin((time * 0.18) + (row * 0.55)));
-        // 0.28 at rest up to 0.45 on a crest. The ceiling still matters more
-        // than the ramp: however hard the track hits, a line cannot exceed it.
+        // 0.15 at rest, 0.20 at the very most. The ceiling matters more than the
+        // ramp: however hard the track hits, a line cannot exceed it, because
+        // this mesh sits behind the copy rather than beside it.
         stroke(points, row % 3 === 0 ? palette.node : palette.line,
-          Math.min(0.45, 0.28 + (drift * 0.13) + (energy * 0.04)));
+          Math.min(0.2, 0.15 + (drift * 0.02) + (b.treble * 0.02) + (b.onset * 0.01)));
       }
 
       for (column = 0; column < columns; column += 1) {
         points.length = 0;
         for (row = 0; row < rows; row += 1) {
-          band = bandAt(row, column, bands);
-          points.push(nodeX(column, row, time, amp, band), nodeY(column, row, time, amp, band));
+          var p = ((row * columns) + column) * 2;
+          points.push(pts[p], pts[p + 1]);
         }
         var cross = 0.5 + (0.5 * Math.cos((time * 0.15) + (column * 0.47)));
-        // Columns sit a step below rows so the grid still has depth instead of
-        // reading as one flat bright lattice.
+        // Columns sit a step below rows so the grid keeps some depth instead of
+        // reading as one flat lattice -- still inside the 0.15-0.20 band.
         stroke(points, palette.line,
-          Math.min(0.38, 0.22 + (cross * 0.12) + (energy * 0.04)));
+          Math.min(0.18, 0.15 + (cross * 0.015) + (b.treble * 0.015)));
       }
 
-      // Glowing nodes on every other intersection: ~220 arcs a frame instead of
-      // ~900, which is the difference between smooth and stuttered on a phone.
+      // Glowing nodes on every other intersection: ~220 blits a frame instead of
+      // ~870, which is the difference between smooth and stuttered on a phone.
       for (row = 0; row < rows; row += 2) {
         for (column = 0; column < columns; column += 2) {
-          band = bandAt(row, column, bands);
-          glowNode(
-            nodeX(column, row, time, amp, band),
-            nodeY(column, row, time, amp, band),
-            clamp((band * 0.7) + (energy * 0.45), 0, 1)
-          );
+          var q = ((row * columns) + column) * 2;
+          glowNode(pts[q], pts[q + 1], clamp((b.bass * 0.5) + (b.onset * 0.5), 0, 1));
         }
       }
 
@@ -2460,8 +2750,9 @@
     function onSchemeChange() {
       palette = readPalette();
       // The glow is baked into the sprite, so a palette change has to rebuild it
-      // or the nodes keep glowing in the old theme's colour.
-      nodeSprite = makeGlowSprite(palette.node, palette.glow);
+      // or the nodes keep glowing in the old theme's colour -- with the SAME
+      // bloom as the init call, or a scheme flip silently makes them heavier.
+      nodeSprite = makeGlowSprite(palette.node, palette.glow, 0.7);
       // A paused canvas (reduced motion draws one frame and never loops) will
       // not repaint by itself, so nudge a single frame through.
       if (reduceMotion()) {
@@ -2497,6 +2788,81 @@
   }
 
   /* ------------------------------------------------------------
+     11. WHEEL REACTIVITY
+     Bass swells the wheels, a piano onset flares the dashed outer
+     ring and the spokes, treble makes the rim ticks and the tags glint.
+
+     This needs its own loop. The rotary's frame loop stops as soon as
+     the wheel settles -- correct for the physics, useless for anything
+     driven by the music, since a bass pulse has to keep breathing on a
+     wheel that is not moving.
+     ------------------------------------------------------------ */
+  var wheelReactivityCleanup = null;
+
+  function initWheelReactivity() {
+    var wanted = doc.body.classList.contains('credits-rotary-page');
+
+    if (!wanted) {
+      if (wheelReactivityCleanup) wheelReactivityCleanup();
+      return;
+    }
+    // Already driving; bootPage re-ran after a PJAX swap that stayed here.
+    if (wheelReactivityCleanup) return;
+
+    var discs = doc.querySelectorAll('.rotary-disc');
+    if (!discs.length) return;
+
+    var alive = true;
+    var last = { bass: -1, onset: -1, treble: -1 };
+
+    function write(bass, onset, treble) {
+      Array.prototype.forEach.call(discs, function (disc) {
+        disc.style.setProperty('--wheel-bass', bass);
+        disc.style.setProperty('--wheel-onset', onset);
+        disc.style.setProperty('--wheel-treble', treble);
+      });
+    }
+
+    wheelReactivityCleanup = function () {
+      alive = false;
+      write('0', '0', '0');      // leave the wheels static, not mid-pulse
+      wheelReactivityCleanup = null;
+    };
+
+    /* A bass-driven scale IS motion, so reduced motion gets the zeros written
+       once and no loop at all -- the same bargain the canvases already strike. */
+    if (reduceMotion()) {
+      write('0', '0', '0');
+      return;
+    }
+
+    function frame() {
+      if (!alive) return;
+      // A PJAX swap detached the wheels: stop driving elements nobody can see.
+      if (!doc.body.contains(discs[0])) { alive = false; return; }
+
+      var b = readBands();
+      /* Quantised to 1/255th before comparing. Writing a custom property
+         invalidates style for the whole subtree, and with the music off all
+         three sit at 0 -- an unquantified write would cost a style
+         recalculation of both wheels, every frame, forever, to set the same
+         three numbers again. */
+      var bass = Math.round(b.bass * 255) / 255;
+      var onset = Math.round(b.onset * 255) / 255;
+      var treble = Math.round(b.treble * 255) / 255;
+      if (bass !== last.bass || onset !== last.onset || treble !== last.treble) {
+        last.bass = bass;
+        last.onset = onset;
+        last.treble = treble;
+        write(bass.toFixed(3), onset.toFixed(3), treble.toFixed(3));
+      }
+      window.requestAnimationFrame(frame);
+    }
+
+    frame();
+  }
+
+  /* ------------------------------------------------------------
      Boot and PJAX page hydration
      ------------------------------------------------------------ */
   function bootPage() {
@@ -2506,6 +2872,10 @@
     // must be torn down on the way OUT of that page as well as built on the way
     // in, so it runs on every swap rather than once per session.
     initWaveMatrix();
+    // After initWaveMatrix: both are torn down on the way OUT of the credits
+    // page and rebuilt on the way in, so the wheels keep pulsing in step with
+    // the mesh across a PJAX swap instead of one of them going stale.
+    initWheelReactivity();
     initRouting();
     // After initRouting: syncPageLinks rewrites a[data-page] hrefs, and the
     // download CTAs must keep the release URL that wins this ordering.
