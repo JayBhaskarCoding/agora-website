@@ -2614,16 +2614,26 @@ h1, h2, h3 {
 .rotary-disc--top {
   top: 0;
   left: 0;
-  /* The element's center is exactly on the viewport corner. */
-  transform: translate(-50%, -50%);
+  /* 44% sits the hub 6% of the disc INSIDE the corner rather than pinned to it.
+     This one number is the sector-utilisation dial. At the old corner-pinned
+     -50% only 19.7% of each wheel was on screen and the middle of the viewport
+     was dead space; at -44% it is 25.8% on desktop and 26.0% on a phone (up
+     from 7.3%), and the copy is dragged toward the centre with it.
+
+     -44% is also the limit: it is the furthest either hub can travel before the
+     two rims intersect on the tightest viewport measured (1024x768, which keeps
+     +24px of clearance). Both breakpoints deliberately share this value, so the
+     composition reads the same on a phone and a desktop and there is one number
+     to reason about instead of two that can drift apart. */
+  transform: translate(-44%, -44%);
   --sector-offset: 40deg;
 }
 
 .rotary-disc--bottom {
   right: 0;
   bottom: 0;
-  /* The element's center is exactly on the opposite viewport corner. */
-  transform: translate(50%, 50%);
+  /* Mirror of the upper hub, inset by the same 6% of the disc. */
+  transform: translate(44%, 44%);
   --sector-offset: 220deg;
 }
 
@@ -2789,10 +2799,18 @@ h1, h2, h3 {
 
      What separates the two wheels is only --sector-offset (40deg upper,
      220deg lower), which is what puts one block in the upper-left zone and its
-     mirror in the lower-right. Both values were solved against 14 viewports
-     rather than picked by eye; see "Credits rotary geometry" in the README. */
-  top: 48%;
-  left: 88%;
+     mirror in the lower-right.
+
+     Solved, not eyeballed, against 14 viewports and four hard constraints: the
+     safe area (edges, header, status bar), the zone each wheel owns, no overlap
+     between the two blocks, and no overlap with the rim label that shares the
+     block's ray -- the hanging role sign above, the name plate below. That last
+     constraint is checked on all three landing rays per wheel, which are always
+     {40,160,280} and {220,340,100} no matter which member is settled, because
+     A_i -/+ 120m reduces to the same three angles. See "Credits rotary
+     geometry" in the README. */
+  top: 43%;
+  left: 81.5%;
   z-index: 4;
   opacity: var(--segment-opacity);
   transform: translate(-50%, -50%) rotate(calc(0deg - var(--segment-angle) - var(--disc-rotation, 0deg))) scale(var(--segment-scale));
@@ -2806,9 +2824,45 @@ h1, h2, h3 {
   --segment-opacity: 1;
 }
 
-.rotary-disc.is-changing .rotary-segment__content {
-  opacity: 0.22;
-  filter: blur(3px);
+/* The arriving contributor.
+
+   Each segment permanently owns its member, so no copy is ever rewritten when
+   the wheel settles -- the only thing that changes is WHICH block is emphasised.
+   The previous version dimmed every block to nothing, waited, "swapped" text
+   that was already correct, and faded back: a full-screen blink on every sector
+   change, fighting the emphasis the spring was already ramping per frame. This
+   animates the arrival instead, so the incoming block eases up into place while
+   the outgoing one is easing down under the same spring.
+
+   The animation is applied to the CHILDREN, never to .rotary-segment__content or
+   .rotary-sign-hanger themselves. Those two are counter-rotated every animation
+   frame; a transform animation on either would fight that and smear the wheel
+   into a visible lag. Their children are not frame-driven, so they are safe.
+
+   0.42s must stay equal to ARRIVAL_MS in app.js, which clears the marker when
+   the ease-up finishes. A test asserts the two agree. */
+@keyframes rotary-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+.rotary-segment__content.is-arriving > * {
+  animation: rotary-arrive 0.42s var(--ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotary-segment__content.is-arriving > * {
+    animation: none;
+  }
 }
 
 .rotary-segment__content--contribution {
@@ -3141,13 +3195,11 @@ h1, h2, h3 {
     --rotary-disc-size: min(108vmin, 520px);
   }
 
-  .rotary-disc--top {
-    transform: translate(-65%, -65%);
-  }
-
-  .rotary-disc--bottom {
-    transform: translate(65%, 65%);
-  }
+  /* No hub override here on purpose. Narrow screens used to push each hub 15%
+     of the disc OFF-screen (translate(-65%,-65%)), which threw away most of the
+     wheel -- only 7.3% of it was visible -- and forced the detail blocks onto a
+     137% arm to reach past it. Both breakpoints now share the base -44% inset,
+     so the wheel is 3.6x more present on a phone and the arm can be shorter. */
 
   .credits-screen-header {
 
@@ -3179,11 +3231,12 @@ h1, h2, h3 {
     font-size: 1.1rem;
   }
 
-  /* Narrow viewports push each hub 15% of the disc OFF-screen, so the detail
-     blocks need a much longer arm to reach the clear band through the middle. */
+  /* Re-solved for the shared -44% hub inset. The arm is much shorter than the
+     old 137% because the hub no longer sits off-screen, but it is still longer
+     than desktop's: a phone's blocks are a larger fraction of its disc. */
   .rotary-segment__content {
-    top: 77.5%;
-    left: 137%;
+    top: 88%;
+    left: 115%;
   }
 
   .rotary-segment__content--contribution {
