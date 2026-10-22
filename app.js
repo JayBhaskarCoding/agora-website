@@ -37,6 +37,54 @@
     return Math.max(min, Math.min(max, value));
   }
 
+  /* ---- pre-rendered glow ---------------------------------------------------
+     The design review asked for `shadowBlur` 8-12 on every matrix dot and mesh
+     node. shadowBlur is one of the most expensive things a 2D context can do,
+     and between the dot matrix and the wave mesh that is on the order of two
+     thousand of them per frame -- on a phone that is a dropped-frame machine.
+
+     A radial-gradient sprite, rendered once per colour and blitted with
+     drawImage, is the same picture for a small fraction of the cost: no gradient
+     construction and no blur pass inside the frame loop. GLOW_SPREAD is how much
+     bloom surrounds the dot, expressed in dot radii -- 3.4 reads as the
+     shadowBlur 8-12 the review asked for at these dot sizes.                */
+  var GLOW_SPRITE_SIZE = 64;
+  var GLOW_SPREAD = 3.4;
+
+  function makeGlowSprite(coreRgb, glowRgb) {
+    var sprite = doc.createElement('canvas');
+    sprite.width = GLOW_SPRITE_SIZE;
+    sprite.height = GLOW_SPRITE_SIZE;
+    var ctx = sprite.getContext('2d');
+    if (!ctx) return null;
+    var c = GLOW_SPRITE_SIZE / 2;
+    var gradient = ctx.createRadialGradient(c, c, 0, c, c, c);
+    // The dot's own disc occupies the middle ~17% once the sprite is scaled to
+    // radius * 2 * GLOW_SPREAD; everything outside that is bloom.
+    gradient.addColorStop(0, 'rgba(' + coreRgb + ',1)');
+    gradient.addColorStop(0.1, 'rgba(' + coreRgb + ',0.94)');
+    gradient.addColorStop(0.17, 'rgba(' + glowRgb + ',0.6)');
+    gradient.addColorStop(0.5, 'rgba(' + glowRgb + ',0.14)');
+    gradient.addColorStop(1, 'rgba(' + glowRgb + ',0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, GLOW_SPRITE_SIZE, GLOW_SPRITE_SIZE);
+    return sprite;
+  }
+
+  function drawGlow(context, sprite, coreRgb, x, y, radius, alpha) {
+    if (!sprite) {          // no 2D context for the sprite: fall back to a dot
+      context.beginPath();
+      context.fillStyle = 'rgba(' + coreRgb + ',' + alpha.toFixed(4) + ')';
+      context.arc(x, y, radius, 0, Math.PI * 2);
+      context.fill();
+      return;
+    }
+    var size = radius * 2 * GLOW_SPREAD;
+    context.globalAlpha = alpha;
+    context.drawImage(sprite, x - (size / 2), y - (size / 2), size, size);
+    context.globalAlpha = 1;
+  }
+
   /* ------------------------------------------------------------
      1. LINK ROUTING
      This is a static, flat multi-page site: every page lives in
@@ -1229,27 +1277,42 @@
       canvas.setAttribute('aria-hidden', 'true');
       doc.body.insertBefore(canvas, doc.body.firstChild);
 
-      // The dots use the same brand channels the stylesheet exposes, read back
-      // from CSS so the canvas follows the active theme instead of painting
-      // dark-mode colours onto a light page. The literals are only a fallback
-      // for the (unexpected) case of the custom properties being unreadable.
-      var FALLBACK_BLUE = '96,165,250';
-      var FALLBACK_ACCENT = '139,92,246';
+      // The dots read the dedicated mesh channels rather than the general brand
+      // ones, so the background can be retuned without touching buttons, links or
+      // the wordmark -- and so the light theme can deepen them independently.
+      // Still read back from CSS: a hardcoded literal here would paint dark-theme
+      // neon onto a light page. The fallbacks are the dark theme's real values.
+      var FALLBACK_NODE = '147,112,255';
+      var FALLBACK_HI = '190,210,255';
+      var FALLBACK_GLOW = '124,92,255';
 
       function readPalette() {
         try {
           var styles = window.getComputedStyle(doc.documentElement);
           // Computed custom properties come back with the source spacing, e.g.
           // "109, 40, 217"; the canvas wants a bare "r,g,b" triple.
-          var blue = (styles.getPropertyValue('--blue-rgb') || '').replace(/\s+/g, '');
-          var accent = (styles.getPropertyValue('--accent-rgb') || '').replace(/\s+/g, '');
-          return { blue: blue || FALLBACK_BLUE, accent: accent || FALLBACK_ACCENT };
+          var node = (styles.getPropertyValue('--mesh-node-rgb') || '').replace(/\s+/g, '');
+          var hi = (styles.getPropertyValue('--mesh-node-hi-rgb') || '').replace(/\s+/g, '');
+          var glow = (styles.getPropertyValue('--mesh-glow-rgb') || '').replace(/\s+/g, '');
+          return {
+            node: node || FALLBACK_NODE,
+            hi: hi || FALLBACK_HI,
+            glow: glow || FALLBACK_GLOW
+          };
         } catch (error) {
-          return { blue: FALLBACK_BLUE, accent: FALLBACK_ACCENT };
+          return { node: FALLBACK_NODE, hi: FALLBACK_HI, glow: FALLBACK_GLOW };
         }
       }
 
       var palette = readPalette();
+      var sprites = buildSprites(palette);
+
+      function buildSprites(p) {
+        return {
+          node: makeGlowSprite(p.node, p.glow),
+          hi: makeGlowSprite(p.hi, p.glow)
+        };
+      }
 
       var width = 0;
       var height = 0;
@@ -1292,18 +1355,20 @@
 
         dots.forEach(function (dot) {
           var wave = 0.5 + (0.5 * Math.sin((time * 0.22) + dot.phase));
-          var driftX = Math.sin((time * 0.28) + dot.phase + dot.row * 0.08) * (1.5 + energy * 7);
-          var driftY = Math.cos((time * 0.19) + dot.phase) * (1.5 + energy * 5);
+          var driftX = Math.sin((time * 0.28) + dot.phase + dot.row * 0.08) * (2 + energy * 9);
+          var driftY = Math.cos((time * 0.19) + dot.phase) * (2 + energy * 7);
           var x = (dot.column * density) + driftX - density;
           var y = (dot.row * density) + driftY - density;
-          var radius = 0.7 + (wave * 0.55) + (pulse * 0.7);
-          var alpha = 0.045 + (wave * 0.028) + (pulse * 0.06);
-          var color = (dot.column + dot.row) % 4 === 0 ? palette.blue : palette.accent;
+          /* 2px at rest, 3.5px across the wave, 4.5px on an audio peak. Alpha
+             0.75 to 0.95. This is a background, but it is meant to read as
+             present rather than as a texture; what protects the copy is the
+             scrim behind each credits block, not a faint canvas. */
+          var radius = Math.min(4.5, 2 + (wave * 1.5) + (pulse * 1));
+          var alpha = Math.min(0.95, 0.75 + (wave * 0.14) + (pulse * 0.06));
+          var highlight = (dot.column + dot.row) % 4 === 0;
 
-          context.beginPath();
-          context.fillStyle = 'rgba(' + color + ',' + alpha + ')';
-          context.arc(x, y, radius, 0, Math.PI * 2);
-          context.fill();
+          drawGlow(context, highlight ? sprites.hi : sprites.node,
+            highlight ? palette.hi : palette.node, x, y, radius, alpha);
         });
 
         if (!reduceMotion()) window.requestAnimationFrame(draw);
@@ -1317,6 +1382,7 @@
       // repaint by itself, so nudge one frame through in that case.
       function onSchemeChange() {
         palette = readPalette();
+        sprites = buildSprites(palette);   // the glow is baked with the palette
         if (reduceMotion()) {
           draw(window.performance && window.performance.now ? window.performance.now() : 0);
         }
@@ -2217,22 +2283,29 @@
     // Fallbacks only for the unexpected case where the custom properties are
     // unreadable. They are the dark theme's real channels rather than fresh
     // numbers, so a failed read degrades to the intended palette instead of
-    // introducing a third violet that exists nowhere in the stylesheet.
-    var FALLBACK_VIOLET = '167,139,250';
-    var FALLBACK_BLUE = '96,165,250';
+    // introducing a fourth violet that exists nowhere in the stylesheet.
+    var FALLBACK_LINE = '120,95,255';
+    var FALLBACK_NODE = '147,112,255';
+    var FALLBACK_GLOW = '124,92,255';
 
     function readPalette() {
       try {
         var styles = window.getComputedStyle(doc.documentElement);
-        var violet = (styles.getPropertyValue('--violet-soft-rgb') || '').replace(/\s+/g, '');
-        var blue = (styles.getPropertyValue('--blue-rgb') || '').replace(/\s+/g, '');
-        return { violet: violet || FALLBACK_VIOLET, blue: blue || FALLBACK_BLUE };
+        var line = (styles.getPropertyValue('--mesh-line-rgb') || '').replace(/\s+/g, '');
+        var node = (styles.getPropertyValue('--mesh-node-rgb') || '').replace(/\s+/g, '');
+        var glow = (styles.getPropertyValue('--mesh-glow-rgb') || '').replace(/\s+/g, '');
+        return {
+          line: line || FALLBACK_LINE,
+          node: node || FALLBACK_NODE,
+          glow: glow || FALLBACK_GLOW
+        };
       } catch (error) {
-        return { violet: FALLBACK_VIOLET, blue: FALLBACK_BLUE };
+        return { line: FALLBACK_LINE, node: FALLBACK_NODE, glow: FALLBACK_GLOW };
       }
     }
 
     var palette = readPalette();
+    var nodeSprite = makeGlowSprite(palette.node, palette.glow);
     var width = 0;
     var height = 0;
     var spacing = 54;
@@ -2308,19 +2381,14 @@
       context.stroke();
     }
 
-    /* A glowing node is a wide faint halo with a tight bright core. Two cheap
-       arcs read as a glow; canvas shadowBlur reads better and costs far too much
-       at a couple of hundred nodes a frame. */
+    /* A glowing intersection, blitted from the same pre-rendered sprite the dot
+       matrix uses so the two layers read as one material rather than as a grid
+       with unrelated stars on it. Same size ramp: 2px at rest, 4.5px at full
+       audio heat. */
     function glowNode(x, y, heat) {
-      var radius = 0.55 + (heat * 1.5);
-      context.beginPath();
-      context.fillStyle = 'rgba(' + palette.violet + ',' + (0.02 + (heat * 0.08)).toFixed(4) + ')';
-      context.arc(x, y, radius * 3.4, 0, Math.PI * 2);
-      context.fill();
-      context.beginPath();
-      context.fillStyle = 'rgba(' + palette.blue + ',' + (0.05 + (heat * 0.17)).toFixed(4) + ')';
-      context.arc(x, y, radius, 0, Math.PI * 2);
-      context.fill();
+      drawGlow(context, nodeSprite, palette.node, x, y,
+        Math.min(4.5, 2 + (heat * 2.5)),
+        Math.min(0.95, 0.7 + (heat * 0.25)));
     }
 
     function draw(timestamp) {
@@ -2332,9 +2400,12 @@
       var api = readAudio();
       var energy = api ? clamp(api.getEnergy(), 0, 1) : 0;
       var bands = api ? api.getSpectrum() : null;
-      // Silent drift plus up to ~2.8x displacement when the track is loud. The
-      // cap keeps lines from crossing, which would read as tearing not waving.
-      var amp = spacing * (0.12 + (energy * 0.22));
+      // Idle displacement is deliberately obvious: the review wants the
+      // undulation visible with the music paused, not something you have to look
+      // for. 0.26 of a cell at rest, up to 0.68 at full tilt -- still under one
+      // cell, which is the point where lines would cross and read as tearing
+      // rather than as a wave.
+      var amp = spacing * (0.26 + (energy * 0.42));
 
       context.clearRect(0, 0, width, height);
       context.lineWidth = 1;
@@ -2351,10 +2422,10 @@
           points.push(nodeX(column, row, time, amp, band), nodeY(column, row, time, amp, band));
         }
         var drift = 0.5 + (0.5 * Math.sin((time * 0.18) + (row * 0.55)));
-        // Ceiling matters more than the ramp: the mesh sits behind the copy, so
-        // however hard the track hits, the lines stay under 0.13 alpha.
-        stroke(points, row % 3 === 0 ? palette.blue : palette.violet,
-          Math.min(0.13, 0.045 + (drift * 0.04) + (energy * 0.05)));
+        // 0.28 at rest up to 0.45 on a crest. The ceiling still matters more
+        // than the ramp: however hard the track hits, a line cannot exceed it.
+        stroke(points, row % 3 === 0 ? palette.node : palette.line,
+          Math.min(0.45, 0.28 + (drift * 0.13) + (energy * 0.04)));
       }
 
       for (column = 0; column < columns; column += 1) {
@@ -2364,8 +2435,10 @@
           points.push(nodeX(column, row, time, amp, band), nodeY(column, row, time, amp, band));
         }
         var cross = 0.5 + (0.5 * Math.cos((time * 0.15) + (column * 0.47)));
-        stroke(points, palette.violet,
-          Math.min(0.1, 0.03 + (cross * 0.03) + (energy * 0.04)));
+        // Columns sit a step below rows so the grid still has depth instead of
+        // reading as one flat bright lattice.
+        stroke(points, palette.line,
+          Math.min(0.38, 0.22 + (cross * 0.12) + (energy * 0.04)));
       }
 
       // Glowing nodes on every other intersection: ~220 arcs a frame instead of
@@ -2386,6 +2459,9 @@
 
     function onSchemeChange() {
       palette = readPalette();
+      // The glow is baked into the sprite, so a palette change has to rebuild it
+      // or the nodes keep glowing in the old theme's colour.
+      nodeSprite = makeGlowSprite(palette.node, palette.glow);
       // A paused canvas (reduced motion draws one frame and never loops) will
       // not repaint by itself, so nudge a single frame through.
       if (reduceMotion()) {
