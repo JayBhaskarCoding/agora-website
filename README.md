@@ -752,7 +752,8 @@ effect of a theming change.
 markup. Two wheels sit on opposite viewport corners, each carrying three
 contributors in 120-degree sectors. Everything below is load-bearing: change a
 number without re-deriving it and the screen still renders, still animates, and
-silently describes the wrong person or overflows the viewport.
+silently describes the wrong person, overflows the viewport, or collides with its
+own labels.
 
 ### One equation decides where the copy lands
 
@@ -774,17 +775,33 @@ Hung from a corner, the landing point moves with the block's own height and one
 extra line of bio shoves it through the viewport edge. Centred, it is exact at
 any `--segment-scale`.
 
-| Breakpoint | `top` | `left` |
-| --- | --- | --- |
-| desktop | `48%` | `88%` |
-| `max-width: 768px` | `77.5%` | `137%` |
+| Breakpoint | `top` | `left` | arm radius |
+| --- | --- | --- | --- |
+| desktop | `43%` | `81.5%` | 31.6% of the disc |
+| `max-width: 768px` | `88%` | `115%` | 75.3% of the disc |
 
-One shared pair for both wheels. The only thing separating them is
-`--sector-offset` (`40deg` upper, `220deg` lower), which is what puts one block
-in the upper-left zone and its mirror in the lower-right. Both pairs were solved
-against 14 viewports rather than picked by eye; the mobile arm has to be much
-longer because `translate(-65%, -65%)` pushes each narrow-screen hub 15% of the
-disc **off-screen**.
+One shared pair per breakpoint, for both wheels. The only thing separating them
+is `--sector-offset` (`40deg` upper, `220deg` lower), which is what puts one
+block in the upper-left zone and its mirror in the lower-right.
+
+### The hubs are inset, and that inset is the sector-utilisation dial
+
+```css
+.rotary-disc--top    { transform: translate(-44%, -44%); }
+.rotary-disc--bottom { transform: translate( 44%,  44%); }
+```
+
+Both breakpoints share these — the narrow-screen block deliberately declares no
+hub override. Pinned to the exact corners (`-50%`) only **19.7%** of each wheel
+was on screen and the middle of the viewport was dead space; narrow screens were
+worse, pushed to `-65%` so each hub sat 15% of the disc *off-screen* and only
+**7.3%** of the wheel showed. At `-44%` it is **25.8%** on desktop and **26.0%**
+on a phone.
+
+`-44%` is also the limit. Past it the two rims intersect on the tighter
+viewports — at `-42%` they overlap by 42px on 1024x768 — and the sector lines of
+one wheel draw across the face of the other. The worst-case clearance at `-44%`
+is `+24px`, and a test asserts it never goes negative on any of the 14 viewports.
 
 ### The sector angles are not in order, on purpose
 
@@ -797,8 +814,12 @@ Read as a list they look shuffled, and the temptation to "tidy" them into
 `40, 160, 280` is exactly the bug. They are dictated by `indexForRotation()`
 (`round(rotation / 120) % 3`) and by the lower wheel turning the other way
 (`bottomRotation = -state.rotation`). The invariant is
-`A_i == --sector-offset -/+ 120i`, and `tests/test_site.py` asserts it for both
-wheels at every index.
+`A_i == --sector-offset -/+ 120i`.
+
+A useful consequence: the three **landing directions** per wheel are always
+`{40, 160, 280}` and `{220, 340, 100}` no matter which member is settled,
+because `A_i -/+ 120m` reduces to the same three angles. That is what makes
+collision checking exhaustive rather than sampled.
 
 ### The stylesheet is the only source of those numbers
 
@@ -808,29 +829,38 @@ active-centre arguments (`40`, `220`). A drifted copy does not throw — it puts
 the scale-and-opacity emphasis on the wrong contributor while the wheel keeps
 turning and snapping normally.
 
-`initCreditsRotary()` now reads them back with `getComputedStyle`:
+`initCreditsRotary()` now reads them back with `getComputedStyle`. If the read
+fails, `anglesReadable` is false and the JS emphasis is skipped entirely rather
+than guessed — the `.rotary-segment.is-active` rule still scales and fades the
+settled segment on its own, so the screen degrades instead of misplacing.
 
-```js
-var TOP_SEGMENT_ANGLES = segmentAngles(topSegments);      // --segment-angle each
-var TOP_ACTIVE_CENTER  = readAngleDegrees(topDisc, '--sector-offset');
-```
+### Four hard constraints, solved not eyeballed
 
-If the read fails, `anglesReadable` is false and the JS emphasis is skipped
-entirely rather than guessed — the `.rotary-segment.is-active` rule still scales
-and fades the settled segment on its own, so the screen degrades instead of
-misplacing.
+The offsets come from a search over 14 viewports subject to:
+
+1. **Safe area** — clear of the edges (24px), the header, and the status bar.
+2. **Zone** — upper wheel lands upper-left, lower wheel lower-right.
+3. **No block-on-block overlap** between the two contributors.
+4. **No block-on-label overlap.** The hanging role sign and the name plate sit on
+   the same ray as their own block, and the sign hangs straight *down in screen
+   space* while the ray points wherever its sector does — so on an upward-pointing
+   ray the sign swings back toward the copy. Checked on all three rays per wheel,
+   with the two non-settled blocks measured at the `0.6` scale they really render
+   at.
+
+Constraint 4 is the binding one, and it is invisible without modelling it: the
+previously shipped offsets passed 1-3 comfortably and still put a role sign
+across its own contribution text on the upward ray.
 
 ### Role signs hang from their own segment
 
-The three upper-wheel signs ("Developer", "Design & ideas", "The public") were
-positioned by hand with per-index `top`/`left`, and two of the three were a full
-120 degrees away from the sector they described — in the base rule **and** in
-the mobile rule. Hand-authored coordinates per index are the bug class, not just
-the bug.
+The three upper-wheel signs were once positioned by hand with per-index
+`top`/`left`, and two of the three were a full 120 degrees away from the sector
+they described — in the base rule **and** in the mobile rule. Hand-authored
+coordinates per index are the bug class, not just the bug.
 
 Each sign now lives inside its own `[data-rotary-segment]` and inherits
-`--segment-angle`, the way the lower wheel's name tags always did. One rule
-places all three:
+`--segment-angle`, the way the lower wheel's name tags always did:
 
 ```css
 .rotary-sign-hanger {
@@ -844,23 +874,73 @@ places all three:
 ```
 
 It has to subtract **both** ancestors' rotations, or it comes out tilted by its
-own sector angle. On narrow screens only `left` changes (`91.2%`, a 41.2% orbit),
-which is the radius the one correctly-placed sign already used. `.rotary-tag-track`
-is gone; a sibling track is what let the signs drift in the first place.
+own sector angle. On narrow screens only `left` changes (`91.2%`, a 41.2% orbit).
+`.rotary-tag-track` is gone; a sibling track is what let the signs drift.
 
-### No clipping, and the decoration paints underneath
+`.rotary-segment` also no longer sets `overflow: hidden` or a wedge `clip-path`.
+The wedge looked tidy and silently truncated copy at narrow viewports (corners
+reach 64-78 degrees against a 60-degree limit), and a clip-path is invisible in a
+text diff. `.rotary-disc__sector-track::before` is `z-index: 1`, below the detail
+blocks at `4`; at `5` the decorative radial lines drew across the text.
 
-`.rotary-segment` no longer sets `overflow: hidden` or a wedge `clip-path`. The
-wedge looked tidy and silently truncated copy: at narrow viewports the
-contribution block's corners reach 64-78 degrees against a 60-degree limit. A
-clip-path is invisible in a text diff, so it survived review while cutting text
-on every phone.
+### Scroll physics
 
-`.rotary-disc__sector-track::before` (the radial sector lines) is `z-index: 1`,
-below the detail blocks at `4`. At `5` it drew straight across the contributor's
-copy.
+The wheel is a **critically damped spring**, integrated in seconds:
 
-### The wave mesh
+```js
+var SPRING_STIFFNESS = 132;
+var SPRING_DAMPING = 2 * Math.sqrt(SPRING_STIFFNESS);  // the critical boundary
+var MAX_ANGULAR_VELOCITY = 760;                        // deg/s ceiling
+```
+
+`damping == 2*sqrt(stiffness)` is the exact boundary at which the wheel returns
+to its target as fast as possible **without overshooting**. Under-damped and it
+wobbles past the contributor and settles back; over-damped and it crawls. At
+critical damping the error decays exponentially — fast while the gap is large,
+automatically easing off as it arrives — so there is no separate ease-out stage
+to tune. The relationship is asserted as an expression, not as two numbers, so
+retuning the stiffness cannot silently break the damping.
+
+Two details that are easy to lose:
+
+* **Seconds, not frames.** The previous integrator multiplied by a frame count
+  normalised to 16.67ms, which is frame-rate dependent: the same flick settled
+  visibly differently at 144Hz than at 60Hz.
+* **The settle lock must test the post-integration error.** Testing the
+  pre-integration error lets the loop exit one frame early — a frame arrives with
+  error `0.025` (no lock), integrates to `0.0198`, the stop test sees "close
+  enough" and quits, freezing the wheel at `119.98` degrees instead of `120`.
+
+Dead space is a number, not a vibe. A standard mouse notch is `deltaY 100`; at
+`WHEEL_DAMPING 0.11` that is 11 degrees, so committing a sector at
+`SNAP_THRESHOLD 0.5` takes about **6 notches** (it took ~13 at the old `0.05` /
+`0.65`). A hard notch (`deltaY >= 60`) arms `SNAP_THRESHOLD_FAST 0.26` for
+240ms, so one firm flick advances a whole sector — while a hesitant drag still
+has to pass half a sector before it commits, so the wheel never jumps under a
+hand that is still deciding. Each single input is clamped to `WHEEL_MAX_STEP` /
+`TOUCH_MAX_STEP` so one event can never throw it past a sector.
+
+### Switching contributors animates the arrival, not a rewrite
+
+Each segment **permanently owns** its member (`setSegmentContent` maps segment
+index to member index), so no copy is ever rewritten when the wheel settles —
+only the `.is-active` classes and the `01/02/03` counter change. The earlier
+version dimmed every block to nothing, waited 190ms, "swapped" text that was
+already correct, and faded back: a full-screen blink on every sector change,
+fighting the emphasis the spring was already ramping per frame.
+
+Now the classes and counter update synchronously, and `@keyframes rotary-arrive`
+eases the **incoming** block up into place (fade, 12px slide, 3px blur) while the
+outgoing one eases down under the same spring. `ARRIVAL_MS` in app.js must equal
+the animation's duration; a test asserts the two agree.
+
+The animation is applied to `.rotary-segment__content.is-arriving > *` — the
+**children**. `.rotary-segment__content` and `.rotary-sign-hanger` are
+counter-rotated every frame, so a transform animation on either would fight that
+and smear the wheel into a visible lag. Their children are not frame-driven and
+are safe. Reduced motion suppresses it.
+
+### The audio-reactive wave mesh
 
 `.credits-wave-matrix` is a canvas the credits screen owns. It replaced the
 static `.credits-rotary-page::before` grid texture — on this page only. The
@@ -870,47 +950,84 @@ including here, so credits deliberately carries two ambient layers.
 A mesh of grid nodes is displaced by two out-of-phase sine terms per axis, one
 keyed on the row and one on the column, so it shears and travels instead of
 breathing. Whole rows and columns are stroked as single paths (~60 per frame
-rather than ~2000 individual segments).
+rather than ~2000 segments).
 
-* **Colours are read from the stylesheet's `--violet-soft-rgb` / `--blue-rgb`**,
-  so the mesh follows the active theme instead of painting dark-mode indigo onto
-  a light page. A `prefers-color-scheme` flip re-reads them, and nudges one frame
-  through if the canvas is paused.
-* **Alpha stays in `0.03-0.085`.** The mesh sits behind the copy; the test suite
-  fails if a stroke exceeds `0.09`.
-* **`prefers-reduced-motion` gets one static frame and no loop.**
-* **Pixel ratio is capped at `1.75`**, like the dot matrix — a 3x retina buffer
-  costs four times the fill for one-pixel lines.
-* **It is page-scoped and removable.** `bootPage()` re-runs on every PJAX swap
-  and line 135 replaces `body.className`, so `initWaveMatrix()` tears the canvas
-  and its listeners down on the way out, and the draw loop stops itself the
-  moment `!canvas.isConnected`. Without that it would keep painting a fixed
-  full-viewport canvas over every other page.
+It is driven by the site's real Web Audio graph through the `AgoraAudio` facade,
+which now also exposes `getEnergy`, `getPulse`, `getSpectrum` and
+`SPECTRUM_BANDS`:
+
+* **`getSpectrum()`** splits the same `AnalyserNode` FFT into 8 log-spaced bands.
+  `getEnergy()` alone reduces the track to one bass-weighted number, which is
+  right for the dot matrix but too coarse for a mesh — every row would move
+  together and nothing would read as frequency. Log spacing because the
+  analyser's bins are linear in Hz while music is not. Bin 0 is skipped: it is DC
+  offset, not signal.
+* **Bass energy** drives amplitude (`spacing * (0.12 + energy * 0.22)`), stroke
+  alpha, and the glow on each node.
+* **Attack is faster than release** (`0.42` vs `0.11`) so the mesh snaps onto a
+  beat and eases off it — that asymmetry is what makes a visual read as driven by
+  sound rather than merely moving at the same time as it.
+* **A node must land in the same place from either pass.** Rows and columns are
+  stroked separately over the same grid, so if displacement depended on which
+  pass reached it, the mesh would tear at every intersection. `bandAt(row, column)`
+  blends the row's band with the column's, making displacement a pure function of
+  `(row, column)`.
+* **Glowing nodes** are a wide faint halo plus a tight bright core — two cheap
+  arcs. `shadowBlur` reads better and costs far too much at ~220 nodes a frame,
+  which is why nodes are drawn on every *other* intersection rather than every one.
+* **Silence still moves.** With the music off, energy and bands are zero and the
+  amplitude floor (`0.12`) keeps the mesh drifting, so there is no separate idle
+  path to keep in sync. Stopping the track decays the bands by `0.9` per frame
+  rather than zeroing them.
+* **Colours come from `--violet-soft-rgb` / `--blue-rgb`**, so the mesh follows
+  the active theme; a `prefers-color-scheme` flip re-reads them. Alpha is capped
+  by `Math.min` per pass (0.13 strokes, 0.10 cross-strokes, 0.22 node peak)
+  because however hard the track hits, the mesh sits *behind* the copy.
+* **`prefers-reduced-motion` gets one static frame and no loop** — audio
+  reactivity is disabled with it, deliberately: the preference is about motion,
+  and a mesh pulsing to a beat is motion.
+* **Pixel ratio is capped at `1.75`**, like the dot matrix.
+* **It is page-scoped and removable.** `bootPage()` re-runs per PJAX swap and
+  `body.className` is replaced, so the canvas and its listeners are torn down on
+  the way out and the draw loop stops itself once `!canvas.isConnected`.
+* **It reads the facade every frame**, not once at init, and degrades to its
+  silent drift if the facade is missing or an older shape — a cached `app.js` or
+  a browser with no `AudioContext` must not throw.
 
 ### Verifying the screen
 
-There is no browser in CI, and jsdom performs no layout, so placement is proved
+There is no browser in CI and jsdom performs no layout, so placement is proved
 two ways:
 
 ```bash
-npm test                                  # CreditsRotaryGeometry + CreditsWaveMatrix
-node /tmp/waveharness/behaviour.js        # 38 behavioural checks, needs jsdom
+npm test                        # 138 tests, incl. CreditsRotaryGeometry,
+                                # CreditsWaveMatrix, CreditsScrollPhysics,
+                                # CreditsWaveAudioReactivity
+node /tmp/wh/behaviour.js       # 71 behavioural checks, needs jsdom
 ```
 
 `CreditsRotaryGeometry` does not eyeball anything: it reads `--segment-angle`,
-`--sector-offset`, `--rotary-disc-size` and each disc's `translate()` back out of
-the stylesheet, recomputes every detail block's landing box across 14 viewports,
-and fails if a block reaches past an edge, under the header, or into the status
-bar. Before the fix that check failed on 8 of 9 viewports; it now passes on all
-14. The behavioural harness runs the real `app.js` in jsdom with a stubbed 2d
-context and asserts the canvas is created, painted with the theme's channels,
-reduced to one frame under reduced motion, and removed — without stacking a
-second — across a PJAX round trip.
+`--sector-offset`, `--rotary-disc-size`, each disc's `translate()`, and the rim
+labels' own `clamp()`/`min()` chains back out of the stylesheet on disk, then
+recomputes every landing box, every rim clearance and the visible wheel fraction
+across 14 viewports. The behavioural harness runs the real `app.js` in jsdom with
+a stubbed 2d context **and a stubbed Web Audio graph**, so it exercises
+`AnalyserNode` -> `getSpectrum()` -> mesh displacement end to end: it starts the
+track, feeds a bass-heavy FFT, and measures that the mesh's y-spread grows (path
+*length* is a useless proxy — doubling a sine's amplitude lengthens the path by
+only a few percent), that the nodes brighten, that the strokes stay under their
+ceiling, and that stopping the track decays the bands. It also flings the wheel
+and asserts the rotation trace never reverses direction, peaks under the velocity
+ceiling, and lands on an exact multiple of 120.
 
-Both suites are mutation-tested: 51 re-introduced regressions (a sign renumbered
+Both suites are mutation-tested: re-introduced regressions — a sign renumbered
 out of its segment, an angle drifted one degree, a hardcoded array restored, a
-hub moved to the wrong corner, the clip restored, a hardcoded stroke colour, the
-teardown removed) are each caught by the guard named for it.
+hub moved to the wrong corner, the wheels made to intersect, the clip restored, a
+hardcoded stroke colour, the damping detuned from critical, the settle lock
+reverted to the pre-integration error, the teardown removed — are each caught by
+the guard named for it.
+
+
 ## Notes
 
 - The feedback form on `about.html` uses the same-origin `/api/contact`

@@ -17,7 +17,7 @@
      7. Shared-post       — URL param parsing + post preview stub
      8. Ambient layer      — custom cursor, soundscape, synced dot matrix
      9. Dynamic download  — newest GitHub release APK for every CTA
-     10. Credits wave mesh — animated sine grid behind the rotary wheels
+     10. Credits wave mesh — audio-reactive sine grid behind the rotary wheels
    ============================================================ */
 
 (function agoraApp() {
@@ -27,6 +27,15 @@
   var reduceMotion = function () {
     return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   };
+
+  /* Shared by the credits wheel and the credits wave mesh. This used to be a
+     private helper inside initCreditsRotary, which is fine until a second
+     section needs it: the mesh called clamp() from its own draw loop and threw a
+     ReferenceError on every frame, silently killing the animation. `node --check`
+     cannot see that and neither can a source grep -- only running it can. */
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
 
   /* ------------------------------------------------------------
      1. LINK ROUTING
@@ -1088,11 +1097,75 @@
 
     // Expose one stable manager for the whole document. It is never recreated
     // when a page's <main> is replaced by the PJAX router.
+    /* ---- spectrum tap ----------------------------------------------------
+       getEnergy() already reduces the analyser to a single bass-weighted number.
+       That suits the dot matrix, but it is too coarse to drive a mesh: every row
+       would move together and nothing would read as frequency. This splits the
+       SAME FFT into log-spaced bands so different parts of the grid respond to
+       different parts of the track.
+
+       Log spacing because the analyser's bins are linear in Hz while music is
+       not -- the low bands carry the beat and need only a few bins each, the
+       high ones need many just to cover one octave.
+
+       Exposed on the existing facade rather than duplicated: these close over
+       the audio graph, and a second graph would drift out of sync with the
+       track that is actually playing.                                       */
+    var SPECTRUM_BANDS = 8;
+    var spectrum = [];
+    var spectrumBins = null;
+    for (var bandIndex = 0; bandIndex < SPECTRUM_BANDS; bandIndex += 1) spectrum.push(0);
+
+    function buildSpectrumBins(binCount) {
+      var bins = [];
+      var first = 1;                       // bin 0 is DC offset, not signal
+      var last = Math.max(first + SPECTRUM_BANDS, Math.floor(binCount * 0.62));
+      for (var i = 0; i < SPECTRUM_BANDS; i += 1) {
+        var from = first + (Math.pow(i / SPECTRUM_BANDS, 1.9) * (last - first));
+        var to = first + (Math.pow((i + 1) / SPECTRUM_BANDS, 1.9) * (last - first));
+        var start = Math.min(binCount - 1, Math.floor(from));
+        var end = Math.min(binCount, Math.max(start + 1, Math.floor(to)));
+        bins.push([start, end]);
+      }
+      return bins;
+    }
+
+    function getSpectrum() {
+      var i;
+      if (!audio.isPlaying || !audio.analyser || !audio.data) {
+        // Decay rather than snap to zero, so stopping the track eases the mesh
+        // back into its silent drift instead of dropping it in a single frame.
+        for (i = 0; i < SPECTRUM_BANDS; i += 1) spectrum[i] *= 0.9;
+        return spectrum;
+      }
+      audio.analyser.getByteFrequencyData(audio.data);
+      if (!spectrumBins) spectrumBins = buildSpectrumBins(audio.data.length);
+      for (i = 0; i < SPECTRUM_BANDS; i += 1) {
+        var range = spectrumBins[i];
+        var total = 0;
+        var count = 0;
+        for (var bin = range[0]; bin < range[1]; bin += 1) {
+          total += audio.data[bin];
+          count += 1;
+        }
+        var next = count ? total / count / 255 : 0;
+        // Attack fast, release slow: the mesh snaps onto a beat and eases off it,
+        // which is how the eye reads a visual as being driven by sound rather
+        // than merely moving at the same time as it.
+        spectrum[i] += (next - spectrum[i]) * (next > spectrum[i] ? 0.42 : 0.11);
+      }
+      return spectrum;
+    }
+
     window.AgoraAudio = {
       start: startMusic,
       stop: stopMusic,
       toggle: toggleMusic,
-      get isPlaying() { return audio.isPlaying; }
+      get isPlaying() { return audio.isPlaying; },
+      getEnergy: getEnergy,
+      getPulse: getPulse,
+      getSpectrum: getSpectrum,
+      SPECTRUM_BANDS: SPECTRUM_BANDS
     };
 
     function getEnergy() {
@@ -1348,11 +1421,65 @@
       touchVelocity: 0
     };
     var SEGMENT = 120;
-    var WHEEL_DAMPING = 0.05;
-    var TOUCH_DAMPING = 0.78;
+
+    /* --- input sensitivity ------------------------------------------------
+       How much of the physical gesture reaches the wheel. The old 0.05 meant a
+       single mouse notch (deltaY 100) turned the wheel 5 degrees, so reaching
+       one 120-degree sector took ~24 notches: that is the "excessive dead
+       space" feeling. 0.11 puts it at ~11 degrees per notch.                */
+    var WHEEL_DAMPING = 0.11;
+    var WHEEL_MAX_STEP = 45;      // one event can never throw it past a sector
+    var TOUCH_DAMPING = 0.92;     // was 0.78: a 120-degree sector now takes
+                                  // ~130px of drag instead of ~155px
+    var TOUCH_MAX_STEP = 40;
     var TOUCH_FLING_VELOCITY = 0.72;
-    var SNAP_DELAY = 120;
-    var SNAP_THRESHOLD = 0.65;
+
+    /* --- snapping ---------------------------------------------------------
+       Two thresholds. A hesitant drag still has to pass half a sector before it
+       commits, so the wheel never jumps under a hand that is still deciding; a
+       fast scroll commits at 26%, which is what removes the dead space without
+       making the wheel feel trigger-happy. COMMIT_BOOST_MS is how long a fast
+       input keeps that quicker threshold armed.                            */
+    var SNAP_DELAY = 90;          // was 120
+    var SNAP_THRESHOLD = 0.5;     // was 0.65
+    var SNAP_THRESHOLD_FAST = 0.26;
+    var COMMIT_BOOST_MS = 240;
+    var FAST_WHEEL_DELTA = 60;    // a wheel event above this counts as "hard"
+
+    /* --- the spring -------------------------------------------------------
+       Critically damped on purpose: damping == 2*sqrt(stiffness) is the exact
+       boundary at which the wheel returns to its target as fast as possible
+       WITHOUT overshooting. Under-damped and it wobbles past the contributor
+       and settles back; over-damped and it crawls in. Critically damped it
+       decays exponentially -- fast while the error is large, automatically
+       easing off as it arrives -- which is the "slows down and cleanly locks
+       into place" behaviour, with no separate ease-out stage to tune.
+
+       All three constants are per SECOND, not per frame, and the integrator
+       below works in seconds. The previous version multiplied by a frame count
+       normalised to 16.67ms, which is frame-rate dependent: the same flick
+       settled noticeably differently on a 144Hz display than on a 60Hz one. */
+    var SPRING_STIFFNESS = 132;
+    var SPRING_DAMPING = 2 * Math.sqrt(SPRING_STIFFNESS);
+    var MAX_ANGULAR_VELOCITY = 760;   // deg/s ceiling: hard scrolls stay bounded
+    var SETTLE_ANGLE = 0.02;          // inside this, lock exactly onto the target
+    var SETTLE_VELOCITY = 0.6;        // so the wheel never idles a hair off
+
+    /* How long the arriving block's ease-up plays. Must equal the
+       rotary-arrive animation duration in style.css. */
+    var ARRIVAL_MS = 420;
+
+    // A fast input arms the quicker snap threshold for a short window.
+    var commitBoostUntil = 0;
+
+    function nowMs() {
+      return window.performance && window.performance.now
+        ? window.performance.now() : Date.now();
+    }
+
+    function armCommitBoost() {
+      commitBoostUntil = nowMs() + COMMIT_BOOST_MS;
+    }
     var teamLength = ROTARY_TEAM.length;
 
     /* The sector geometry lives in the stylesheet -- --segment-angle on each
@@ -1391,11 +1518,18 @@
         return angle !== null;
       });
 
-    if (total) total.textContent = String(teamLength).padStart(2, '0');
+    // Every detail block, so an arrival marker can be cleared from all of them
+    // before being set on the one that is arriving. A marker left behind by a
+    // rapid series of sector changes would keep that block animating forever.
+    var allContents = [];
+    [topSegments, bottomSegments].forEach(function (segments) {
+      Array.prototype.forEach.call(segments, function (segment) {
+        var content = segment.querySelector('.rotary-segment__content');
+        if (content) allContents.push(content);
+      });
+    });
 
-    function clamp(value, min, max) {
-      return Math.max(min, Math.min(max, value));
-    }
+    if (total) total.textContent = String(teamLength).padStart(2, '0');
 
     function indexForRotation(rotation) {
       var sector = Math.round(rotation / SEGMENT);
@@ -1443,21 +1577,42 @@
 
     function showMember(index, animate) {
       state.memberIndex = (index + teamLength) % teamLength;
-      if (!animate) {
-        setMemberText();
-        return;
-      }
+
+      /* Nothing in the copy is rewritten when the wheel settles. Each segment
+         permanently owns its member -- setSegmentContent maps segment index to
+         member index -- so the only things that actually change are the
+         .is-active classes and the 01/02/03 counter.
+
+         The old version dimmed EVERY block to nothing, waited 190ms, "swapped"
+         text that was already correct, and faded back. That hid a no-op and
+         blinked the whole screen on every sector change, fighting the per-frame
+         emphasis the spring is already ramping smoothly. So: update the classes
+         and the counter immediately, with no timer to drift out of sync, and
+         animate the one thing that genuinely changed -- which block arrived. */
+      setMemberText();
+      if (!animate) return;
 
       state.transition += 1;
       var transitionId = state.transition;
-      topDisc.classList.add('is-changing');
-      bottomDisc.classList.add('is-changing');
+      allContents.forEach(function (content) { content.classList.remove('is-arriving'); });
+
+      var arriving = [topSegments[state.memberIndex], bottomSegments[state.memberIndex]]
+        .map(function (segment) {
+          return segment ? segment.querySelector('.rotary-segment__content') : null;
+        })
+        .filter(function (content) { return !!content; });
+
+      arriving.forEach(function (content) {
+        // Reflow between removing and re-adding, so stepping through sectors
+        // faster than the animation plays restarts it instead of skipping it.
+        void content.offsetWidth;
+        content.classList.add('is-arriving');
+      });
+
       window.setTimeout(function () {
         if (transitionId !== state.transition) return;
-        setMemberText();
-        topDisc.classList.remove('is-changing');
-        bottomDisc.classList.remove('is-changing');
-      }, 150);
+        arriving.forEach(function (content) { content.classList.remove('is-arriving'); });
+      }, ARRIVAL_MS);
     }
 
     function updateMemberFromRotation(rotation) {
@@ -1516,12 +1671,15 @@
     function calculateSnapTarget() {
       var displacement = state.rotationTarget - state.anchorRotation;
       if (!displacement) return state.anchorRotation;
+      // A hard scroll commits early; a slow, deliberate drag still has to pass
+      // the resting threshold so the wheel cannot jump under a hesitant hand.
+      var threshold = nowMs() < commitBoostUntil ? SNAP_THRESHOLD_FAST : SNAP_THRESHOLD;
 
       var direction = displacement < 0 ? -1 : 1;
       var distance = Math.abs(displacement);
       var completeSegments = Math.floor(distance / SEGMENT);
       var remainder = distance - (completeSegments * SEGMENT);
-      var extraSegment = remainder / SEGMENT >= SNAP_THRESHOLD ? 1 : 0;
+      var extraSegment = remainder / SEGMENT >= threshold ? 1 : 0;
       return state.anchorRotation + direction * (completeSegments + extraSegment) * SEGMENT;
     }
 
@@ -1546,11 +1704,35 @@
         updateMemberFromRotation(state.rotationTarget);
       }
 
-      // A critically damped-ish spring gives the wheel weight while still
-      // allowing the trackpad to hand it a deliberate, low-sensitivity turn.
-      state.rotationVelocity += (state.rotationTarget - state.rotation) * 0.16 * elapsed;
-      state.rotationVelocity *= Math.pow(0.68, elapsed);
-      state.rotation += state.rotationVelocity * elapsed;
+      /* Critically damped spring, integrated in SECONDS so the settle is
+         identical at 60Hz and 144Hz. Acceleration is the pull toward the target
+         minus a drag proportional to velocity; at damping == 2*sqrt(stiffness)
+         the error decays exponentially with no overshoot, so the wheel is fast
+         while the gap is large and eases itself into the sector as it closes. */
+      var dt = clamp(timestamp - state.lastTime, 8, 34) / 1000;
+      var error = state.rotationTarget - state.rotation;
+      var acceleration = (error * SPRING_STIFFNESS) - (state.rotationVelocity * SPRING_DAMPING);
+      state.rotationVelocity = clamp(
+        state.rotationVelocity + (acceleration * dt),
+        -MAX_ANGULAR_VELOCITY, MAX_ANGULAR_VELOCITY
+      );
+      state.rotation += state.rotationVelocity * dt;
+
+      /* Lock exactly onto the target once it is close and slow, so the spring
+         does not asymptote forever and idle a hair off-sector.
+
+         This must test the error AFTER the integration above, and must run before
+         the stop test at the end of the frame. Testing the pre-integration error
+         lets the loop exit one frame early: a frame arrives with error 0.025 (so
+         no lock), integrates down to 0.0198, and the stop test below then sees
+         "close enough" and quits -- freezing the wheel at 119.98 degrees instead
+         of 120. Invisible to the eye, but it is the difference between a wheel
+         that locks and one that merely stops. */
+      if (Math.abs(state.rotationTarget - state.rotation) < SETTLE_ANGLE
+        && Math.abs(state.rotationVelocity) < SETTLE_VELOCITY) {
+        state.rotation = state.rotationTarget;
+        state.rotationVelocity = 0;
+      }
 
       // Every role tag has its own delayed pendulum. The CSS applies the
       // exact inverse wheel rotation first, then this small spring swing.
@@ -1568,8 +1750,8 @@
       var tagsMoving = state.tagAngles.some(function (angle, index) {
         return Math.abs(angle) > 0.01 || Math.abs(state.tagVelocities[index]) > 0.01;
       });
-      var moving = Math.abs(state.rotationTarget - state.rotation) > 0.04
-        || Math.abs(state.rotationVelocity) > 0.01
+      var moving = Math.abs(state.rotationTarget - state.rotation) > 0.02
+        || Math.abs(state.rotationVelocity) > SETTLE_VELOCITY
         || tagsMoving;
       if (moving) queueFrame();
     }
@@ -1601,9 +1783,10 @@
       if (!delta) return;
       hideScrollAffordance();
 
-      // Five percent of the physical wheel delta makes fast trackpads feel
-      // deliberate instead of throwing the 120-degree wheel across the UI.
-      var rotationDelta = clamp(delta * WHEEL_DAMPING, -36, 36);
+      var rotationDelta = clamp(delta * WHEEL_DAMPING, -WHEEL_MAX_STEP, WHEEL_MAX_STEP);
+      // A hard notch arms the quicker snap threshold so one firm flick advances
+      // a whole sector instead of needing the user to keep scrolling into it.
+      if (Math.abs(delta) >= FAST_WHEEL_DELTA) armCommitBoost();
       applyRotationDelta(rotationDelta);
       scheduleSnap();
     }
@@ -1649,7 +1832,8 @@
 
       // Finger-up is the same direction as scrolling down: it advances the
       // wheel. The accumulated target is evaluated by the shared 65% snap rule.
-      applyRotationDelta(clamp(verticalDelta * TOUCH_DAMPING, -34, 34));
+      applyRotationDelta(clamp(verticalDelta * TOUCH_DAMPING, -TOUCH_MAX_STEP, TOUCH_MAX_STEP));
+      if (Math.abs(state.touchVelocity) >= TOUCH_FLING_VELOCITY) armCommitBoost();
     }
 
     function finishTouch(event) {
@@ -1987,6 +2171,14 @@
      whole rows and columns so a frame costs on the order of sixty
      paths instead of a couple of thousand individual segments.
 
+     The mesh is wired into the site's Web Audio graph through the
+     AgoraAudio facade: the track's log-spaced spectrum drives per-node
+     displacement and its bass energy drives amplitude, stroke alpha and
+     the glow on each node. With the music off -- or on a browser with no
+     AudioContext -- energy and bands are simply zero and the same code
+     falls back to its silent drift, so there is no separate idle path to
+     keep in sync.
+
      It follows the ambient dot matrix's discipline. Colours are read
      back out of the stylesheet's --*-rgb channels, so the mesh tracks
      the active theme rather than painting dark-mode indigo onto a
@@ -2067,14 +2259,43 @@
 
     /* Two sine terms per axis -- one keyed on the row, one on the column -- so
        the mesh shears and travels instead of expanding in place. That shear is
-       what reads as a wave rather than as breathing. Amplitude is 17% of the
-       cell, enough to see the distortion without letting lines cross. */
-    function nodeX(column, row, time) {
-      return ((column - 1) * spacing) + (Math.sin((time * 0.31) + (row * 0.42)) * spacing * 0.17);
+       what reads as a wave rather than as breathing.
+
+       `amp` is the base displacement and `band` is this node's share of the live
+       spectrum. One function serves both states: with no music, energy and band
+       are 0 and the mesh keeps breathing on its own at 12% of a cell, so the
+       background is never dead. At full tilt the track roughly triples it.   */
+    function nodeX(column, row, time, amp, band) {
+      return ((column - 1) * spacing)
+        + (Math.sin((time * 0.31) + (row * 0.42)) * amp)
+        + (Math.sin((time * 0.92) + (row * 0.16)) * amp * band);
     }
 
-    function nodeY(column, row, time) {
-      return ((row - 1) * spacing) + (Math.cos((time * 0.24) + (column * 0.37)) * spacing * 0.17);
+    function nodeY(column, row, time, amp, band) {
+      return ((row - 1) * spacing)
+        + (Math.cos((time * 0.24) + (column * 0.37)) * amp)
+        + (Math.cos((time * 1.07) + (column * 0.19)) * amp * band);
+    }
+
+    /* A node must land in the SAME place whether it is reached along its row or
+       along its column, or the mesh tears at every intersection -- two passes
+       drawing the same grid point in two different spots. Blending the row's
+       band with the column's makes the displacement a pure function of
+       (row, column), which is what keeps the passes stitched together. */
+    function bandAt(row, column, bands) {
+      if (!bands || !bands.length) return 0;
+      return (bands[row % bands.length] + bands[column % bands.length]) * 0.5;
+    }
+
+    /* Read every frame rather than once at init: the mesh is rebuilt on each PJAX
+       swap while the audio graph is built once per session, and the track can
+       start or stop at any moment. A missing or older facade must degrade to the
+       silent drift, never throw. */
+    function readAudio() {
+      var api = window.AgoraAudio;
+      if (!api || typeof api.getEnergy !== 'function'
+        || typeof api.getSpectrum !== 'function') return null;
+      return api;
     }
 
     function stroke(points, color, alpha) {
@@ -2087,35 +2308,77 @@
       context.stroke();
     }
 
+    /* A glowing node is a wide faint halo with a tight bright core. Two cheap
+       arcs read as a glow; canvas shadowBlur reads better and costs far too much
+       at a couple of hundred nodes a frame. */
+    function glowNode(x, y, heat) {
+      var radius = 0.55 + (heat * 1.5);
+      context.beginPath();
+      context.fillStyle = 'rgba(' + palette.violet + ',' + (0.02 + (heat * 0.08)).toFixed(4) + ')';
+      context.arc(x, y, radius * 3.4, 0, Math.PI * 2);
+      context.fill();
+      context.beginPath();
+      context.fillStyle = 'rgba(' + palette.blue + ',' + (0.05 + (heat * 0.17)).toFixed(4) + ')';
+      context.arc(x, y, radius, 0, Math.PI * 2);
+      context.fill();
+    }
+
     function draw(timestamp) {
       // A PJAX swap may have detached us between frames. Stop rather than keep
       // painting an invisible canvas for the rest of the session.
       if (!canvas.isConnected) return;
 
       var time = timestamp / 1000;
+      var api = readAudio();
+      var energy = api ? clamp(api.getEnergy(), 0, 1) : 0;
+      var bands = api ? api.getSpectrum() : null;
+      // Silent drift plus up to ~2.8x displacement when the track is loud. The
+      // cap keeps lines from crossing, which would read as tearing not waving.
+      var amp = spacing * (0.12 + (energy * 0.22));
+
       context.clearRect(0, 0, width, height);
       context.lineWidth = 1;
 
       var points = [];
       var row;
       var column;
+      var band;
 
       for (row = 0; row < rows; row += 1) {
         points.length = 0;
         for (column = 0; column < columns; column += 1) {
-          points.push(nodeX(column, row, time), nodeY(column, row, time));
+          band = bandAt(row, column, bands);
+          points.push(nodeX(column, row, time, amp, band), nodeY(column, row, time, amp, band));
         }
         var drift = 0.5 + (0.5 * Math.sin((time * 0.18) + (row * 0.55)));
-        stroke(points, row % 3 === 0 ? palette.blue : palette.violet, 0.045 + (drift * 0.04));
+        // Ceiling matters more than the ramp: the mesh sits behind the copy, so
+        // however hard the track hits, the lines stay under 0.13 alpha.
+        stroke(points, row % 3 === 0 ? palette.blue : palette.violet,
+          Math.min(0.13, 0.045 + (drift * 0.04) + (energy * 0.05)));
       }
 
       for (column = 0; column < columns; column += 1) {
         points.length = 0;
         for (row = 0; row < rows; row += 1) {
-          points.push(nodeX(column, row, time), nodeY(column, row, time));
+          band = bandAt(row, column, bands);
+          points.push(nodeX(column, row, time, amp, band), nodeY(column, row, time, amp, band));
         }
         var cross = 0.5 + (0.5 * Math.cos((time * 0.15) + (column * 0.47)));
-        stroke(points, palette.violet, 0.03 + (cross * 0.03));
+        stroke(points, palette.violet,
+          Math.min(0.1, 0.03 + (cross * 0.03) + (energy * 0.04)));
+      }
+
+      // Glowing nodes on every other intersection: ~220 arcs a frame instead of
+      // ~900, which is the difference between smooth and stuttered on a phone.
+      for (row = 0; row < rows; row += 2) {
+        for (column = 0; column < columns; column += 2) {
+          band = bandAt(row, column, bands);
+          glowNode(
+            nodeX(column, row, time, amp, band),
+            nodeY(column, row, time, amp, band),
+            clamp((band * 0.7) + (energy * 0.45), 0, 1)
+          );
+        }
       }
 
       if (!reduceMotion()) window.requestAnimationFrame(draw);

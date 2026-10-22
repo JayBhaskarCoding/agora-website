@@ -344,8 +344,14 @@ class LaunchContract(unittest.TestCase):
         self.assertIn("padding: 8px 16px", self.css)
         self.assertIn(".rotary-sign,\n.rotary-name-tag", self.css)
         self.assertIn("@media (max-width: 768px)", self.css)
-        self.assertIn("translate(-65%, -65%)", self.css)
-        self.assertIn("translate(65%, 65%)", self.css)
+        # Both breakpoints share ONE hub inset (see CreditsRotaryGeometry):
+        # narrow screens used to push each hub 15% of the disc off-screen.
+        self.assertIn("translate(-44%, -44%)", self.css)
+        self.assertIn("translate(44%, 44%)", self.css)
+        for stale in ("translate(-65%, -65%)", "translate(65%, 65%)",
+                      "translate(-50%, -50%);\n  --sector-offset"):
+            self.assertNotIn(stale, self.css,
+                             "a divergent per-breakpoint hub inset came back")
         for listener in ["touchstart", "touchmove", "touchend"]:
             self.assertIn("page.addEventListener('" + listener + "'", (ROOT / "app.js").read_text())
         self.assertIn("TOUCH_DAMPING", (ROOT / "app.js").read_text())
@@ -1918,11 +1924,30 @@ class CreditsRotaryGeometry(unittest.TestCase):
     # --- helpers -------------------------------------------------------
     def block(self, selector, after=0):
         """The declaration body of the FIRST rule matching selector at/after
-        `after`, so a mobile override can be read separately from the base."""
+        `after`, so a mobile override can be read separately from the base.
+
+        Comment-aware and depth-counting. A CSS comment may legitimately contain
+        braces -- the credits block lists its three landing angles as
+        {40,160,280} -- and a naive search for the next "}" truncates the rule at
+        the first one, which then reports every later declaration as missing."""
         start = self.css.index(selector, after)
         brace = self.css.index("{", start)
-        end = self.css.index("}", brace)
-        return self.css[brace + 1:end], end
+        depth = 0
+        i = brace
+        end = len(self.css)
+        while i < end:
+            if self.css.startswith("/*", i):
+                i = self.css.index("*/", i) + 2
+                continue
+            char = self.css[i]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return self.css[brace + 1:i], i
+            i += 1
+        self.fail(f"unbalanced braces after {selector!r}")
 
     def decl(self, body, prop):
         match = re.search(r"(?:^|[;\s])" + re.escape(prop) + r":\s*([^;]+);", body)
@@ -2116,7 +2141,7 @@ class CreditsRotaryGeometry(unittest.TestCase):
             body, _ = self.block(modifier)
             self.assertIsNone(self.decl(body, "top"), f"{modifier} re-tunes top")
             self.assertIsNone(self.decl(body, "left"), f"{modifier} re-tunes left")
-        self.assertEqual((self.pct(base, "left"), self.pct(base, "top")), (88.0, 48.0))
+        self.assertEqual((self.pct(base, "left"), self.pct(base, "top")), (81.5, 43.0))
 
     def test_segments_no_longer_clip_their_content(self):
         """The upper wheel clipped its sectors to a 120-degree wedge, which cut
@@ -2203,6 +2228,273 @@ class CreditsRotaryGeometry(unittest.TestCase):
         self.assertGreater(bx + pw / 2, w / 2, "the profile block is not lower-right")
         self.assertGreater(by + phh / 2, h / 2, "the profile block is not lower-right")
 
+    # --- helpers for the rim labels ------------------------------------
+    REM = 16.0
+
+    def resolve_size(self, expr, d, vw):
+        """Evaluate the clamp()/min() chains the credits rules use, so the label
+        boxes are derived from the stylesheet instead of restated here."""
+        def val(token):
+            token = token.strip()
+            if token.startswith("calc(") and "100vw" in token:
+                off = re.search(r"-\s*([\d.]+)rem", token)
+                return vw - (float(off.group(1)) * self.REM if off else 0)
+            if token.startswith("calc(") and "var(--rotary-disc-size)" in token:
+                return d * float(re.search(r"\*\s*([\d.]+)", token).group(1))
+            if token.endswith("rem"):
+                return float(token[:-3]) * self.REM
+            if token.endswith("px"):
+                return float(token[:-2])
+            self.fail(f"cannot evaluate {token!r} from the stylesheet")
+
+        expr = expr.strip()
+        m = re.match(r"^clamp\((.*?), (.*?), (.*)\)$", expr)
+        if m:
+            return max(val(m.group(1)), min(val(m.group(2)), val(m.group(3))))
+        m = re.match(r"^min\((.*?), (.*)\)$", expr)
+        if m:
+            return min(val(m.group(1)), val(m.group(2)))
+        return val(expr)
+
+    def block_declaring(self, selector, prop, after=0):
+        """The first rule for `selector` that actually declares `prop`.
+
+        `.rotary-name-tag {` matches the shared box rule (`.rotary-sign,
+        .rotary-name-tag {`) before it matches the positioning rule, and only the
+        second one declares `left`."""
+        cursor = after
+        for _ in range(6):
+            try:
+                body, end = self.block(selector, cursor)
+            except ValueError:
+                break
+            if self.decl(body, prop) is not None:
+                return body
+            cursor = end + 1
+        self.fail(f"no {selector} rule declares {prop}")
+
+    def orbit_radius(self, kind, mobile):
+        selector = ".rotary-sign-hanger {" if kind == "sign" else ".rotary-name-tag {"
+        if mobile:
+            try:
+                body, _ = self.block(selector, self.mobile_offset())
+                if self.decl(body, "left"):
+                    return float(self.decl(body, "left").rstrip("%")) - 50
+            except ValueError:
+                pass
+        body = self.block_declaring(selector, "left")
+        return float(self.decl(body, "left").rstrip("%")) - 50
+
+    def label_box(self, mobile, d, vw):
+        """(width, height) of a rim label, read from whichever rule wins."""
+        if mobile:
+            try:
+                body, _ = self.block(".rotary-name-tag {", self.mobile_offset())
+                if self.decl(body, "height"):
+                    return (self.resolve_size(self.decl(body, "min-width"), d, vw),
+                            self.resolve_size(self.decl(body, "height"), d, vw))
+            except ValueError:
+                pass
+        body = self.block_declaring(".rotary-name-tag {", "height")
+        return (self.resolve_size(self.decl(body, "min-width"), d, vw),
+                self.resolve_size(self.decl(body, "height"), d, vw))
+
+    def cord_length(self, mobile, d):
+        body, _ = self.block(".rotary-sign-hanger__cord {")
+        return self.resolve_size(self.decl(body, "height"), d, 0)
+
+    def ray_point(self, w, h, mobile, which, theta, radius_pct):
+        d = self.disc_diameter(w, h, mobile)
+        hx, hy = self.hub(which, w, h, mobile)
+        a = math.radians(theta)
+        vx, vy = radius_pct / 100 * d, 0.0
+        return hx + vx * math.cos(a) - vy * math.sin(a), hy + vx * math.sin(a) + vy * math.cos(a)
+
+    def content_centre(self, w, h, mobile, which, theta, left, top):
+        d = self.disc_diameter(w, h, mobile)
+        hx, hy = self.hub(which, w, h, mobile)
+        a = math.radians(theta)
+        vx, vy = (left - 50) / 100 * d, (top - 50) / 100 * d
+        return hx + vx * math.cos(a) - vy * math.sin(a), hy + vx * math.sin(a) + vy * math.cos(a)
+
+    @staticmethod
+    def box(cx, cy, bw, bh):
+        return (cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2)
+
+    @staticmethod
+    def hits(a, b):
+        return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+    # --- 5. the wheels and the copy must not collide ---------------------
+    def test_both_breakpoints_share_one_hub_inset(self):
+        """One number, not two that can drift apart. Narrow screens used to push
+        each hub 15% of the disc off-screen, which threw away most of the wheel."""
+        base_top = self.decl(self.block(".rotary-disc--top {")[0], "transform")
+        base_bottom = self.decl(self.block(".rotary-disc--bottom {")[0], "transform")
+        self.assertEqual(base_top, "translate(-44%, -44%)")
+        self.assertEqual(base_bottom, "translate(44%, 44%)")
+        # Assert on the media tail itself: disc_rule() falls back to the base
+        # rule when the narrow block declares no override, which cannot tell
+        # "absent" apart from "present and wrong".
+        tail = self.css[self.mobile_offset():]
+        for which in ("top", "bottom"):
+            self.assertNotIn(f".rotary-disc--{which} {{", tail,
+                             f"the narrow-screen block re-tunes the {which} hub")
+
+    def test_the_wheels_never_intersect(self):
+        """Pulling the hubs inward is what fills the dead space in the middle of
+        the screen, but only until the rims meet. -44% is the limit: past it the
+        two wheels overlap on the tighter viewports and the sector lines of one
+        draw across the face of the other."""
+        for mobile, viewports in ((False, self.DESKTOP), (True, self.MOBILE)):
+            for w, h in viewports:
+                d = self.disc_diameter(w, h, mobile)
+                tx, ty = self.hub("top", w, h, mobile)
+                bx, by = self.hub("bottom", w, h, mobile)
+                gap = math.hypot(bx - tx, by - ty) - d
+                with self.subTest(viewport=f"{w}x{h}", mobile=mobile):
+                    self.assertGreaterEqual(gap, 0, "the two wheel rims intersect")
+
+    def test_sector_utilisation_is_maximised(self):
+        """The point of moving the hubs at all: how much of each wheel is
+        actually on screen. Corner-pinned hubs showed 19.7% on desktop and 7.3%
+        on a phone, and left the middle of the viewport empty."""
+        for mobile, (w, h), floor in ((False, (1440, 900), 0.25), (True, (390, 844), 0.25)):
+            d = self.disc_diameter(w, h, mobile)
+            hx, hy = self.hub("top", w, h, mobile)
+            r = d / 2
+            steps = 150
+            inside = 0
+            for i in range(steps):
+                y = hy - r + (i + 0.5) * (2 * r / steps)
+                for j in range(steps):
+                    x = hx - r + (j + 0.5) * (2 * r / steps)
+                    if ((x - hx) ** 2 + (y - hy) ** 2 <= r * r
+                            and 0 <= x <= w and 0 <= y <= h):
+                        inside += 1
+            fraction = inside / (steps * steps)
+            with self.subTest(viewport=f"{w}x{h}", mobile=mobile):
+                self.assertGreaterEqual(fraction, floor,
+                                        f"only {fraction:.1%} of the wheel is on screen")
+
+    def test_detail_blocks_never_collide_with_their_rim_labels(self):
+        """The hanging role sign and the name plate sit on the same ray as their
+        own detail block -- and the sign hangs straight DOWN in screen space while
+        the ray points wherever its sector does, so on an upward-pointing ray the
+        sign swings back toward the copy.
+
+        All three landing rays per wheel are checked, not just the settled one:
+        A_i -/+ 120m always reduces to {40,160,280} and {220,340,100}, so the set
+        of directions is fixed no matter which contributor is showing. The two
+        non-settled blocks are measured at the 0.6 scale they really render at."""
+        base, _ = self.block(".rotary-segment__content {")
+        mobile_body, _ = self.block(".rotary-segment__content {", self.mobile_offset())
+        rays = {"top": (40, 160, 280), "bottom": (220, 340, 100)}
+        for mobile, viewports, body in ((False, self.DESKTOP, base), (True, self.MOBILE, mobile_body)):
+            left, top = self.pct(body, "left"), self.pct(body, "top")
+            for w, h in viewports:
+                d = self.disc_diameter(w, h, mobile)
+                (cw, chh), (pw, phh) = self._metrics(w, h, d, mobile)
+                bw_l, bh_l = self.label_box(mobile, d, w)
+                cord = self.cord_length(mobile, d)
+                for which in ("top", "bottom"):
+                    r_orbit = self.orbit_radius("sign" if which == "top" else "name", mobile)
+                    size = (cw, chh) if which == "top" else (pw, phh)
+                    for theta in rays[which]:
+                        # Only the settled block renders at full size.
+                        scale = 1.0 if theta in (40, 220) else 0.6
+                        cx, cy = self.content_centre(w, h, mobile, which, theta, left, top)
+                        cbox = self.box(cx, cy, size[0] * scale, size[1] * scale)
+                        lx, ly = self.ray_point(w, h, mobile, which, theta, r_orbit)
+                        if which == "top":
+                            ly += cord + bh_l / 2      # the sign hangs straight down
+                        lbox = self.box(lx, ly, bw_l, bh_l)
+                        with self.subTest(viewport=f"{w}x{h}", mobile=mobile,
+                                          wheel=which, ray=theta):
+                            self.assertFalse(self.hits(cbox, lbox),
+                                             "the copy collides with its own rim label")
+
+    def test_the_two_detail_blocks_never_overlap_each_other(self):
+        base, _ = self.block(".rotary-segment__content {")
+        mobile_body, _ = self.block(".rotary-segment__content {", self.mobile_offset())
+        for mobile, viewports, body in ((False, self.DESKTOP, base), (True, self.MOBILE, mobile_body)):
+            left, top = self.pct(body, "left"), self.pct(body, "top")
+            for w, h in viewports:
+                d = self.disc_diameter(w, h, mobile)
+                (cw, chh), (pw, phh) = self._metrics(w, h, d, mobile)
+                tx, ty = self.content_centre(w, h, mobile, "top", 40, left, top)
+                bx, by = self.content_centre(w, h, mobile, "bottom", 220, left, top)
+                with self.subTest(viewport=f"{w}x{h}", mobile=mobile):
+                    self.assertFalse(self.hits(self.box(tx, ty, cw, chh),
+                                               self.box(bx, by, pw, phh)),
+                                     "the two contributor blocks overlap")
+
+    # --- 6. the swap animation ----------------------------------------
+    def test_the_arrival_timing_agrees_between_css_and_js(self):
+        """app.js clears the arrival marker on a timer; the CSS animation plays
+        for a duration. If those drift apart the marker is stripped mid-ease (the
+        block snaps) or left on afterwards (it animates forever)."""
+        js = int(re.search(r"var ARRIVAL_MS = (\d+);", self.app).group(1))
+        css = re.search(r"animation: rotary-arrive ([\d.]+)s", self.css)
+        self.assertIsNotNone(css, "the rotary-arrive animation is missing")
+        self.assertEqual(float(css.group(1)) * 1000, float(js),
+                         f"CSS animation {css.group(1)}s vs ARRIVAL_MS {js}ms")
+
+    def test_the_copy_is_not_swapped_behind_a_timer(self):
+        """Each segment permanently owns its member, so nothing in the copy
+        actually changes when the wheel settles -- only the .is-active classes
+        and the 01/02/03 counter do. Deferring that behind a timeout bought
+        nothing and gave the two a chance to drift apart."""
+        body = self.app.split("function showMember(index, animate)", 1)[1]
+        body = body.split("\n    }", 1)[0]
+        self.assertIn("setMemberText();\n      if (!animate) return;", body,
+                      "the class/counter update must be synchronous")
+        timer = body.split("window.setTimeout(", 1)
+        self.assertEqual(len(timer), 2, "expected exactly one timer, for the marker")
+        self.assertNotIn("setMemberText()", timer[1],
+                         "the copy update is still hidden inside a timeout")
+        self.assertNotIn("is-changing", self.app, "the dim-everything swap is gone")
+        self.assertNotIn("is-changing", self.css, "and so is its rule")
+
+    def test_the_arrival_marker_is_cleared_from_every_block_first(self):
+        """Stepping through sectors faster than the animation plays must not
+        leave a marker behind on a block that is no longer arriving."""
+        body = self.app.split("function showMember(index, animate)", 1)[1]
+        self.assertLess(body.index("content.classList.remove('is-arriving')"),
+                        body.index("content.classList.add('is-arriving')"),
+                        "the marker is added before it is cleared")
+        self.assertIn("[topSegments, bottomSegments].forEach", self.app,
+                      "every block must be in the cleared set, not just the arriving one")
+
+    def test_the_arrival_animation_is_only_on_frame_stable_elements(self):
+        """.rotary-segment__content and .rotary-sign-hanger are counter-rotated
+        every animation frame. A transform transition OR animation on either
+        would fight that per-frame rotation and smear the wheel into a visible
+        lag, so the ease-up has to be applied to their children instead."""
+        for selector in (".rotary-segment__content {", ".rotary-sign-hanger {"):
+            body, _ = self.block(selector)
+            transition = self.decl(body, "transition") or ""
+            self.assertNotIn("transform", transition,
+                             f"{selector} transitions its frame-driven transform")
+            self.assertIsNone(self.decl(body, "animation"),
+                              f"{selector} animates its frame-driven transform")
+        self.assertIn(".rotary-segment__content.is-arriving > * {", self.css,
+                      "the ease-up must target the children")
+        rule, _ = self.block(".rotary-segment__content.is-arriving > * {")
+        self.assertIn("rotary-arrive", self.decl(rule, "animation"))
+        keyframes = self.css.split("@keyframes rotary-arrive {", 1)
+        self.assertEqual(len(keyframes), 2, "the keyframes are missing")
+        self.assertIn("translateY(", keyframes[1].split("}", 2)[1] + keyframes[1])
+        # Assert the suppression itself, not merely that a reduced-motion block
+        # happens to sit nearby: swapping `animation: none` for the full
+        # animation leaves the words "prefers-reduced-motion" in place and the
+        # assertion would still pass while the preference is ignored.
+        self.assertRegex(
+            self.css,
+            r"\.rotary-segment__content\.is-arriving > \*\s*\{\s*animation:\s*none;\s*\}",
+            "the arrival animation is not actually suppressed for reduced motion")
+
+
 
 class CreditsWaveMatrix(unittest.TestCase):
     """The credits screen's one animated background layer."""
@@ -2268,11 +2560,37 @@ class CreditsWaveMatrix(unittest.TestCase):
                       "the helper must build its colour from the channel it is given")
 
     def test_it_stays_subtle_enough_to_read_through(self):
-        alphas = [float(a) for a in re.findall(r"(0\.\d+) \+ \((?:drift|cross) \* (0\.\d+)\)", self.body)
-                  for a in a]
-        self.assertTrue(alphas, "no alpha ramps found; the parser is stale")
-        self.assertLessEqual(max(alphas), 0.09,
+        """The mesh sits behind the copy, so the CEILING matters more than the
+        ramp: a loud track must not be able to push a line into competing with
+        the text. Each stroke pass therefore carries its own Math.min cap."""
+        # Exclude the helper's own declaration -- `function stroke(points,
+        # color, alpha)` matches the same shape as a call site.
+        declaration = "function stroke(points, color, alpha) {"
+        self.assertIn(declaration, self.body)
+        call_body = self.body.replace(declaration, "")
+        callsites = re.findall(r"stroke\(points,\s*([^,]+),", call_body)
+        self.assertEqual(len(callsites), 2,
+                         f"expected a row pass and a column pass, got {callsites}")
+        caps = [(float(cap), float(floor)) for cap, floor
+                in re.findall(r"Math\.min\((0\.\d+),\s*(0\.\d+) \+", self.body)]
+        self.assertEqual(len(caps), len(callsites),
+                         "every stroke pass must be capped, one Math.min each")
+        self.assertLessEqual(max(cap for cap, _ in caps), 0.13,
                              "the mesh must sit behind the copy, not compete with it")
+        # Silence still has to be visible, or the background reads as dead.
+        self.assertGreater(min(floor for _, floor in caps), 0,
+                           "the silent mesh vanished")
+
+    def test_the_glowing_nodes_are_capped_too(self):
+        """Nodes are tiny but bright, so they get their own ceiling: a halo and a
+        core, neither of which may bloom into the copy above them."""
+        alphas = [float(a) for a in re.findall(r"\+ \(heat \* (0\.\d+)\)", self.body)]
+        bases = [float(a) for a in re.findall(r"\((0\.\d+) \+ \(heat", self.body)]
+        self.assertEqual(len(alphas), 2, f"expected a halo and a core, got {alphas}")
+        self.assertEqual(len(bases), 2, bases)
+        peaks = [b + a for b, a in zip(bases, alphas)]
+        self.assertLessEqual(max(peaks), 0.22 + 1e-9,
+                             "a node at full heat must stay a speck, not a lamp")
 
     def test_reduced_motion_gets_one_frame_and_no_loop(self):
         self.assertIn("if (!reduceMotion()) window.requestAnimationFrame(draw);", self.body,
@@ -2284,3 +2602,216 @@ class CreditsWaveMatrix(unittest.TestCase):
         self.assertIn("Math.min(window.devicePixelRatio || 1, 1.75)", self.body)
         self.assertIn("context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)", self.body)
         self.assertIn("addEventListener('resize', resize", self.body)
+
+
+class CreditsScrollPhysics(unittest.TestCase):
+    """The wheel's feel is arithmetic too, and it fails silently.
+
+    A spring that is under-damped overshoots the contributor and settles back;
+    one integrated per-frame rather than per-second settles differently on a
+    144Hz display than on a 60Hz one; a snap threshold set too high makes the
+    user scroll through a sector of dead space before anything commits. None of
+    those throw, so all of them are asserted.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = (ROOT / "app.js").read_text()
+        cls.rotary = cls.app.split("function initCreditsRotary()", 1)[1]
+
+    def const(self, name):
+        match = re.search(r"var " + name + r" = ([\d.]+);", self.rotary)
+        self.assertIsNotNone(match, f"{name} is not declared")
+        return float(match.group(1))
+
+    def test_the_spring_is_critically_damped(self):
+        """damping == 2*sqrt(stiffness) is the exact boundary at which the wheel
+        returns to its target as fast as possible WITHOUT overshooting. Asserting
+        the expression rather than a number means the relationship cannot drift
+        if the stiffness is ever retuned."""
+        self.assertIn("var SPRING_DAMPING = 2 * Math.sqrt(SPRING_STIFFNESS);", self.rotary,
+                      "damping must be derived from stiffness, not picked separately")
+        self.assertGreater(self.const("SPRING_STIFFNESS"), 0)
+
+    def test_the_spring_integrates_in_seconds_not_frames(self):
+        """The previous integrator multiplied by a frame count normalised to
+        16.67ms, which is frame-rate dependent: the same flick settled visibly
+        differently at 144Hz than at 60Hz."""
+        self.assertIn("/ 1000;", self.rotary, "no seconds-based dt found")
+        self.assertIn("acceleration * dt", self.rotary)
+        self.assertIn("state.rotationVelocity * dt", self.rotary)
+        self.assertNotIn("Math.pow(0.68, elapsed)", self.rotary,
+                         "the per-frame exponential damping is still there")
+
+    def test_angular_velocity_is_bounded(self):
+        """A hard fling must move fast but stay bounded, or one trackpad gesture
+        throws the wheel past several contributors."""
+        ceiling = self.const("MAX_ANGULAR_VELOCITY")
+        self.assertGreater(ceiling, 0)
+        self.assertIn("-MAX_ANGULAR_VELOCITY, MAX_ANGULAR_VELOCITY", self.rotary,
+                      "the velocity clamp is missing from the integrator")
+
+    def test_the_wheel_locks_exactly_onto_its_target(self):
+        """A spring asymptotes forever. Without a hard settle the wheel idles
+        fractionally off-sector, which reads as a label that never sits straight."""
+        self.assertIn("state.rotation = state.rotationTarget;", self.rotary)
+        self.assertIn("state.rotationVelocity = 0;", self.rotary)
+        self.assertLess(self.const("SETTLE_ANGLE"), 0.1)
+
+    def test_a_fast_scroll_commits_earlier_than_a_slow_drag(self):
+        """Two thresholds, and the quicker one has to be armed BY the input
+        rather than applied always -- otherwise a hesitant drag jumps sectors."""
+        slow = self.const("SNAP_THRESHOLD")
+        fast = self.const("SNAP_THRESHOLD_FAST")
+        self.assertLess(fast, slow, "the fast threshold must be the smaller one")
+        self.assertLess(fast, 0.5, "committing before half a sector removes the dead space")
+        self.assertIn("nowMs() < commitBoostUntil ? SNAP_THRESHOLD_FAST : SNAP_THRESHOLD",
+                      self.rotary, "the snap does not actually consult the boost")
+        # Both input paths have to be able to arm it.
+        self.assertEqual(self.rotary.count("armCommitBoost()"), 3,
+                         "expected the definition plus one call each from the "
+                         "wheel and touch paths")
+        self.assertIn("Math.abs(delta) >= FAST_WHEEL_DELTA", self.rotary)
+        self.assertIn("Math.abs(state.touchVelocity) >= TOUCH_FLING_VELOCITY", self.rotary)
+
+    def test_one_sector_does_not_take_excessive_scrolling(self):
+        """The dead-space complaint, expressed as a number. A standard mouse notch
+        is deltaY 100; at the old 0.05 damping one 120-degree sector took about 24
+        notches, and committing took about 13."""
+        damping = self.const("WHEEL_DAMPING")
+        segment = self.const("SEGMENT")
+        threshold = self.const("SNAP_THRESHOLD")
+        degrees_per_notch = 100 * damping
+        self.assertGreater(degrees_per_notch, 8, "a notch barely moves the wheel")
+        notches_to_commit = (segment * threshold) / degrees_per_notch
+        notches_per_sector = segment / degrees_per_notch
+        self.assertLessEqual(notches_to_commit, 6,
+                             f"{notches_to_commit:.1f} notches to commit is still dead space")
+        self.assertLessEqual(notches_per_sector, 12)
+
+    def test_a_single_input_can_never_throw_the_wheel_past_a_sector(self):
+        self.assertIn("clamp(delta * WHEEL_DAMPING, -WHEEL_MAX_STEP, WHEEL_MAX_STEP)", self.rotary)
+        self.assertIn("clamp(verticalDelta * TOUCH_DAMPING, -TOUCH_MAX_STEP, TOUCH_MAX_STEP)",
+                      self.rotary)
+        self.assertLessEqual(self.const("WHEEL_MAX_STEP"), self.const("SEGMENT"))
+        self.assertLessEqual(self.const("TOUCH_MAX_STEP"), self.const("SEGMENT"))
+
+    def test_the_settle_lock_reads_the_post_integration_error(self):
+        """The lock must test the error AFTER the position update, and must run
+        before the frame's stop test. Testing the pre-integration error lets the
+        rAF loop exit one frame early: a frame arrives with error 0.025 (no lock),
+        integrates down to 0.0198, the stop test sees "close enough" and quits --
+        freezing the wheel at 119.98 degrees instead of 120. Invisible, but it is
+        the difference between a wheel that locks and one that merely stops."""
+        body = self.rotary.split("state.rotation += state.rotationVelocity * dt;", 1)
+        self.assertEqual(len(body), 2, "the integrator changed shape")
+        lock = body[1].split("state.rotation = state.rotationTarget;", 1)[0]
+        self.assertIn("state.rotationTarget - state.rotation", lock,
+                      "the lock still tests a stale, pre-integration error")
+        self.assertNotRegex(lock, r"Math\.abs\(error\)",
+                            "`error` is captured before the integration")
+
+    def test_the_touch_fling_still_gets_its_commitment(self):
+        """A short fast flick must reach the threshold on its own; without it a
+        quick swipe does nothing and the wheel feels unresponsive."""
+        self.assertIn("velocity >= TOUCH_FLING_VELOCITY", self.rotary)
+        self.assertIn("SEGMENT * SNAP_THRESHOLD", self.rotary)
+
+
+class CreditsWaveAudioReactivity(unittest.TestCase):
+    """The mesh is driven by the track that is actually playing."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = (ROOT / "app.js").read_text()
+        cls.audio = cls.app.split("var SPECTRUM_BANDS =", 1)[1].split("window.AgoraAudio = {", 1)[0]
+        cls.mesh = cls.app.split("function initWaveMatrix()", 1)[1].split("\n  function bootPage", 1)[0]
+        cls.facade = cls.app.split("window.AgoraAudio = {", 1)[1].split("};", 1)[0]
+
+    def test_the_facade_exposes_a_spectrum_tap(self):
+        """Exposed on the existing facade rather than duplicated: these close over
+        the audio graph, and a second graph would drift out of sync with the track
+        that is actually playing."""
+        for member in ("getEnergy: getEnergy", "getPulse: getPulse",
+                       "getSpectrum: getSpectrum", "SPECTRUM_BANDS: SPECTRUM_BANDS"):
+            with self.subTest(member=member):
+                self.assertIn(member, self.facade)
+        self.assertIn("get isPlaying()", self.facade, "the existing facade lost a member")
+        for existing in ("start: startMusic", "stop: stopMusic", "toggle: toggleMusic"):
+            self.assertIn(existing, self.facade)
+
+    def test_the_spectrum_skips_dc_and_is_log_spaced(self):
+        """Bin 0 is DC offset, not signal. And the analyser's bins are linear in
+        Hz while music is not, so equal-width bands would put almost the whole
+        track in band zero."""
+        self.assertIn("var first = 1;", self.audio, "bin 0 (DC offset) is being read as signal")
+        self.assertIn("Math.pow(i / SPECTRUM_BANDS, 1.9)", self.audio,
+                      "the bands are not log-spaced")
+        # Searched in the whole file: self.audio is split off AFTER this
+        # declaration, so the declaration itself is not inside it.
+        bands = int(re.search(r"var SPECTRUM_BANDS = (\d+);", self.app).group(1))
+        self.assertGreaterEqual(bands, 4, "too few bands to drive a mesh")
+
+    def test_the_spectrum_decays_when_the_track_stops(self):
+        """Stopping the music must ease the mesh back into its silent drift, not
+        drop it in a single frame."""
+        stopped = self.audio.split("if (!audio.isPlaying", 1)[1].split("}", 1)[0]
+        self.assertIn("*= 0.9", stopped, "the bands snap to zero instead of decaying")
+
+    def test_attack_is_faster_than_release(self):
+        """The mesh should snap onto a beat and ease off it -- that asymmetry is
+        what makes a visual read as driven by sound rather than merely moving at
+        the same time as it."""
+        attack, release = re.search(
+            r"next > spectrum\[i\] \? ([\d.]+) : ([\d.]+)", self.audio).groups()
+        self.assertGreater(float(attack), float(release))
+        self.assertLess(float(release), 0.2, "the release is too fast to read as an ease")
+
+    def test_the_mesh_reads_the_facade_every_frame_not_once(self):
+        """The mesh is rebuilt on each PJAX swap while the audio graph is built
+        once per session, and the track can start or stop at any moment."""
+        draw = self.mesh.split("function draw(timestamp)", 1)[1]
+        self.assertIn("readAudio()", draw, "the draw loop never consults the audio")
+        self.assertIn("api.getEnergy()", draw)
+        self.assertIn("api.getSpectrum()", draw)
+        self.assertNotIn("readAudio();\n    resize();", self.mesh,
+                         "audio is being sampled once at init")
+
+    def test_the_mesh_degrades_when_the_facade_is_missing_or_older(self):
+        """A browser with no AudioContext, or a cached older app.js, must not
+        throw -- the mesh just keeps breathing on its own."""
+        guard = self.mesh.split("function readAudio()", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("typeof api.getEnergy !== 'function'", guard)
+        self.assertIn("typeof api.getSpectrum !== 'function'", guard)
+        self.assertIn("return null", guard)
+        self.assertIn("api ? clamp(api.getEnergy(), 0, 1) : 0", self.mesh)
+        self.assertIn("api ? api.getSpectrum() : null", self.mesh)
+
+    def test_silence_still_moves_the_mesh(self):
+        """With the music off, energy and bands are zero -- the amplitude floor is
+        what keeps the background alive instead of frozen."""
+        floor = float(re.search(r"spacing \* \(([\d.]+) \+ \(energy", self.mesh).group(1))
+        self.assertGreater(floor, 0, "the mesh is static until the music starts")
+        self.assertLess(floor, 0.2, "and the silent drift must stay subtle")
+
+    def test_a_grid_node_lands_in_the_same_place_from_either_pass(self):
+        """Rows and columns are stroked as separate passes over the same nodes. If
+        the displacement depended on which pass reached it, the mesh would tear at
+        every intersection -- so both passes (and the node pass) must go through
+        one shared function of (row, column)."""
+        # Count the CALL form: `function bandAt(row, column, bands)` is itself a
+        # match for the bare pattern, which is how this asserted 4 instead of 3.
+        self.assertEqual(self.mesh.count("= bandAt(row, column, bands);"), 3,
+                         "row pass, column pass and node pass must all agree")
+        body = self.mesh.split("function bandAt(row, column, bands)", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("bands[row % bands.length]", body)
+        self.assertIn("bands[column % bands.length]", body)
+        self.assertIn("if (!bands || !bands.length) return 0;", body,
+                      "the silent case must not divide by an empty spectrum")
+
+    def test_the_nodes_are_lit_by_the_spectrum(self):
+        node_loop = self.mesh.split("for (row = 0; row < rows; row += 2)", 1)[1]
+        self.assertIn("glowNode(", node_loop)
+        self.assertIn("band * 0.7", node_loop, "the nodes ignore the spectrum")
+        self.assertIn("energy * 0.45", node_loop, "the nodes ignore the bass energy")
+        self.assertIn("row += 2", self.mesh, "every intersection is drawn; that is ~900 arcs a frame")
