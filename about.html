@@ -46,6 +46,7 @@
         <a class="nav__link" href="/download.html" data-page="download" data-nav-key="download">Download</a>
         <a class="nav__link" href="/about.html" data-page="about" data-nav-key="about">About</a>
         <a class="nav__link" href="/credits.html" data-page="credits" data-nav-key="credits">Credits</a>
+        <a class="nav__link" href="/contact.html" data-page="contact" data-nav-key="contact">Contact</a>
       </nav>
 
       <div class="nav__actions">
@@ -63,6 +64,7 @@
       <a href="/download.html">Download</a>
       <a href="/about.html">About</a>
       <a href="/credits.html">Credits</a>
+      <a href="/contact.html">Contact</a>
       <a class="btn btn--primary btn--get-app" href="/download.html" data-page="download">Get the app</a>
     </nav>
   </header>
@@ -185,100 +187,33 @@
             <p>
               Agora is still growing, and your feedback helps shape what comes
               next. If something feels thoughtful &mdash; or could work better
-              &mdash; <a href="mailto:mail@agora.in.net">mail@agora.in.net</a> is
-              the best way to reach me.
+              &mdash; <a data-email-user="mail" data-email-domain="agora.in.net">an
+              email</a> is the best way to reach me.
             </p>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ============ CONTACT / FEEDBACK ============ -->
+    <!-- ============ CONTACT CALLOUT ============
+         The form and the direct addresses live on /contact.html now. What stays
+         here is the invitation, so the page keeps its three-part rhythm without
+         carrying a second copy of the form to keep in sync. -->
     <section class="section section--alt" id="contact">
-      <div class="container contact-grid">
-        <div class="section-head" data-reveal style="margin-bottom:0;">
-          <p class="eyebrow">03 — Send a signal</p>
-          <h2 class="h2">Feedback, ideas, or just hello.</h2>
+      <div class="container">
+        <div class="cta-panel" data-reveal>
+          <p class="eyebrow eyebrow--center">03 — Send a signal</p>
+          <h2>Have a question, idea, or press inquiry?</h2>
           <p>
-            This is an early-build platform, and the people in it shape what it
-            becomes. Everything sent here is read by the person who writes the
-            code.
+            Everything sent to Agora is read by the person who writes the code.
+            The form, the direct addresses and what each one is for live on their
+            own page now — this one can stay about the vision.
           </p>
-        </div>
-
-        <div class="form-card" data-reveal data-reveal-delay="120">
-          <!-- Live form: app.js validates every field and POSTs the message
-               to the same-origin Cloudflare Pages Function at /api/contact. -->
-          <form id="feedback-form" method="post" novalidate>
-            <div class="form-row">
-              <div class="field">
-                <label for="fb-name">Name</label>
-                <input id="fb-name" name="name" type="text" placeholder="How should we address you?"
-                       autocomplete="name" maxlength="80" required data-validate aria-describedby="fb-name-error" />
-                <p class="field__error" id="fb-name-error" data-error-for="name" hidden></p>
-              </div>
-              <div class="field">
-                <label for="fb-email">Email</label>
-                <input id="fb-email" name="email" type="email" placeholder="you@somewhere.com"
-                       autocomplete="email" maxlength="120" required data-validate aria-describedby="fb-email-error" />
-                <p class="field__error" id="fb-email-error" data-error-for="email" hidden></p>
-              </div>
-            </div>
-
-            <div class="field">
-              <label for="fb-topic">Topic</label>
-              <select id="fb-topic" name="topic" required data-validate aria-describedby="fb-topic-error">
-                <option value="feedback" selected>General feedback</option>
-                <option value="bug">Bug report</option>
-                <option value="moderation">Moderation &amp; rules</option>
-                <option value="press">Press</option>
-                <option value="hello">Just saying hi</option>
-              </select>
-              <p class="field__error" id="fb-topic-error" data-error-for="topic" hidden></p>
-            </div>
-
-            <div class="field">
-              <label for="fb-message">Message</label>
-              <textarea id="fb-message" name="message" placeholder="What should the square hear?"
-                        maxlength="2000" required data-validate aria-describedby="fb-message-error"></textarea>
-              <p class="field__error" id="fb-message-error" data-error-for="message" hidden></p>
-            </div>
-
-            <!-- Spam trap: hidden from people, irresistible to bots. -->
-            <div class="field field--hp" aria-hidden="true">
-              <label for="fb-company">Company</label>
-              <input id="fb-company" name="company" type="text" tabindex="-1" autocomplete="off" data-honeypot />
-            </div>
-
-            <button class="btn btn--primary btn--lg btn--block" type="submit" data-submit>
-              <span data-button-label>Send message</span>
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" />
-              </svg>
-            </button>
-
-            <p class="form-status" id="feedback-status" role="status" aria-live="polite" hidden></p>
-
-            <p class="form-note">
-              Sent securely through the Agora contact service.<br />
-              A human reply goes to the email address you provide.
-            </p>
-          </form>
-
-          <div class="form-success" id="feedback-success" hidden>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" /><path d="m8.5 12.5 2.5 2.5 5-5.5" />
-            </svg>
-            <h3>Signal received.</h3>
-            <p data-success-note>
-              Your message is on its way — a human reads every one of these.
-            </p>
+          <div class="hero__actions">
+            <a class="btn btn--primary btn--lg" href="/contact.html" data-page="contact">Contact us</a>
+            <a class="btn btn--ghost btn--lg" data-email-user="mail" data-email-domain="agora.in.net"
+               data-email-label>Email the team</a>
           </div>
-
-          <p class="contact-alt">
-            Prefer email? <a href="mailto:mail@agora.in.net">mail@agora.in.net</a> —
-            answered by a human, usually the developer.
-          </p>
         </div>
       </div>
     </section>
@@ -318,13 +253,21 @@
           <a href="/index.html#why-agora">Why Agora</a>
           <a href="/download.html">Download</a>
           <a href="/credits.html">Credits</a>
+          <a href="/contact.html">Contact</a>
         </nav>
 
         <div class="site-footer__contact">
           <h4>Contact</h4>
           <p>
             Feedback, questions, press:<br />
-            <a href="mailto:mail@agora.in.net">mail@agora.in.net</a>
+            <a href="/contact.html" data-page="contact">Send a signal</a>
+            &nbsp;·&nbsp;
+            <!-- No literal address anywhere in this file. Cloudflare's Email
+                 Address Obfuscation rewrites raw addresses at the edge into
+                 anchors on a Cloudflare edge path, which break under our CSP and
+                 across PJAX swaps, so app.js assembles the href and the visible
+                 text from these two attributes at runtime. -->
+            <a data-email-user="mail" data-email-domain="agora.in.net">Email the team</a>
           </p>
           <p>Android app · APK, out now<br />iOS &amp; desktop — coming soon</p>
         </div>

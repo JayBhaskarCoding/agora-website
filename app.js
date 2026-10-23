@@ -15,9 +15,9 @@
      5. Chrome            — header scroll state, active nav, year
      6. Feedback form     — validation + same-origin API submit
      7. Shared-post       — URL param parsing + post preview stub
-     8. Ambient layer      — custom cursor, soundscape, the background mesh
+     8. Ambient layer      — custom cursor, streaming music, the background mesh
      9. Dynamic download  — newest GitHub release APK for every CTA
-     10. Wheel reactivity — bass/onset/treble drive the wheels themselves
+     10. Email hydration  — addresses assembled at runtime, never in the markup
    ============================================================ */
 
 (function agoraApp() {
@@ -92,21 +92,6 @@
     context.globalAlpha = 1;
   }
 
-  /* One place that asks the audio facade for its band metrics, so the mesh
-     and the wheels all degrade identically when the
-     facade is absent, older than getBands(), or throws. */
-  var IDLE_BANDS = { bass: 0, mid: 0, treble: 0, onset: 0, pitch: 0.5, centroid: 0.5 };
-
-  function readBands() {
-    var api = window.AgoraAudio;
-    if (!api || typeof api.getBands !== 'function') return IDLE_BANDS;
-    try {
-      return api.getBands() || IDLE_BANDS;
-    } catch (error) {
-      return IDLE_BANDS;
-    }
-  }
-
   /* Deterministic 32-bit hash, used for the mesh's per-vertex jitter and its
      per-cell diagonal flip. Math.imul keeps the products inside 32-bit integer
      range; without it they exceed 2^53 and the low bits -- the only ones that
@@ -134,7 +119,8 @@
     why: '/index.html#why-agora',
     download: '/download.html',
     about: '/about.html',
-    credits: '/credits.html'
+    credits: '/credits.html',
+    contact: '/contact.html'
   };
 
   var routerState = {
@@ -446,7 +432,12 @@
      Pages Function at /api/contact. The API keeps the Resend key
      server-side and returns a JSON success or error response.
      ------------------------------------------------------------ */
-  var CONTACT_EMAIL = 'mail@agora.in.net';
+  /* Assembled rather than written out. This one only ever reaches the DOM as text
+     inside an error message, never as markup, so Cloudflare's edge parser would
+     not touch it -- but keeping the literal out of EVERY served file is what makes
+     "no raw address in the site" a claim a test can check with one grep instead of
+     a list of exceptions. */
+  var CONTACT_EMAIL = ['mail', 'agora.in.net'].join('@');
   var SUBMIT_TIMEOUT = 12000;                // ms before we give up on the API
 
   function initContactForm() {
@@ -991,21 +982,40 @@
 
     var MUSIC_SRC = '/assets/bgMusic.mpeg';
     var TARGET_VOLUME = 0.075;
+
+    /* ---- background music, as a plain streaming <audio> element -------------
+       There is no Web Audio API left in this file: no AudioContext, no
+       AnalyserNode, no createMediaElementSource, no getByteFrequencyData, and no
+       bass/mid/treble/onset/pitch analysis.
+
+       That architecture was the 10-15 minute delay. It fetched the entire track as
+       an ArrayBuffer and ran decodeAudioData on it, so not one sample could play
+       until all ~12MB had arrived AND decoded into roughly 40MB of PCM. On a phone
+       on a mobile connection that is minutes. It also explains the other symptom --
+       the track appearing to start when you clicked through to another page --
+       because a navigation re-ran boot(), and by then the bytes had finally landed.
+
+       A streaming <audio preload="auto"> starts once the browser has a few hundred
+       kilobytes, keeps downloading in the background, and costs zero per-frame work.
+       Removing the analysis is therefore also the credits-wheel fix: there is no
+       getByteFrequencyData plus per-bin pitch loop running 60 times a second any
+       more, on any page.
+
+       One trade, stated plainly because it is audible. The old graph ran the track
+       through a 2200Hz lowpass and a compressor on the way to the destination. Those
+       nodes need an AudioContext, so they are gone and the track now plays as
+       authored rather than softly filtered. Volume moves onto the element at the same
+       0.075 the master gain used. */
     var audio = {
-      context: null,
-      source: null,
-      master: null,
-      filter: null,
-      compressor: null,
-      analyser: null,
-      data: null,
-      buffer: null,
-      bufferPromise: null,
-      rawDataPromise: null,
-      starting: false,
+      el: null,
       isPlaying: false,
-      energy: 0,
-      unavailable: false
+      starting: false,
+      startPromise: null,
+      unavailable: false,
+      userMuted: false,      // the toggle was used; autoplay must never override it
+      autoplayTried: false,  // canplay fires more than once
+      unlockBound: false,
+      unlockFired: false
     };
     var soundControl = { button: null, label: null };
 
@@ -1033,144 +1043,141 @@
       updateSoundButton();
     }
 
-    function createAudioGraph() {
-      if (audio.context) return true;
-      var AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContext) {
-        markUnavailable();
-        return false;
-      }
+    function createAudioElement() {
+      if (audio.el) return audio.el;
+      var el = doc.createElement('audio');
+      el.src = MUSIC_SRC;
+      el.loop = true;
+      /* preload="auto" is the whole point: begin fetching immediately and let the
+         browser start playback from a partial download. "metadata" or "none" would
+         leave the visitor on a silent page until some other event nudged it, which
+         is the behaviour being fixed. */
+      el.preload = 'auto';
+      el.volume = TARGET_VOLUME;
+      // No native controls -- .ambient-toggle is the only transport, and a second
+      // unsynchronised one would contradict it. aria-hidden and tabindex -1 because
+      // a decorative loop is not content and must not be a tab stop.
+      el.setAttribute('aria-hidden', 'true');
+      el.setAttribute('tabindex', '-1');
 
-      try {
-        var context = new AudioContext();
-        var master = context.createGain();
-        var filter = context.createBiquadFilter();
-        var compressor = context.createDynamicsCompressor();
-        var analyser = context.createAnalyser();
-        var now = context.currentTime;
+      // State is driven by the element's own events rather than by the promise, so
+      // a stall, a seek or an OS-level interruption is reflected in the toggle.
+      el.addEventListener('playing', function () {
+        audio.isPlaying = true;
+        audio.starting = false;
+        updateSoundButton();
+      });
+      el.addEventListener('pause', function () {
+        audio.isPlaying = false;
+        audio.starting = false;
+        updateSoundButton();
+      });
+      // A missing or undecodable asset must degrade to "sound unavailable" rather
+      // than leave the toggle claiming it is off-but-working.
+      el.addEventListener('error', function () { markUnavailable(); });
+      el.addEventListener('canplay', function () {
+        // Attempt as soon as the stream is ready. Browsers reject this without a
+        // prior gesture, and that rejection is what arms the unlock listeners --
+        // it is the policy working as designed, not a fault to surface.
+        if (audio.autoplayTried || audio.userMuted || audio.isPlaying) return;
+        audio.autoplayTried = true;
+        attemptPlay('autoplay');
+      });
 
-        // Set the gain before any node is connected or the source starts. This
-        // prevents a decoded buffer from leaking at full volume for one frame.
-        master.gain.value = 0;
-        filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(2200, now);
-        filter.Q.setValueAtTime(0.25, now);
-        compressor.threshold.setValueAtTime(-24, now);
-        compressor.knee.setValueAtTime(18, now);
-        compressor.ratio.setValueAtTime(3, now);
-        compressor.attack.setValueAtTime(0.035, now);
-        compressor.release.setValueAtTime(0.45, now);
-        /* 2048 rather than 128: bin width drops from ~344Hz to ~21.5Hz at
-           44.1kHz, which is what makes a 20-200Hz bass band and a dominant-pitch
-           reading meaningful at all -- at 128 the whole bass band was one bin.
+      /* Appended rather than left detached. A detached <audio> does still play in
+         most engines, but preload priority for a node that is not in the document
+         is engine-dependent, and "start streaming immediately" is the entire point
+         of this rewrite -- so it goes in the DOM, invisible and unfocusable.
 
-           Smoothing 0.35 rather than 0.9. The analyser's smoothing is a running
-           average over previous frames, so a high value is exactly what turns a
-           piano keystroke into a slow swell; at 0.35 a strike registers on the
-           next animation frame. It is not 0 -- that would make the visuals
-           jitter on every sample instead of tracking notes. */
-        analyser.fftSize = 2048;
-        analyser.smoothingTimeConstant = 0.35;
+         The PJAX router only ever replaces <header> and <main>, so a direct child
+         of <body> survives every swap. That is how the mesh canvas works too, and
+         why neither of them needs a teardown closure: audio.el stays valid across
+         navigation, so this runs once per session and never re-creates the element
+         (which would restart the track on every page change). */
+      if (doc.body && el.parentNode !== doc.body) doc.body.appendChild(el);
 
-        master.connect(filter);
-        filter.connect(compressor);
-        compressor.connect(analyser);
-        analyser.connect(context.destination);
-
-        audio.context = context;
-        audio.master = master;
-        audio.filter = filter;
-        audio.compressor = compressor;
-        audio.analyser = analyser;
-        audio.data = new Uint8Array(analyser.frequencyBinCount);
-        return true;
-      } catch (error) {
-        markUnavailable();
-        return false;
-      }
+      audio.el = el;
+      return el;
     }
 
-    function loadMusicBuffer() {
-      if (audio.buffer) return Promise.resolve(audio.buffer);
-      if (audio.bufferPromise) return audio.bufferPromise;
-
-      var rawData = audio.rawDataPromise || fetch(MUSIC_SRC).then(function (response) {
-        if (!response.ok) throw new Error('Music request failed (' + response.status + ').');
-        return response.arrayBuffer();
-      });
-      audio.rawDataPromise = rawData;
-      audio.bufferPromise = rawData.then(function (arrayBuffer) {
-        if (!arrayBuffer || !audio.context) throw new Error('Audio buffer is unavailable.');
-        return audio.context.decodeAudioData(arrayBuffer);
-      }).then(function (buffer) {
-        audio.buffer = buffer;
-        return buffer;
-      }).catch(function (error) {
-        audio.bufferPromise = null;
-        audio.rawDataPromise = null;
+    /* The one place play() is called. Returns a promise of a BOOLEAN rather than
+       rejecting on a policy block, because "the browser said not yet" and "the
+       track is broken" need different handling and the old single rejection path
+       conflated them -- a blocked autoplay marked the music unavailable, which then
+       suppressed the very gesture that would have started it. */
+    function attemptPlay(reason) {
+      var el = audio.el;
+      if (!el || audio.unavailable) return Promise.resolve(false);
+      if (!el.paused) {
+        audio.isPlaying = true;
+        updateSoundButton();
+        return Promise.resolve(true);
+      }
+      audio.starting = true;
+      var promise;
+      try {
+        promise = el.play();
+      } catch (error) {
+        // Engines old enough to return undefined from play() throw synchronously.
+        audio.starting = false;
         markUnavailable();
-        throw error;
+        return Promise.resolve(false);
+      }
+      if (!promise || typeof promise.then !== 'function') {
+        audio.starting = false;
+        audio.isPlaying = !el.paused;
+        updateSoundButton();
+        return Promise.resolve(audio.isPlaying);
+      }
+      return promise.then(function () {
+        audio.isPlaying = true;
+        audio.starting = false;
+        updateSoundButton();
+        return true;
+      }).catch(function (error) {
+        audio.starting = false;
+        if (error && error.name === 'NotAllowedError') {
+          // Autoplay policy. Keep the element warm and wait for a gesture.
+          if (!audio.unlockFired) bindUnlock();
+          return false;
+        }
+        markUnavailable();   // NotSupportedError, a 404, a decode failure
+        return false;
       });
-
-      return audio.bufferPromise;
     }
 
     function startMusic() {
       if (audio.unavailable) return Promise.reject(new Error('Background music is unavailable.'));
       if (audio.isPlaying) return Promise.resolve(true);
-      if (audio.starting) return audio.startPromise;
-      if (!createAudioGraph()) return Promise.reject(new Error('Audio is unavailable.'));
-
-      audio.starting = true;
-      audio.startPromise = Promise.resolve(audio.context.state === 'suspended'
-        ? audio.context.resume()
-        : true).then(function () {
-        return loadMusicBuffer();
-      }).then(function (buffer) {
-        if (audio.isPlaying) return true;
-
-        var sourceNode = audio.context.createBufferSource();
-        sourceNode.buffer = buffer;
-        sourceNode.loop = true;
-        sourceNode.connect(audio.master);
-
-        // The master gain was initialized at zero before this source exists.
-        // Start the loop only after the safe graph is fully connected.
-        sourceNode.start(0);
-        audio.source = sourceNode;
-        audio.isPlaying = true;
-        audio.starting = false;
-
-        var now = audio.context.currentTime;
-        audio.master.gain.cancelScheduledValues(now);
-        audio.master.gain.setTargetAtTime(TARGET_VOLUME, now, 2.8);
+      if (audio.starting && audio.startPromise) return audio.startPromise;
+      createAudioElement();
+      // An explicit start is by definition not a mute, whatever the toggle did before.
+      audio.userMuted = false;
+      audio.startPromise = attemptPlay('explicit').then(function (started) {
+        audio.startPromise = null;
         updateSoundButton();
-        return true;
-      }).catch(function (error) {
-        audio.starting = false;
-        if (audio.context && audio.context.state === 'closed') markUnavailable();
-        throw error;
+        return started;
       });
-
       return audio.startPromise;
     }
 
     function stopMusic() {
-      if (!audio.context || !audio.master || !audio.isPlaying) return;
-
-      var now = audio.context.currentTime;
-      var sourceNode = audio.source;
-      audio.isPlaying = false;
-      audio.master.gain.cancelScheduledValues(now);
-      audio.master.gain.setTargetAtTime(0, now, 0.35);
-      audio.source = null;
-      if (sourceNode) {
-        try {
-          sourceNode.stop(now + 1);
-        } catch (error) {
-          // A source can already be ending when the toggle is pressed.
-        }
+      audio.userMuted = true;   // an explicit stop must survive every later gesture
+      audio.starting = false;
+      audio.startPromise = null;
+      var el = audio.el;
+      if (!el) {
+        audio.isPlaying = false;
+        updateSoundButton();
+        return;
       }
+      try {
+        el.pause();
+      } catch (error) {
+        // A pause on an already-paused element is harmless; swallow rather than
+        // let a decorative control take the page down.
+      }
+      audio.isPlaying = false;
       updateSoundButton();
     }
 
@@ -1179,241 +1186,74 @@
         stopMusic();
         return Promise.resolve(false);
       }
-      return startMusic().then(function () {
+      return startMusic().then(function (started) {
         updateSoundButton();
-        return true;
+        return started;
       });
     }
 
-    // Expose one stable manager for the whole document. It is never recreated
-    // when a page's <main> is replaced by the PJAX router.
-    /* ---- spectrum tap ----------------------------------------------------
-       getEnergy() already reduces the analyser to a single bass-weighted number.
-       That suits the dot matrix, but it is too coarse to drive a mesh: every row
-       would move together and nothing would read as frequency. This splits the
-       SAME FFT into log-spaced bands so different parts of the grid respond to
-       different parts of the track.
+    /* ---- the first-gesture unlock ------------------------------------------
+       Browsers block unmuted autoplay until the user has interacted, so the track
+       cannot simply be started on load. What it CAN do is be ready, and then start
+       on the first gesture of any kind -- not only on a link, which is why the old
+       version looked like the music was tied to navigation.
 
-       Log spacing because the analyser's bins are linear in Hz while music is
-       not -- the low bands carry the beat and need only a few bins each, the
-       high ones need many just to cover one octave.
+       Capture phase, passive, on BOTH window and document, for five event types.
+       Capture runs before any page handler can stopPropagation, so a gesture
+       consumed by the credits wheel, the mobile menu or a form still unlocks the
+       audio; passive guarantees this never costs a scroll frame, which matters
+       because `wheel` is in the list and the credits screen is entirely
+       gesture-driven. */
+    var UNLOCK_EVENTS = ['pointerdown', 'touchstart', 'wheel', 'keydown', 'click'];
 
-       Exposed on the existing facade rather than duplicated: these close over
-       the audio graph, and a second graph would drift out of sync with the
-       track that is actually playing.                                       */
-    var SPECTRUM_BANDS = 8;
-    var spectrum = [];
-    var spectrumBins = null;
-    for (var bandIndex = 0; bandIndex < SPECTRUM_BANDS; bandIndex += 1) spectrum.push(0);
-
-    function buildSpectrumBins(binCount) {
-      var bins = [];
-      var first = 1;                       // bin 0 is DC offset, not signal
-      var last = Math.max(first + SPECTRUM_BANDS, Math.floor(binCount * 0.62));
-      for (var i = 0; i < SPECTRUM_BANDS; i += 1) {
-        var from = first + (Math.pow(i / SPECTRUM_BANDS, 1.9) * (last - first));
-        var to = first + (Math.pow((i + 1) / SPECTRUM_BANDS, 1.9) * (last - first));
-        var start = Math.min(binCount - 1, Math.floor(from));
-        var end = Math.min(binCount, Math.max(start + 1, Math.floor(to)));
-        bins.push([start, end]);
-      }
-      return bins;
+    function unbindUnlock() {
+      if (!audio.unlockBound) return;
+      audio.unlockBound = false;
+      UNLOCK_EVENTS.forEach(function (type) {
+        window.removeEventListener(type, onFirstGesture, true);
+        doc.removeEventListener(type, onFirstGesture, true);
+      });
     }
 
-    /* ---- bass / mid / treble / onset / pitch -----------------------------
-       Band edges are declared in HZ and converted to bins from the context's
-       real sample rate and fftSize. Hardcoding indices is how a "bass" band
-       silently becomes a low-mid band: bin 9 is 194Hz at 44.1kHz and 211Hz at
-       48kHz, and nothing about the visuals would tell you the difference. */
-    var BAND_BASS_HZ = [20, 200];
-    var BAND_MID_HZ = [200, 3200];
-    var BAND_TREBLE_HZ = [3200, 12000];
-
-    /* Music sits far below full scale in a byte spectrum -- a quiet piano
-       passage averages around 0.1 -- so a linear mapping produces almost no
-       movement and the canvas looks broken rather than quiet. pow(v, 0.6)
-       lifts the low end hard (0.1 becomes 0.25) while still compressing peaks,
-       and the per-band gain brings a normal passage into the visible range.
-       Treble gets the most gain because it carries the least energy. */
-    var SENSITIVITY_EXPONENT = 0.6;
-    var BASS_GAIN = 1.55;
-    var MID_GAIN = 1.9;
-    var TREBLE_GAIN = 2.7;
-    var ONSET_GAIN = 7.5;
-    var ONSET_DECAY = 0.86;     // per frame: a strike spikes, then fades fast
-
-    var bandBins = null;
-    var previousMid = 0;
-    var bands = {
-      bass: 0, mid: 0, treble: 0, onset: 0,
-      pitch: 0.5, centroid: 0.5, computedAt: -1e9
-    };
-
-    function buildBandBins(binCount) {
-      var rate = (audio.context && audio.context.sampleRate) || 44100;
-      var fft = (audio.analyser && audio.analyser.fftSize) || 2048;
-      function binFor(hz) {
-        var b = Math.round((hz * fft) / rate);
-        if (b < 1) return 1;                       // bin 0 is DC offset
-        return b > binCount - 1 ? binCount - 1 : b;
-      }
-      return {
-        bass: [binFor(BAND_BASS_HZ[0]), binFor(BAND_BASS_HZ[1])],
-        mid: [binFor(BAND_MID_HZ[0]), binFor(BAND_MID_HZ[1])],
-        treble: [binFor(BAND_TREBLE_HZ[0]), binFor(BAND_TREBLE_HZ[1])]
-      };
+    function bindUnlock() {
+      if (audio.unlockBound || audio.unavailable || audio.unlockFired) return;
+      audio.unlockBound = true;
+      UNLOCK_EVENTS.forEach(function (type) {
+        window.addEventListener(type, onFirstGesture, { capture: true, passive: true });
+        doc.addEventListener(type, onFirstGesture, { capture: true, passive: true });
+      });
     }
 
-    function shape(value, gain) {
-      return clamp(Math.pow(clamp(value, 0, 1), SENSITIVITY_EXPONENT) * gain, 0, 1);
+    function onFirstGesture(event) {
+      // Bound on window AND document, so one gesture invokes this twice; the flag
+      // makes it idempotent and the listeners come off on the first call.
+      if (audio.unlockFired) return;
+      audio.unlockFired = true;
+      unbindUnlock();
+
+      var target = event && event.target;
+      // The mute toggle is itself a gesture. Starting the track only for the
+      // toggle's own handler to stop it a millisecond later is a wasted play() and
+      // an audible blip, so disarm and let the toggle speak.
+      if (target && target.closest && target.closest('.ambient-toggle')) return;
+      if (audio.userMuted) return;    // an explicit mute always wins over autoplay
+      attemptPlay('gesture');
     }
 
-    function bandAverage(data, range) {
-      var total = 0;
-      var count = 0;
-      for (var i = range[0]; i < range[1]; i += 1) { total += data[i]; count += 1; }
-      return count ? (total / count) / 255 : 0;
-    }
+    /* One stable manager for the whole document, never recreated when the PJAX
+       router replaces a page's <main>.
 
-    function computeBands() {
-      /* Once per frame however many consumers ask. Three canvases each calling
-         getByteFrequencyData would be wasteful, but worse: the onset delta is
-         frame-over-frame, so computing it twice in one tick would halve the
-         spike the second caller sees. */
-      var stamp = window.performance && window.performance.now
-        ? window.performance.now() : Date.now();
-      if (stamp - bands.computedAt < 8) return bands;
-      bands.computedAt = stamp;
-
-      if (!audio.isPlaying || !audio.analyser || !audio.data) {
-        bands.bass *= 0.9; bands.mid *= 0.9; bands.treble *= 0.9;
-        bands.onset *= ONSET_DECAY;
-        previousMid *= 0.9;
-        return bands;
-      }
-
-      audio.analyser.getByteFrequencyData(audio.data);
-      if (!bandBins) bandBins = buildBandBins(audio.data.length);
-      var data = audio.data;
-
-      var rawBass = bandAverage(data, bandBins.bass);
-      var rawMid = bandAverage(data, bandBins.mid);
-      var rawTreble = bandAverage(data, bandBins.treble);
-
-      /* Onset is the frame-over-frame RISE in mid energy, floored at zero so a
-         note decaying is never mistaken for a note striking. The envelope holds
-         the spike for a few frames: one frame is shorter than the eye can
-         register, and a keystroke's visual should outlast the sample window. */
-      var rise = Math.max(0, rawMid - previousMid);
-      previousMid = rawMid;
-      bands.onset = Math.max(clamp(rise * ONSET_GAIN, 0, 1), bands.onset * ONSET_DECAY);
-
-      // Attack fast, release slower: snap onto a note, ease off it.
-      bands.bass += (shape(rawBass, BASS_GAIN) - bands.bass)
-        * (shape(rawBass, BASS_GAIN) > bands.bass ? 0.5 : 0.14);
-      bands.mid += (shape(rawMid, MID_GAIN) - bands.mid)
-        * (shape(rawMid, MID_GAIN) > bands.mid ? 0.5 : 0.14);
-      bands.treble += (shape(rawTreble, TREBLE_GAIN) - bands.treble)
-        * (shape(rawTreble, TREBLE_GAIN) > bands.treble ? 0.55 : 0.16);
-
-      /* Dominant pitch and spectral centroid, over the mid+treble range. Both
-         are reported 0..1 on a LOG scale because pitch perception is
-         logarithmic: a linear map would spend most of its range on the top
-         octave and a climbing melody would look pinned near 1. */
-      var lo = bandBins.mid[0];
-      var hi = bandBins.treble[1];
-      var peak = -1;
-      var peakBin = lo;
-      var weighted = 0;
-      var totalEnergy = 0;
-      for (var b = lo; b < hi; b += 1) {
-        var v = data[b];
-        if (v > peak) { peak = v; peakBin = b; }
-        weighted += v * Math.log(b + 1);
-        totalEnergy += v;
-      }
-      var logLo = Math.log(lo + 1);
-      var logSpan = Math.log(hi + 1) - logLo;
-      bands.pitch = clamp((Math.log(peakBin + 1) - logLo) / logSpan, 0, 1);
-      var centroidBin = totalEnergy ? Math.exp(weighted / totalEnergy) - 1 : lo;
-      bands.centroid = clamp((Math.log(centroidBin + 1) - logLo) / logSpan, 0, 1);
-      return bands;
-    }
-
-    function getBands() {
-      var b = computeBands();
-      /* A copy, not the live object. computeBands mutates ONE instance in place
-         -- that is what makes the per-frame cache work -- so returning it would
-         let a caller's snapshot silently change underneath them between reads.
-         Internal callers go through readBands() once per frame and use it
-         immediately, so the copy costs three small objects a frame and removes
-         a footgun from the public facade. */
-      return {
-        bass: b.bass, mid: b.mid, treble: b.treble,
-        onset: b.onset, pitch: b.pitch, centroid: b.centroid
-      };
-    }
-
-    function getSpectrum() {
-      var i;
-      if (!audio.isPlaying || !audio.analyser || !audio.data) {
-        // Decay rather than snap to zero, so stopping the track eases the mesh
-        // back into its silent drift instead of dropping it in a single frame.
-        for (i = 0; i < SPECTRUM_BANDS; i += 1) spectrum[i] *= 0.9;
-        return spectrum;
-      }
-      audio.analyser.getByteFrequencyData(audio.data);
-      if (!spectrumBins) spectrumBins = buildSpectrumBins(audio.data.length);
-      for (i = 0; i < SPECTRUM_BANDS; i += 1) {
-        var range = spectrumBins[i];
-        var total = 0;
-        var count = 0;
-        for (var bin = range[0]; bin < range[1]; bin += 1) {
-          total += audio.data[bin];
-          count += 1;
-        }
-        var next = count ? total / count / 255 : 0;
-        // Attack fast, release slow: the mesh snaps onto a beat and eases off it,
-        // which is how the eye reads a visual as being driven by sound rather
-        // than merely moving at the same time as it.
-        spectrum[i] += (next - spectrum[i]) * (next > spectrum[i] ? 0.42 : 0.11);
-      }
-      return spectrum;
-    }
-
+       The analysis members are gone with the graph they read from: getBands,
+       getEnergy, getPulse, getSpectrum and SPECTRUM_BANDS existed to feed the mesh
+       and the credits wheels, the mesh was disconnected from them last round, and
+       this round removes the wheels' reactivity too. What is left is a transport. */
     window.AgoraAudio = {
       start: startMusic,
       stop: stopMusic,
       toggle: toggleMusic,
       get isPlaying() { return audio.isPlaying; },
-      getEnergy: getEnergy,
-      getPulse: getPulse,
-      getSpectrum: getSpectrum,
-      getBands: getBands,
-      SPECTRUM_BANDS: SPECTRUM_BANDS
+      get isMuted() { return audio.userMuted; }
     };
-
-    /* Broadband loudness, for consumers that want one number. Derived from the
-       same shaped bands everything else uses rather than from a second pass over
-       raw bins: at fftSize 128 the old bin 2-17 window covered roughly
-       0.7-5.8kHz, and at 2048 the same indices would cover 43-366Hz. Keeping the
-       indices would have silently turned "energy" into "bass". */
-    function getEnergy() {
-      if (!audio.isPlaying || !audio.analyser || !audio.data) {
-        audio.energy *= 0.94;
-        return audio.energy;
-      }
-      var b = computeBands();
-      var next = (b.bass * 0.5) + (b.mid * 0.35) + (b.treble * 0.15);
-      audio.energy += (next - audio.energy) * 0.12;
-      return audio.energy;
-    }
-
-    function getPulse(timestamp) {
-      var clock = audio.context ? audio.context.currentTime : timestamp / 1000;
-      var breathe = 0.5 + (0.5 * Math.sin(clock * Math.PI * 0.09));
-      return audio.isPlaying ? (audio.energy * 0.65) + (breathe * 0.18) : 0;
-    }
 
     function initSoundControl() {
       var button = doc.createElement('button');
@@ -1529,8 +1369,15 @@
          identical picture, and the reason no shadowBlur assignment appears anywhere
          in this file. Bloom and spread are both well up from the 0.42/1.9 the mesh
          carried while it was a faint texture, because it is now meant to pop. */
-      var MESH_GLOW_BLOOM = 0.78;
-      var MESH_GLOW_SPREAD = 2.8;
+      /* Bloom is back down to a soft edge rather than a halo. There has never been
+         a literal shadowBlur in this file -- at ~600 vertices and 60fps that is
+         36,000 of the most expensive calls a 2D context has per second -- so "remove
+         the heavy glow" means turning THIS down. makeGlowSprite() bakes the same
+         radial falloff into an off-screen canvas once per colour and drawGlow()
+         blits it, which is why the glow can be retuned from one constant instead of
+         from a per-frame API cost. */
+      var MESH_GLOW_BLOOM = 0.30;
+      var MESH_GLOW_SPREAD = 1.8;
 
       /* ---- the flow field --------------------------------------------------
          Multi-octave value noise (fBm), sampled in three dimensions: x, y, and a
@@ -1860,15 +1707,15 @@
            Two stroke calls for ~1700 edges -- a stroke per edge would be ~1700 state
            changes a frame and would not survive a phone.
 
-           Line alphas are constants now rather than audio-driven ramps. They are
-           authored inside the 0.35-0.45 band and multiplied by the theme's ink, and
-           keeping them uniform is the point: the lattice is the structure and the
-           vertices are where the variation lives. Per-segment alpha would need a
-           stroke per segment, which is the one thing the batching exists to avoid. */
+           Line alphas are constants rather than ramps, authored inside the 0.07-0.12
+           band and multiplied by the theme's ink. Keeping them uniform is the point:
+           the lattice is the structure and the vertices are where the variation lives.
+           Per-segment alpha would need a stroke per segment, which is the one thing
+           the batching exists to avoid. */
         context.lineWidth = 1;
 
         context.strokeStyle = 'rgba(' + palette.line + ','
-          + (0.36 * palette.ink).toFixed(4) + ')';
+          + (0.07 * palette.ink).toFixed(4) + ')';
         context.beginPath();
         for (row = 0; row < rows; row += 1) {
           var rowBase = row * columns * 2;
@@ -1883,7 +1730,7 @@
         // Columns a step brighter than rows, so the field keeps some depth instead
         // of reading as one flat lattice. Both stay inside the requested band.
         context.strokeStyle = 'rgba(' + palette.line + ','
-          + (0.43 * palette.ink).toFixed(4) + ')';
+          + (0.10 * palette.ink).toFixed(4) + ')';
         context.beginPath();
         for (column = 0; column < columns; column += 1) {
           for (row = 0; row < rows; row += 1) {
@@ -1910,9 +1757,10 @@
         }
         context.stroke();
 
-        /* Vertices on top of the wireframe: 2.0px to 3.0px, 0.45 to 0.60 alpha,
+        /* Vertices on top of the wireframe: 1.5px to 2.0px, 0.16 to 0.22 alpha,
            blitted from the glow sprite. Both ramps reach their ceiling exactly, so
-           the Math.min caps are live rather than decorative.
+           the Math.min caps are live rather than decorative -- a ceiling nothing can
+           reach is a comment, not a constraint.
 
            Which sprite a vertex uses is STATIC -- one in four gets the brighter
            texture, decided by its lattice position and never changed. A version of
@@ -1925,8 +1773,8 @@
           for (column = 0; column < columns; column += 1) {
             var q = ((row * columns) + column) * 2;
             var light = lights[(row * columns) + column];
-            var radius = Math.min(3, 2 + light);
-            var alpha = Math.min(0.6, 0.45 + (light * 0.15)) * palette.ink;
+            var radius = Math.min(2, 1.5 + (light * 0.5));
+            var alpha = Math.min(0.22, 0.16 + (light * 0.06)) * palette.ink;
             var highlight = ((column + row) % 4) === 0;
 
             drawGlow(context, highlight ? sprites.hi : sprites.node,
@@ -1968,31 +1816,14 @@
     initSoundControl();
     initAmbientMesh();
 
-    /* Preload bytes without touching the AudioContext. The first click below
-       resumes/creates the context and starts the already-persistent loop.
+    /* Build the element now so the browser starts fetching during page load rather
+       than on the first gesture, and arm the unlock listeners immediately. Waiting
+       for the autoplay attempt to be rejected before arming them would miss a
+       visitor who scrolls before `canplay` fires -- and that scroll is exactly the
+       gesture meant to start the track. */
+    createAudioElement();
+    bindUnlock();
 
-       The `typeof fetch` guard is less about old browsers than about the SHAPE of
-       the failure. The `.catch()` below can only handle a rejected promise; if
-       `fetch` is not a function the call throws a ReferenceError synchronously,
-       before there is a promise to catch on. And because initAmbientExperience()
-       runs first in boot(), that one throw used to abort boot() outright -- taking
-       routing, the menu, the contact form and the credits screen down with it.
-       A missing decorative layer has to cost the decoration, not the page. */
-    audio.rawDataPromise = typeof fetch === 'function' ? fetch(MUSIC_SRC).then(function (response) {
-      if (!response.ok) throw new Error('Music request failed (' + response.status + ').');
-      return response.arrayBuffer();
-    }).catch(function () {
-      audio.rawDataPromise = null;
-      return null;
-    }) : null;
-
-    function firstClickStartsAudio() {
-      document.removeEventListener('click', firstClickStartsAudio, true);
-      startMusic().catch(function () {
-        if (audio.context && audio.context.state === 'closed') markUnavailable();
-      });
-    }
-    document.addEventListener('click', firstClickStartsAudio, true);
   }
 
   var ROTARY_TEAM = [
@@ -2813,92 +2644,95 @@
   }
 
   /* ------------------------------------------------------------
-     10. WHEEL REACTIVITY
-     Bass swells the wheels, a piano onset flares the dashed outer
-     ring and the spokes, treble makes the rim ticks and the tags glint.
+     10. EMAIL HYDRATION
 
-     This needs its own loop. The rotary's frame loop stops as soon as
-     the wheel settles -- correct for the physics, useless for anything
-     driven by the music, since a bass pulse has to keep breathing on a
-     wheel that is not moving.
+     No literal email address appears anywhere in this site's HTML, and that is
+     deliberate. Cloudflare's Email Address Obfuscation rewrites raw addresses at
+     the edge into
+
+       <a href="/cdn-cgi/l/email-protection#..." class="__cf_email__"
+          data-cfemail="...">[email protected]</a>
+
+     and that breaks twice here. The rewritten href is a relative Cloudflare path,
+     which the PJAX router treats as an internal navigation and fetches -- so
+     clicking the address performs a page swap instead of opening the mail client.
+     And the replacement markup is written into the parsed document, so a shell
+     fetched during a swap can carry obfuscated anchors that nothing ever decodes.
+
+     So addresses live in data attributes and are assembled at runtime, on boot and
+     after every navigation. Nothing at the edge has a pattern to match.
+
+     The second half is defensive rather than decorative: if an address ever does
+     reach the HTML -- a hand edit, a cached shell from before this change -- this
+     also finds the anchor Cloudflare produced, decodes it and restores a working
+     mailto. Decoding is not a hack; data-cfemail is the address XORed against its
+     own first byte, which is a stable public format.
      ------------------------------------------------------------ */
-  var wheelReactivityCleanup = null;
-
-  function initWheelReactivity() {
-    var wanted = doc.body.classList.contains('credits-rotary-page');
-
-    if (!wanted) {
-      if (wheelReactivityCleanup) wheelReactivityCleanup();
-      return;
+  function decodeCfEmail(encoded) {
+    if (!encoded || !/^[0-9a-f]+$/i.test(encoded)) return '';
+    if (encoded.length % 2 || encoded.length < 4) return '';
+    var key = parseInt(encoded.substr(0, 2), 16);
+    var out = '';
+    for (var i = 2; i < encoded.length; i += 2) {
+      out += String.fromCharCode(parseInt(encoded.substr(i, 2), 16) ^ key);
     }
-    // Already driving; bootPage re-ran after a PJAX swap that stayed here.
-    if (wheelReactivityCleanup) return;
+    // A decode with no @ in it is a malformed payload rather than an address, and
+    // painting that into the page would be worse than leaving the anchor alone.
+    return out.indexOf('@') > 0 ? out : '';
+  }
 
-    var discs = doc.querySelectorAll('.rotary-disc');
-    if (!discs.length) return;
+  function hydrateEmailLinks(scope) {
+    var root = scope || doc;
+    if (!root || typeof root.querySelectorAll !== 'function') return;
 
-    var alive = true;
-    var last = { bass: -1, onset: -1, treble: -1 };
-
-    function write(bass, onset, treble) {
-      Array.prototype.forEach.call(discs, function (disc) {
-        disc.style.setProperty('--wheel-bass', bass);
-        disc.style.setProperty('--wheel-onset', onset);
-        disc.style.setProperty('--wheel-treble', treble);
+    /* Repair anything Cloudflare already rewrote. Runs first, so a repaired anchor
+       that also carries data-email-* attributes is then normalised by the pass
+       below rather than being left half-migrated. */
+    Array.prototype.forEach.call(
+      root.querySelectorAll('a.__cf_email__, a[href*="/cdn-cgi/l/email-protection"]'),
+      function (node) {
+        var decoded = decodeCfEmail(node.getAttribute('data-cfemail'));
+        if (!decoded) return;
+        node.setAttribute('href', 'mailto:' + decoded);
+        node.removeAttribute('data-cfemail');
+        node.classList.remove('__cf_email__');
+        node.textContent = decoded;
       });
-    }
 
-    wheelReactivityCleanup = function () {
-      alive = false;
-      write('0', '0', '0');      // leave the wheels static, not mid-pulse
-      wheelReactivityCleanup = null;
-    };
-
-    /* A bass-driven scale IS motion, so reduced motion gets the zeros written
-       once and no loop at all -- the same bargain the canvases already strike. */
-    if (reduceMotion()) {
-      write('0', '0', '0');
-      return;
-    }
-
-    function frame() {
-      if (!alive) return;
-      // A PJAX swap detached the wheels: stop driving elements nobody can see.
-      if (!doc.body.contains(discs[0])) { alive = false; return; }
-
-      var b = readBands();
-      /* Quantised to 1/255th before comparing. Writing a custom property
-         invalidates style for the whole subtree, and with the music off all
-         three sit at 0 -- an unquantified write would cost a style
-         recalculation of both wheels, every frame, forever, to set the same
-         three numbers again. */
-      var bass = Math.round(b.bass * 255) / 255;
-      var onset = Math.round(b.onset * 255) / 255;
-      var treble = Math.round(b.treble * 255) / 255;
-      if (bass !== last.bass || onset !== last.onset || treble !== last.treble) {
-        last.bass = bass;
-        last.onset = onset;
-        last.treble = treble;
-        write(bass.toFixed(3), onset.toFixed(3), treble.toFixed(3));
-      }
-      window.requestAnimationFrame(frame);
-    }
-
-    frame();
+    // Assemble the authored ones.
+    Array.prototype.forEach.call(
+      root.querySelectorAll('[data-email-user][data-email-domain]'),
+      function (node) {
+        var user = (node.getAttribute('data-email-user') || '').trim();
+        var domain = (node.getAttribute('data-email-domain') || '').trim();
+        // Reject an @ in either half: that means someone put a whole address in one
+        // attribute, which is exactly the literal this exists to prevent.
+        if (!user || !domain || user.indexOf('@') !== -1 || domain.indexOf('@') !== -1) return;
+        var address = user + '@' + domain;
+        var href = 'mailto:' + address;
+        var subject = node.getAttribute('data-email-subject');
+        if (subject) href += '?subject=' + encodeURIComponent(subject);
+        node.setAttribute('href', href);
+        /* data-email-label means "keep the copy I wrote" -- the category cards want
+           to say "Press inquiry", not recite the address. Without it the visible
+           text IS the address, which is what the footer and the bio want. */
+        if (!node.hasAttribute('data-email-label')) node.textContent = address;
+      });
   }
 
   /* ------------------------------------------------------------
      Boot and PJAX page hydration
      ------------------------------------------------------------ */
   function bootPage() {
+    /* Before initRouting, deliberately: an unhydrated email anchor has no href at
+       all, and a hydrated one has a mailto: href that getInternalPageUrl already
+       excludes. Either way the router cannot mistake it for an internal link -- but
+       hydrating first means there is no window in which a click lands on an anchor
+       with no destination. bootPage runs once at boot and again after every PJAX
+       swap, which is exactly the two moments new markup can arrive. */
+    hydrateEmailLinks();
     initImages();
     initCreditsRotary();
-    // After initCreditsRotary, on every swap rather than once per session: this
-    // is torn down on the way OUT of the credits page as well as rebuilt on the
-    // way in, so the wheels keep pulsing in step with the mesh instead of the
-    // custom properties going stale on a returned-to page. The mesh itself is
-    // NOT here -- it is global and is built once, in initAmbientExperience.
-    initWheelReactivity();
     initRouting();
     // After initRouting: syncPageLinks rewrites a[data-page] hrefs, and the
     // download CTAs must keep the release URL that wins this ordering.
@@ -2916,8 +2750,8 @@
        rerun after the router swaps a page shell.
 
        The ambient layer is wrapped because it is DECORATIVE and it runs FIRST.
-       Anything it throws -- a browser without fetch, without AudioContext, without
-       matchMedia, a canvas that refuses a 2D context -- would otherwise abort boot()
+       Anything it throws -- a browser without <audio>, without matchMedia, a canvas
+       that refuses a 2D context -- would otherwise abort boot()
        before bootPage() and leave the visitor with a page whose navigation, menu and
        credits screen are all dead but whose background is fine. That is precisely
        backwards. The same reasoning is why initDynamicDownload catches around its own

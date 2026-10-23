@@ -946,34 +946,40 @@ pulled back.
 | one mesh, first pass | 1.5-2.2px @ 0.25-0.35 | 0.15-0.20 | 0.26 cell |
 | unified, frequency-budgeted | 1.5-2.2px @ 0.25-0.30 | 0.15-0.20 | up to 0.75 cell |
 | smooth flow + audio droplets | 1.5-2.2px @ 0.25-0.30 | 0.15-0.20 | flow 0.24 cell |
-| **current** | **2-3px @ 0.45-0.60** | **0.36-0.43** | **0.42 cell, autonomous** |
+| autonomous noise, "make it pop" | 2-3px @ 0.45-0.60 | 0.36-0.43 | 0.42 cell |
+| **current** | **1.5-2px @ 0.16-0.22** | **0.07-0.10** | **0.42 cell, autonomous** |
 
-Hold the current row. The opacities are roughly double what three consecutive rounds
+Hold the current row. Note what it is: the sixth calibration, and the third reversal.
+The band has now been "under 0.13, stay subtle", "at least 0.28, be prominent", a narrow
+0.15-0.20, "0.35-0.45, make the lattice eye-catching", and 0.07-0.12 — which is very
+nearly where it started. Every row is recorded rather than overwritten, because each was
+a deliberate review decision and the next one should be able to see the whole path
+instead of discovering it by accident. The opacities are roughly double what three consecutive rounds
 pinned, and the vertex radius is up from 1.5-2.2px. Both are `Math.min` ceilings, and
 both ramps *reach* their ceiling exactly — a `Math.min` that never binds is decoration,
 and a calibration comment describing a range the code does not produce is worse than no
 comment. Measured on the real code path: lines 0.360 and 0.430, vertices 0.4500-0.5843
 alpha at 2.00-2.90px.
 
-Because a layer this bright sits directly behind body copy, the numbers that matter are
-not the mesh's but the copy's. `test_the_scrim_outweighs_the_mesh_at_its_brightest`
-computes the contribution paragraph's contrast against the brightest thing the mesh
-paints, in both themes, with and without the scrim, reading the alphas out of `app.js`
-rather than restating them — it used to hardcode 0.30 and kept passing at half the real
-brightness after the calibration moved, which is what a guard that hardcodes the number
-it guards looks like. The result this round:
+Because the mesh sits directly behind body copy, the numbers that matter are not the
+mesh's but the copy's. `test_the_scrim_outweighs_the_mesh_at_its_brightest` computes the
+contribution paragraph's contrast against the brightest thing the mesh paints, in both
+themes, with and without the scrim, reading the alphas out of `app.js` rather than
+restating them — it used to hardcode 0.30 and kept passing at half the real brightness
+after the calibration moved, which is what a guard that hardcodes the number it guards
+looks like. At the current calibration:
 
-| | paragraph with no scrim | through the scrim |
+| | paragraph on the bare mesh | through the scrim |
 | --- | --- | --- |
-| dark | 2.39:1 | **7.43:1** (AAA) |
-| light | 4.06:1 | **6.91:1** (AA) |
+| dark | **5.59:1** (AA) | **7.59:1** (AAA) |
+| light | **4.96:1** (AA) | **6.92:1** (AA) |
 
-Both moved deliberately in opposite directions. `bare` went *down*, from 5.18:1, because
-the background was asked to become a feature rather than a texture and that is what it
-costs. The floor behind the scrim went *up*, from 4.5 to 6.0, because the scrim is now
-the only thing holding the credits copy up — and it was thickened from `0.9/0.6` to
-`0.93/0.74` to do the job. Weakening the first assertion and tightening the second is
-not a retreat; it is moving the guarantee to where it actually lives.
+Both clear AA *without* the scrim, which is the actual requirement — body text and
+headings effortless to read — and the scrim is insurance again rather than structure. It
+is therefore back to the `0.9/0.6` it shipped with, after one round at `0.93/0.74` when
+the mesh was at 0.45-0.60 alpha and the paragraph measured 2.39:1 on the bare mesh with
+the scrim doing all the work. The floor behind the scrim stays strict at 6.0, so the next
+brightness increase fails here instead of shipping.
 
 **Glow is a pre-rendered gradient sprite, not `shadowBlur`.** The brief offered either;
 this takes the gradient, and the choice is not aesthetic. At ~600 vertices and 60fps,
@@ -990,14 +996,21 @@ threshold, and vertices popped between two baked textures as a crest passed unde
 that popping reads as flicker no matter how smooth the geometry is. All continuous
 variation lives in alpha and radius, which cannot pop.
 
-**`--mesh-ink` is one dial on how hard the layer presses.** The alphas above are authored
-for the dark canvas. The same alphas over the deepened light-theme channels print a
-lavender graph across the content — a light vertex at full 0.60 measures 3.02:1, which
-clears the visibility ceiling and is still far too heavy to sit behind body copy — so
-light scales the whole layer to `0.55`. The two themes then match in *presence*
-(1.49-1.76:1 light against 1.74-3.24:1 dark) rather than in numbers. Changing it is one
-custom property, and `test_the_mesh_is_visible_in_both_themes_without_a_blend_mode`
-recomputes the compositing from the tokens on disk either way.
+**`--mesh-ink` is one dial on how hard the layer presses, and both themes currently sit
+at 1.** That is a consequence of the calibration, not an oversight: when the alphas were
+0.45-0.60, light needed 0.55, because violet-800 at that strength over off-white measures
+3.02:1 and prints a lavender graph across body copy. At 0.16-0.22 the deepened light
+channels land in the same band as dark on their own — line 1.18:1 against 1.08:1, vertex
+1.44:1 against 1.39:1 — so scaling back would make light *fainter* than dark for no
+reason. The dial stays, and the test asserts the **outcome** (both themes within 0.75-1.35×
+of each other) rather than the dial's value, so it survives either arrangement and survives
+a palette change.
+
+**Glow is back to a soft edge.** `bloom` 0.78 → **0.30** and `spread` 2.8 → **1.8**. There
+has never been a literal `shadowBlur` in this file — at ~600 vertices and 60fps that is
+36,000 of the most expensive calls a 2D context has per second — so "remove the heavy glow"
+means turning the sprite's bloom down, which is one constant precisely because the glow is
+pre-rendered.
 
 ### Autonomous motion: multi-octave value noise
 
@@ -1099,182 +1112,103 @@ One trap worth recording: `fbm()` dividing by its normaliser is load-bearing. De
 gradient, the velocity and the tear spend — is silently 87.5% bigger than the arithmetic
 says, with no constant changing. That mutation survived the first sweep.
 
-### What drives the wheels
+### Nothing is audio-reactive any more
 
-`initAmbientExperience()` owns one `AnalyserNode`. Since the mesh was disconnected it has
-exactly **one** consumer: `initWheelReactivity()`, which early-returns unless the body
-carries `credits-rotary-page`. So on index, about, download and shared-post the analyser is
-never read at all — four of the five pages went from running `getByteFrequencyData` plus a
-per-bin pitch loop 60 times a second to never running it. `readBands();` appears once in
-`app.js`, and a test counts it.
+Three rounds of this site drove visuals from the music: the mesh read six band metrics,
+the credits wheels scaled and glinted from three of them, and a droplet system dropped
+expanding rings on detected transients. All of it is gone, and the removal is total rather
+than gated — there is no `AudioContext`, `AnalyserNode`, `createMediaElementSource`,
+`getByteFrequencyData`, band calculation, or `--wheel-*` custom property anywhere in
+`app.js` or `style.css`. `test_the_analysis_and_the_wheel_driver_are_both_gone` asserts the
+absence on comment-stripped source in both files, because each of those names appears in
+prose explaining why it is gone.
 
-It is configured for two things at once:
+What that bought, concretely:
 
-```js
-analyser.fftSize = 2048;               // ~21.5Hz bins at 44.1kHz
-analyser.smoothingTimeConstant = 0.35; // a keystroke lands on the next frame
-```
+* **Four of the five pages now run no audio analysis at all.** `readBands()` had exactly two
+  callers; the mesh's went last round, and the wheel driver's went this round. The analysis
+  was `getByteFrequencyData` into a 1024-byte array plus a per-bin loop over the mid and
+  treble ranges for pitch and centroid, sixty times a second.
+* **The credits screen lost a per-frame style-recalculation driver on top of its two large
+  rotating discs.** `initWheelReactivity()` ran its own rAF loop — separate from the rotary's,
+  which stops when the wheel settles — and wrote three custom properties per disc per frame.
+  Each write invalidated `calc()`s in a `scale()`, an `opacity`, a `border-color`, and two
+  `box-shadow` radii, on elements carrying masks, `repeating-conic-gradient` and
+  `drop-shadow`. That is the lag, and it is now structurally impossible rather than merely
+  reduced.
+* **The mesh has no input from another subsystem**, so its frame has no branch that depends
+  on a value arriving from somewhere else.
 
-At the old `fftSize` of 128 a bin was ~344Hz wide, so the entire 20-200Hz bass
-band was ONE bin and a dominant-pitch reading was meaningless. And the
-analyser's smoothing is a running average over previous frames, which is exactly
-what turns a piano keystroke into a slow swell — 0.9 meant a strike arrived
-several frames late. It is not 0 either; that would make the visuals jitter per
-sample instead of tracking notes.
+The wheels themselves are untouched: every spring, damping, snap and velocity constant is
+byte-identical, `CreditsRotaryGeometry` and `CreditsScrollPhysics` still pass unchanged, and
+the counter-rotation that keeps the contributor copy upright is still there. What was removed
+is only the decoration that sat on descendant-free layers above it.
 
-`computeBands()` derives six metrics from it, **once per frame** however many
-consumers ask (an 8ms cache):
+#### The invariant that outlived the reactivity
 
-| metric | source | drives |
-| --- | --- | --- |
-| `bass` | 20-200Hz | the wheels' radial pulse, `scale(1 + bass × 0.035)` on the descendant-free layers |
-| `mid` | 200-3200Hz | `onset`'s source, and 0.35 of `getEnergy()` |
-| `treble` | 3200-12000Hz | the rim ticks and the hanging name tags glint |
-| `onset` | frame-over-frame RISE in `mid` | the dashed outer ring and the spokes flare |
-| `pitch` | dominant bin in mid+treble, log-scaled | **nothing** — see below |
-| `centroid` | spectral centroid, log-scaled | **nothing** — see below |
+The audio-reactive wheels were built around one hard constraint, and it is worth keeping now
+that they are gone. The contributor text, avatars and rim tags all live under
+`.rotary-disc__sector-track`, whose coordinates are solved against 14 viewports and locked. A
+`scale()` on any **ancestor** of them moves the text — a bass pulse of 3.5% on a 1260px disc
+is 44px — and silently breaks that solve. So the old code only ever transformed layers with no
+descendants.
 
-Nothing in this table reaches the background canvas, and that is now a structural fact
-rather than a tuning choice: `test_the_mesh_has_no_connection_to_the_audio_engine` asserts
-the mesh function names no band, no facade and no analyser, and the harness proves it from
-outside by making the facade scream full scale on every band and then *throw*, and getting
-bit-identical lattices both times — `0.00e+0px` divergence over 36,000 vertex positions.
-
-**`pitch` and `centroid` are now computed for nobody.** The mesh was their only consumer.
-They are left in place deliberately — they are public members of the `AgoraAudio` facade and
-removing them is a contract change nobody asked for — but they are not free: the per-bin
-loop over the mid and treble ranges that produces them runs every frame on the credits
-screen. Trimming them is a one-function change and an offered cleanup, not something to do
-silently inside a round about the background.
-
-Band edges are declared in **Hz** and converted using the context's real
-`sampleRate` and `fftSize`. Hardcoding bin indices is how a "bass" band silently
-becomes a low-mid band: bin 9 is 194Hz at 44.1kHz and 211Hz at 48kHz, and nothing
-about the visuals would tell you the difference.
-
-Two details that are easy to lose:
-
-- **`onset` is a rise, not a level.** `Math.max(0, rawMid - previousMid)`, so a
-  note *decaying* is never mistaken for a note striking. The result is held by an
-  envelope (`ONSET_DECAY = 0.86`) because a single frame is shorter than the eye
-  can register.
-- **The sensitivity curve lifts quiet passages.** Music sits far below full scale
-  in a byte spectrum — a quiet piano passage averages around 0.1 — so a linear
-  mapping produces almost no movement and reads as broken rather than quiet.
-  `Math.pow(v, 0.6) * gain` takes 0.1 to 0.25 before the per-band gain, and
-  treble gets the most gain because it carries the least energy.
-
-`pitch` and `centroid` are reported 0..1 on a **log** scale because pitch perception is
-logarithmic: a linear map would spend most of its range on the top octave and a climbing
-melody would look pinned near 1.
-
-### The wheels breathe; the copy does not
-
-`initWheelReactivity()` writes three normalised custom properties onto each
-`.rotary-disc` — `--wheel-bass`, `--wheel-onset`, `--wheel-treble` — and the
-stylesheet turns them into a bass scale, an onset flare and a treble glint.
-
-It needs its own loop. The rotary's frame loop stops the instant the wheel
-settles, which is right for the physics and useless for a bass pulse that has to
-keep breathing on a stationary wheel.
-
-The scale is the part that has to be handled carefully, because the contributor
-text and avatar coordinates are solved against 14 viewports and locked. A bass
-scale on any **ancestor** of them would move the text by 3.5% of a 1260px disc —
-44px — and silently break that solve. So it is only permitted on layers with no
-descendants:
-
-| layer | reacts to | how |
-| --- | --- | --- |
-| `.rotary-disc__plate::before` (rim ticks) | bass, treble | scale + opacity |
-| `.rotary-disc__plate::after` (dashed outer ring) | bass, onset | scale + glow + opacity |
-| `.rotary-disc__ring` ×3 (empty spans) | bass, onset | scale + opacity |
-| `.rotary-disc__sector-track::before` (spokes) | onset | opacity only |
-| `.rotary-sign, .rotary-name-tag` | treble | border + glow |
-
-The two pseudo-elements and the ring spans hold nothing; the spokes and the tags
-change opacity and colour only. `.rotary-disc__sector-track` — the subtree that
-carries every piece of copy — is never transformed at all.
-`test_the_wheel_pulse_cannot_move_the_copy` asserts exactly that, by enumerating
-every rule that scales with `--wheel-bass` and failing on any selector outside
-the allowed set.
-
-Every use carries a `var(--wheel-x, 0)` fallback, so the wheels are static and
-correct with the script absent, the music off, or reduced motion requested (in
-that last case the driver writes the zeros once and starts no loop — a
-bass-driven scale *is* motion). Writes are quantised to 1/255th before comparing:
-setting a custom property invalidates style for the whole subtree, and with the
-music off all three sit at 0, so an unquantified write would cost a style
-recalculation of both wheels every frame forever to set the same numbers again.
-
-### What is no longer there: droplets, and any scroll coupling
-
-#### The droplet system was deleted, not disabled
-
-The previous round built an audio-triggered ripple system — a novelty detector with an
-asymmetric envelope follower, a soft-knee strength curve, a threshold, a 160ms refractory
-period and a four-ring buffer, expanding concentric rings that faded toward the screen
-edges. It worked, and it measured well.
-
-Disconnecting the audio removes its only trigger. What is left would be ~70 lines of ring
-buffer, follower and gate that nothing can reach, so it is gone rather than dormant — and
-reinstating it as a *timed* ambient event is a deliberate act that should be decided, not
-inherited. Inventing an autonomous trigger was not asked for, and random discrete events
-are the opposite of the continuous field this round is about.
-
-`test_the_droplet_system_is_gone_rather_than_dormant` pins the removal, so it cannot come
-back as dead code and cannot be removed twice by someone who does not know it already was.
-
-What replaced it as the source of contrast: **the surface's own height**. Each vertex's
-brightness rides its normalised vertical displacement, which is free — `dy` is already
-computed — and it reads as light falling across a moving sheet, crests catching it and
-troughs falling away. With no audio left to modulate anything, this is the only place
-contrast comes from, and a test asserts it exists.
-
-#### Scrolling still cannot reach the canvas
-
-Unchanged from the previous round, and now over-determined: the mesh has no audio input and
-no scroll input, so the only things that can affect it are the viewport size, the theme, the
-reduced-motion preference and its own clock.
-
-The removal was done at the level of the *channel* rather than a gate. The module-level
-`wheelSpin` slot, `readSpin()`, both spin constants, the physics loop's publish, the mesh's
-credits body-class check and the radial spin term are all deleted — a gate is something a
-future edit forgets, and a slot that does not exist cannot be forgotten. `test_scroll_cannot_reach_the_mesh_at_all`
-also asserts the rotary section assigns to no global at all, because that is the shape a
-replacement coupling would take.
-
-Measured end to end: flinging the credits wheel eight times leaves the lattice **bit-for-bit
-identical** to not touching it, while the wheel still turns and commits contributors
-(counter trace `01 → 03 → 01`). And `credits.html` produces a bit-identical lattice to
-`index.html` for the same input — the mesh does not know which page it is on.
-
-Two compositor costs also stay out, both performance decisions rather than aesthetic ones:
-
-* **No `mix-blend-mode`.** A full-viewport blend mode makes the compositor read back and
-  blend the entire backdrop group every frame and defeats GPU layer caching — on the credits
-  screen, which already composites two large rotating discs with masks and rim gradients over
-  this canvas, it was the most expensive thing the background was doing. Dropping it was
-  close to free visually: `screen` on near-black and `multiply` on off-white are each within
-  3.6/255 of plain alpha compositing, and contrast was slightly *better* without them in both
-  themes. Which is also why `screen` was able to hide the light theme's mesh at 1.003:1 for a
-  whole release — it was doing almost nothing in either theme.
-* **No element `opacity`** — a second compositing multiply over the whole viewport for a 5%
-  dim nobody can see.
-
-The canvas still covers the viewport exactly as specified:
+`test_nothing_audio_driven_may_transform_the_copy_subtree` now asserts the stronger version:
+the sector track carries no transform at all, and no transform anywhere in the credits CSS
+references `--wheel-*` or a band. It also pins the content block's own transform, because that
+one is large, essential, and easy to mistake for decoration:
 
 ```css
-position: fixed; inset: 0; width: 100vw; height: 100vh;
-pointer-events: none; z-index: 0;
+transform: translate(-50%, -50%)
+           rotate(calc(0deg - var(--segment-angle) - var(--disc-rotation, 0deg)))
+           scale(var(--segment-scale));
 ```
 
-Colours come from four dedicated tokens plus the ink dial — `--mesh-node-rgb`,
-`--mesh-node-hi-rgb`, `--mesh-glow-rgb`, `--mesh-line-rgb`, `--mesh-ink` — declared in
-`:root` and redefined under `prefers-color-scheme: light`. The line channel is the site's own
-`--accent-rgb`, pinned equal to it by a test, so the lattice is on-brand rather than sitting
-next to the brand; and the glow is a step *more* saturated than the core it blooms around,
-which is what makes a halo read as coloured light instead of a grey smudge.
+The `rotate` is the counter-rotation that keeps the block upright as the wheel turns, the
+`translate` centres it on its solved landing point instead of hanging it from its top-left
+corner, and the `scale` is the settled emphasis that moves `0.6 → 1` between sectors. Deleting
+any of them does not fail a test about audio — it silently moves the copy off its mark.
+
+#### Two things flagged rather than silently changed
+
+* **A few resting alphas in the wheel decoration were originally lowered to leave headroom for
+  a flare that no longer exists.** The dashed outer ring's `opacity: 0.6` was `1.0`, and the
+  spokes' `0.4` was `0.48`, before the reactivity was added. They are left exactly as authored,
+  because restoring them is a visual decision and this round was about removing a hook, not
+  redesigning the screen. Both are one number away from their pre-reactivity values.
+* **The track lost its 2200Hz lowpass and its compressor.** Those were `AudioContext` nodes on
+  the path to the destination, so removing the Web Audio API removed them too. The music now
+  plays as authored rather than softly filtered, at the same `0.075` volume the master gain
+  used. If the brighter sound is wrong, the fix is a pre-processed asset, not an audio graph —
+  putting the graph back would put the per-frame cost back with it.
+
+#### The droplets went with the analysis
+
+Last round's ripple system — a novelty detector with an asymmetric envelope follower, a
+soft-knee strength curve, a threshold, a 160ms refractory period and a four-ring buffer — was
+audio-triggered by definition, so removing the audio removed its only trigger. It is deleted
+rather than left dormant: ~70 lines nothing could reach, and an invented autonomous trigger
+would be behaviour nobody asked for. `test_the_droplet_system_is_gone_rather_than_dormant`
+pins the removal so it cannot return as dead code.
+
+What replaced it as the source of contrast is the surface's own height: each vertex's brightness
+rides its normalised vertical displacement, which is free because `dy` is already computed, and
+it reads as light falling across a moving sheet. With no audio left to modulate anything, that
+is the only place contrast comes from — and it survived the dimming pass intact, measured at an
+alpha span of 0.054 and a radius span of 0.45px across the 0.16-0.22 / 1.5-2.0px bands.
+
+#### Scrolling still cannot reach the canvas either
+
+Removed the round before, and now over-determined: the mesh has no audio input *and* no scroll
+input, so the only things that can affect it are the viewport size, the theme, the reduced-motion
+preference and its own integrated clock. `test_the_only_inputs_left_are_the_four_it_is_allowed`
+asserts that list positively, so a fifth input fails rather than only a removed one passing.
+
+The removal was done at the level of the channel rather than a gate — the module-level
+`wheelSpin` slot, `readSpin()`, both spin constants, the physics loop's publish and the mesh's
+credits body-class check are all deleted, because a gate is something a future edit forgets and
+a slot that does not exist cannot be. Measured: flinging the credits wheel eight times leaves the
+lattice bit-for-bit identical, while the wheel still turns and commits (`01 → 03 → 01`).
 
 ### Scroll physics
 
@@ -1343,8 +1277,7 @@ one thing that could have simply been one thing. They still cost two clear-rects
 two position buffers and two draw loops a frame, and where their lattices crossed
 at slightly different spacings they produced moiré.
 
-What is specific to the single layer that replaced them, as opposed to the
-analysis that drives it:
+What is specific to the single layer that replaced them:
 
 * **Two buffers, four consumers.** The vertex loop fills a shared `Float32Array` of
   positions once per frame; the row pass, the column-and-diagonal pass and the blit
@@ -1381,151 +1314,277 @@ analysis that drives it:
   in `bootPage()`, so a PJAX swap cannot stack a canvas per navigation — which is
   also why it needs no teardown closure. The draw loop still stops itself the
   moment `!canvas.isConnected`.
-* **`prefers-reduced-motion` gets one static frame and no loop** — audio reactivity
-  is disabled with it, deliberately: the preference is about motion, and a mesh
-  pulsing to a beat is motion. The wheel driver makes the same bargain.
+* **`prefers-reduced-motion` gets one static frame and no loop.** The preference is about
+  motion, and an autonomously drifting field is motion — so unlike the audio-driven version,
+  which could argue that only the *pulsing* was motion, this one has no ambiguity to hide
+  behind. There is no wheel driver left to make the same bargain.
 * **Pixel ratio is capped at `1.75`.**
-* **It cannot be taken down by the audio engine**, because it never asks it for anything.
-  The `readBands()` guard at module scope — returning `IDLE_BANDS` when the facade is
-  missing, older than `getBands()`, or throwing — still exists, and still matters, but its
-  one remaining consumer is the credits wheel driver. A cached `app.js` or a browser with no
-  `AudioContext` used to be able to freeze the background; now it can only stop the wheels
-  from breathing.
+* **Nothing can take it down.** There is no facade to be missing, no analysis to throw, no
+  decoder to fail. The only ways `draw()` can decline to run are a detached canvas and a
+  reduced-motion preference, and both are intentional.
 
-`getSpectrum()` (8 log-spaced bands, bin 0 skipped as DC offset) is still on the
-facade and still tested, but nothing consumes it — the six band metrics above
-replaced it, because "one bass-weighted number per band" cannot express an onset or
-a dominant pitch.
+`window.AgoraAudio` survives as a transport — `start`, `stop`, `toggle`, `isPlaying`,
+`isMuted` — because the sound toggle button needs one and because it is the seam a future
+consumer should use. Its analysis members (`getBands`, `getEnergy`, `getPulse`,
+`getSpectrum`, `SPECTRUM_BANDS`) are gone with the graph they read from; a facade that
+exports five ways to ask for data nobody computes is worse than no facade.
 
-**One boot-resilience fix came out of this work, and it is not about the mesh.**
-`initAmbientExperience()` runs *first* in `boot()`, and it touches every optional
-browser API the site has. The soundscape preload called `fetch(MUSIC_SRC).catch(...)`
-— but `.catch()` can only handle a *rejected promise*, and if `fetch` is not a
-function the call throws a `ReferenceError` synchronously, before there is a promise
-to catch on. That escaped `boot()` entirely: routing, the mobile menu, smooth
-scrolling, the contact form and this credits screen all failed to initialise, on a
-page whose background was fine. Found by a jsdom run, which has no `fetch`. Both
-ends are now guarded — the call checks `typeof fetch === 'function'`, and `boot()`
-wraps the whole ambient layer in a `try` that reports and continues, with
-`bootPage()` deliberately left *outside* it so a real hydration failure is never
-swallowed. A decorative layer has to cost the decoration, not the page.
+**The boot-resilience wrapper stays, and one of its two halves is now unnecessary.**
+`initAmbientExperience()` runs *first* in `boot()` and is wrapped in a `try` that reports and
+continues, with `bootPage()` deliberately left outside it. That was added after a jsdom run
+showed `fetch(MUSIC_SRC).catch(...)` throwing a synchronous `ReferenceError` where `fetch` did
+not exist — `.catch()` can only handle a rejected promise — which aborted `boot()` outright and
+left routing, the menu, the contact form and the credits screen all dead on a page whose
+background was fine. There is no `fetch` in the ambient layer any more, so that specific hazard
+is gone rather than guarded. The wrapper stays because the class of hazard is not: this is still
+the first thing `boot()` does, and it still touches `matchMedia`, a 2D canvas context and
+`HTMLMediaElement`.
 
 ### Verifying the screen
 
-There is no browser in CI and jsdom performs no layout, so the screen is proved four ways.
-The `/tmp` harnesses are not checked in — they need `jsdom`, which is deliberately not a
-dependency of a zero-build static site — so they are rebuilt per session; what matters is
-what they assert, and the numbers below are what they produced against the current code.
+There is no browser in CI and jsdom performs no layout, so the site is proved four ways. The
+`/tmp` harnesses are not checked in — they need `jsdom`, which is deliberately not a dependency of
+a zero-build static site — so they are rebuilt per session; what matters is what they assert, and
+the numbers below are what they produced against the current code.
 
 ```bash
-npm test                    # 182 tests, incl. CreditsRotaryGeometry, AmbientMesh,
-                            # AmbientMeshGeometry, AmbientMeshAutonomy,
-                            # CreditsScrollPhysics, CreditsBackdrop, CreditsAudioBands
-node /tmp/wh/flow.js        # continuity, integrity, calibration, noise, direction, cost
-node /tmp/wh/parity.js      # credits parity, scroll decoupling, the light-theme ink dial
-python3 /tmp/_mc7.py        # 79 mutations, all must be killed
+npm test                     # 178 tests
+node /tmp/wh/meshverify.js   # mesh: integrity, continuity, calibration, direction, cost
+node /tmp/wh/site.js         # pages: email hydration, Cloudflare repair, audio unlock
+python3 /tmp/_mc7.py         # mutation sweep, all must be killed
 ```
 
-`CreditsRotaryGeometry` does not eyeball anything: it reads `--segment-angle`,
-`--sector-offset`, `--rotary-disc-size`, each disc's `translate()`, and the rim labels' own
-`clamp()`/`min()` chains back out of the stylesheet on disk, then recomputes every landing
-box, every rim clearance and the visible wheel fraction across 14 viewports.
+`CreditsRotaryGeometry` does not eyeball anything: it reads `--segment-angle`, `--sector-offset`,
+`--rotary-disc-size`, each disc's `translate()`, and the rim labels' own `clamp()`/`min()` chains
+back out of the stylesheet on disk, then recomputes every landing box, every rim clearance and the
+visible wheel fraction across 14 viewports. It passed unchanged through the removal of the audio
+reactivity, which is the evidence that the wheels themselves were not touched.
 
-**The harnesses instrument a stub 2D context and read the geometry back out of the recorded
-draw calls**, which is the only way to test a canvas without a browser. The row pass is
-`rows` contiguous polylines of `columns` points in row-major order, so the whole lattice can
-be reconstructed from the path alone; the blit pass is recovered from `drawImage` plus the
-`globalAlpha` in force at the time. What they measured:
+**The mesh harness instruments a stub 2D context and reads the geometry back out of the recorded
+draw calls**, which is the only way to test a canvas without a browser. The row pass is `rows`
+contiguous polylines of `columns` points in row-major order, so the whole lattice can be
+reconstructed from the path alone; the blit pass is recovered from `drawImage` plus the
+`globalAlpha` in force at the time.
 
 | check | result |
 | --- | --- |
-| peak per-vertex motion between consecutive frames, 420 frames | **0.695px** |
-| …returning from a 9-second background tab | **2.41px** |
-| inverted triangles | **0 of 231,420 cells**, min signed area 81% of a cell |
-| vertical displacement range | **±25.5px**, 47% of a 54px cell |
-| drift direction, by cross-correlating a row 960ms apart | **+225 px/s** (declared 240) |
-| …correlation unshifted / shifted +x / shifted −x | 0.584 / **0.819** / 0.048 |
-| residual decorrelation at the best shift (morph vs rigid slide) | **0.181** |
-| zero crossings per lattice row (octave count made visible) | **4.5** |
-| spatial autocorrelation, 1 row apart → 6 rows apart | 0.868 → 0.465 |
-| line alphas / dot alphas / dot radii | 0.360, 0.430 / 0.450-0.584 / 2.00-2.90px |
-| lattice with the facade at full scale vs with `getBands()` throwing | **bit-identical**, 0.00e+0 |
-| credits vs home lattice | **bit-identical** over 60,000 vertices |
-| credits lattice, wheel flung 8× vs untouched | **bit-identical**, 0.00e+0 |
-| JavaScript per frame | **0.51ms = 3.1% of a 16.7ms budget** |
-| mobile 390×844 | 364 vertices at 38px cells, 0 inverted of 325 cells |
+| inverted triangles, 420 frames | **0 of 77,140 cells**, min signed area 81% of a cell |
+| peak per-vertex motion between consecutive frames | **0.695px** |
+| …returning from a 9-second background tab | **1.50px** |
+| typical vertex motion | 0.144px/frame ≈ 9 px/s |
+| displacement range | **±25.5px**, 47% of a 54px cell |
+| drift, cross-correlating a row 960ms apart | **+225 px/s** (declared 240) |
+| …correlation unshifted / +4 cols / −4 cols | 0.584 / **0.819** / 0.048 |
+| residual decorrelation at the best shift | 0.181 — morphing, not a rigid slide |
+| line alphas / dot alphas / dot radii | 0.070, 0.100 / 0.160-0.214 / 1.50-1.95px |
+| crest modulation span after the dimming pass | alpha 0.054, radius 0.45px |
+| JavaScript per frame | **0.50ms = 3.0% of a 16.7ms budget** |
+
+**The site harness boots all six real pages** and exercises the two things that cannot be checked
+by reading: runtime email assembly and the audio unlock path, including the autoplay policy
+*refusing*, which is the normal case rather than an error.
+
+| check | result |
+| --- | --- |
+| literal address or `mailto:` or `cdn-cgi` in any of the six HTML files | **none** |
+| addresses assembled at runtime | index 1, about 3, download 1, contact 6; credits and shared-post route to `/contact.html` instead |
+| four category subjects, distinct and correctly encoded | General enquiry / Feedback & ideas / Question about Agora / Press inquiry |
+| a Cloudflare-encoded anchor injected before boot | **decoded and repaired** to a working `mailto` |
+| `<audio>` count, placement, `preload`, `loop`, `volume` | 1, child of `<body>`, `auto`, true, 0.075 |
+| `canplay` attempts `play()` | yes |
+| a refused autoplay leaves the toggle honest | reads "sound off", not "unavailable" |
+| unlock bindings | **10** — five gesture types × window and document, all capture + passive |
+| a `wheel` gesture starts the music and removes the listeners | yes |
+| an explicit mute survives four later gestures | yes, and `play()` is not even attempted |
 
 Four harness details are load-bearing and non-obvious:
 
 * **One synthetic clock has to drive everything.** `performance.now()`, the rAF timestamp and
   `setTimeout` are three separate clocks and the app reads all three. A real `setTimeout` also
-  never fires inside a synchronous frame pump — which is how an earlier harness silently
-  measured a wheel that turned but never committed a contributor.
-* **Search a shift in both directions.** The backwards advection sign reported itself as
-  *"stationary"* rather than *"backwards"*, because the correct lag was negative and the
-  search only tried positive ones. A null result from a one-sided search is not evidence of
-  absence.
-* **Isolate an effect by differencing two runs, not by thresholding one.** A moving field
-  hides anything smaller than itself. Running two simulations that differ only in one input —
-  a keystroke, a wheel fling, a hostile facade — makes the divergence *purely* that input,
-  which is how the audio disconnection is proved as bit-identity rather than as a tolerance.
+  never fires inside a synchronous frame pump, which is how an earlier harness silently measured a
+  wheel that turned but never committed a contributor.
+* **A stub must be installed before the app runs, but a facade must be replaced after it.**
+  `initAmbientExperience()` guards with `if (window.AgoraAudio) return;`, so planting a hostile
+  facade in advance stopped the whole ambient layer from being built and the test measured nothing.
+* **Search a shift in both directions.** A backwards advection sign reports itself as *"stationary"*
+  rather than *"backwards"* if the search only tries positive lags. A null result from a one-sided
+  search is not evidence of absence.
 * **Mean-centre before cross-correlating.** Uncentred, the product of the two fields' means
-  dominates at every shift, the correlation comes out ~0.77 however far you slide it, and the
-  search reports shift 0. That is how this harness first concluded the advection was broken
-  when it was the measurement that was.
+  dominates at every shift and the correlation comes out ~0.77 however far you slide it.
 
 Both suites are mutation-tested, and the report names the guard that saw each mutation — a
-mutation killed by an unrelated test is a mutation that is not really covered. The 79 in
-`_mc7.py` cover this round's surface specifically: the analysis reconnected to the mesh four
-different ways, both advection signs flipped and the drift disconnected from the sample
-point, every mover multiplied back out of the clock, `dt` unclamped or its clamp widened, the
-first-frame guard dropped, the field collapsed to one octave, gain raised into grit or
-lowered into a single swell, lacunarity made an exact harmonic, the base texel finer than the
-lattice or wider than the viewport, the morph frozen into a rigid slide or fast enough to
-boil, `dx` and `dy` sampling the same region, the quintic downgraded to a cubic or to a
-linear ramp, the corner mixing shortcutted with XOR, corners folded to the wrong range, fBm
-left unnormalised, the two fBm calls collapsed into one, amplitude and `dx` ratio and jitter
-and the tear allowance each blown past the budget, the quintic slope constant understated so
-the budget arithmetic lies, drift raised into agitation or lowered into a still image, both
-line alphas moved out of the band or flattened to one value, the ink dial dropped from lines
-or from vertices, the vertex radius and alpha ceilings raised and both ramps made unable to
-reach theirs, the crest brightness frozen or recomputed in the blit pass, bloom cranked into
-glare or back down to a faint texture, the halo spread past the neighbouring cell,
-`shadowBlur` restored, the sprite choice thresholded on a moving quantity, the light ink dial
-removed, the lattice unhooked from `--accent-rgb`, the glow desaturated below its core, the
-light colours un-inverted, a dark or light triple inlined into a paint call, a fallback
-drifted from its token, the scrim thinned at its centre or at its mid stop or hardcoded or
-lifted above the copy, a blend mode or element opacity re-added, the canvas un-sized or made
-interactive or lifted above the content, the dpr cap removed, a stroke per diagonal, the
-diagonal family dropped, the detached-canvas guard removed, a second canvas attached, the
-mesh moved into `bootPage()`, the reduced-motion gate removed, the spin slot put back, the
-mesh made credits-aware again, a wheel listener added to the canvas, and the rotary
-publishing to a global.
+mutation killed by an unrelated test is a mutation that is not really covered.
 
-Four of those survived the first run and all four were real gaps rather than bad mutations:
+Four of this round's mutations survived the first sweep and all four were real gaps rather than
+bad mutations:
 
 * **`fbm()` left unnormalised.** Deleting `/ norm` grows the field's range 1.875×, so every
   amplitude — and therefore the gradient, the velocity and the tear spend — is silently 87.5%
-  bigger than the arithmetic says, with no constant changing. The budget test now asserts the
-  normalisation is present, because the budget is meaningless without it.
-* **The light-theme ink dial removed.** `--mesh-ink: 0.55 → 1` left the light mesh at 3.02:1,
-  which cleared the visibility ceiling, and the theme-parity ratio was close enough to its
-  threshold to be brittle. Asserting the dial itself — light must be under 0.8 — states the
-  actual contract instead of inferring it.
-* **A light-theme triple inlined into the canvas.** The guard stripped commas from the needle
-  and only spaces from the haystack, so it passed on a file containing `'109,40,217'` — the
-  exact mutation it exists to catch. Flattened on both sides now.
-* **The scrim's mid stop thinned.** The test read only `max(stops)`, so `0.74 52% → 0.30 52%`
-  was invisible: the centre was unchanged while the coverage that carries the gradient past
-  the first line of the paragraph collapsed. All three stops and their monotonicity are now
-  asserted.
+  bigger than the arithmetic says, with no constant changing.
+* **A guard that hardcodes the number it guards.** The scrim test restated the mesh's alpha as
+  0.30; when the calibration moved to 0.60 it kept passing, measuring a layer half as bright as
+  the real one. It now reads both alphas out of `app.js`.
+* **An assertion that stripped one side only.** The "no light-theme triple in the canvas" check
+  removed commas from the needle and spaces from the haystack, so it passed on a file containing
+  `'109,40,217'` — the exact mutation it exists to catch.
+* **A test that read `max(stops)` on a three-stop gradient.** Thinning the scrim's *mid* stop
+  collapsed the coverage that carries it past the first line of the paragraph while the centre
+  stayed put, and nothing noticed.
 
-A fifth was not a gap but a collision, and it is the fourth time this file has hit it: the
-guard that no light-theme triple appears in `app.js` fired on a *comment* illustrating the
-whitespace format of a computed custom property, which happened to use a real palette value
-as its example. The example is now `12, 34, 56`. Renaming the prose beats weakening the
-guard, but only because the prose was not load-bearing — three of the earlier collisions were
-comments explaining the exact bug the guard prevents, and those stayed.
+A fifth was not a gap but a collision, and it is the sixth time this file has hit it: guards that
+assert an identifier is *absent* match the prose explaining its absence. `--wheel-bass` survived in
+a stylesheet comment, `/cdn-cgi/l/email-protection` survived in an HTML comment, `AudioContext` and
+`time * rate` and `(h00 ^ iz)` all survived in `app.js` comments. The fix is not one rule. Where
+the prose is load-bearing documentation of the bug being prevented, the assertion is retargeted at
+the *code shape* (`= timestamp *`, `toUnit(hash2(`) or run against comment-stripped source. Where
+the prose was incidental — an example address in a comment about whitespace formatting — the
+example was changed to `12, 34, 56`. Renaming the prose beats weakening the guard, but only
+because that prose was not doing any work.
+
+
+## Background music, the contact page, and email addresses
+
+### The music streams now, and that was the whole delay
+
+The track used to be loaded with `fetch(MUSIC_SRC).then(r => r.arrayBuffer())` and then
+`decodeAudioData`. That cannot play a single sample until the **entire** file has arrived and
+been decoded into PCM — and the asset is `assets/bgMusic.mpeg` at **11,996,529 bytes**, which
+decodes to roughly 40MB. On a phone on a mobile connection the download alone is minutes.
+
+It also explains the stranger half of the symptom, that the music seemed to start when you
+clicked through to another page: a navigation re-ran `boot()`, and by then the bytes had
+finally landed. It was never tied to navigation; it was tied to the download finishing.
+
+It is now a streaming element:
+
+```js
+var el = doc.createElement('audio');
+el.src = MUSIC_SRC;
+el.loop = true;
+el.preload = 'auto';           // begin fetching now; play from a partial download
+el.volume = TARGET_VOLUME;     // 0.075, the value the deleted master gain used
+doc.body.appendChild(el);
+```
+
+Appended rather than left detached: a detached `<audio>` does still play in most engines, but
+preload priority for a node outside the document is engine-dependent, and "start streaming
+immediately" is the entire point. The PJAX router only ever replaces `<header>` and `<main>`, so
+a direct child of `<body>` survives every swap — which is how the mesh canvas works too, and why
+`createAudioElement()` runs once per session and the track does not restart on navigation.
+
+There is no `controls` attribute, because `.ambient-toggle` is the transport and a second
+unsynchronised one would contradict it; and it is `aria-hidden` with `tabindex="-1"`, because a
+decorative loop is not content.
+
+**A further 8× is available and was not taken.** `assets/bgMusic.mp3` is 1,482,133 bytes and is
+tracked in git but referenced by nothing — 64kbps/48kHz against the .mpeg's 320kbps/44.1kHz, both
+roughly 100 seconds long, so almost certainly the same recording. Streaming fixes the delay
+either way, so swapping the asset is a quality-versus-bandwidth decision rather than a bug fix,
+and changing which recording the site ships is not something to do silently inside a round about
+performance. Both are ~100s; the two durations differ by ~8s, which is more than encoder padding,
+so they may not be identical edits.
+
+### Autoplay: attempt immediately, then unlock on the first gesture of any kind
+
+Browsers block unmuted autoplay until the user has interacted, so the track cannot simply be
+started on load. What it can do is be *ready*, and then start on the first gesture — not only on
+a link, which is why the previous version looked like the music was tied to navigation. It was a
+single bubble-phase `click` listener on `document`.
+
+```js
+var UNLOCK_EVENTS = ['pointerdown', 'touchstart', 'wheel', 'keydown', 'click'];
+window.addEventListener(type, onFirstGesture, { capture: true, passive: true });
+doc.addEventListener(type, onFirstGesture, { capture: true, passive: true });
+```
+
+Every one of those options is load-bearing:
+
+* **Capture**, so the handler runs before any page handler can `stopPropagation`. The credits
+  screen calls `preventDefault` on `wheel` and the mobile menu closes on outside click; a
+  bubble-phase listener would never see either.
+* **Passive**, because `wheel` is in the list and the credits screen is entirely gesture driven.
+  A non-passive wheel listener forces the browser to wait for the handler before it can scroll —
+  adding one to fix the music would have made the lag worse.
+* **Both targets**, because a gesture can be dispatched at either and the spec does not guarantee
+  one sees every event the other does. Binding both means one gesture invokes the handler twice,
+  so `audio.unlockFired` makes it idempotent and the listeners come off on the first call.
+
+Two cases needed specific handling:
+
+* **The mute toggle is itself a gesture.** Starting the track there only for the toggle's own
+  handler to stop it a millisecond later is a wasted `play()` and an audible blip, so the handler
+  disarms and returns when the target is `.ambient-toggle`.
+* **`NotAllowedError` is the policy working, not a fault.** The old single rejection path called
+  `markUnavailable()`, which set a flag that then suppressed the very gesture that would have
+  started the music — so a browser doing exactly the right thing produced a toggle permanently
+  reading "sound unavailable". `attemptPlay()` now resolves a boolean and only marks unavailable
+  on a real failure (`NotSupportedError`, a 404, a decode error, or an `error` event).
+
+An explicit stop sets `audio.userMuted`, which every later gesture checks, so muting survives
+navigation and any amount of scrolling.
+
+### `/contact.html`
+
+The form lived in the middle of `about.html`, between the creator biography and the closing
+call-to-action, which made the about page do two unrelated jobs. It has its own page now, and the
+shape follows the site rather than being invented for it: the header, mobile menu, footer, tokens
+and reveal animations are the ones every other page uses, and `.contact-category` is modelled
+directly on `.principle` — same border, radius, surface gradient, hover lift and accent wash — so
+a new page reads as part of the system instead of as an addition to it. No literal colour appears
+anywhere in the new CSS.
+
+It carries the four direct-email categories (General, Feedback & Ideas, Questions, Press), each
+prefilling its own subject, and then the form — moved intact, including its honeypot, its
+`aria-describedby` wiring and its `role="status"` announcement. `about.html` keeps an editorial
+callout in the same slot, so its three-part rhythm survives without carrying a second copy of the
+form to keep in sync. Duplicate ids would have been the quiet failure here: two live forms sharing
+`fb-name` means the validation and status wiring attaches to whichever one `querySelector` finds
+first, and the second form silently does nothing.
+
+`data-page="contact"` is in `PAGE_MAP`, and `initChrome` derives the active nav key from the
+filename, so `data-nav-key="contact"` highlights with no extra code. Every page's desktop nav,
+mobile menu and footer now reach it; `credits.html` and `shared-post.html` have their own header
+shapes and were updated to match.
+
+### No literal email address exists in any served file
+
+Cloudflare's Email Address Obfuscation rewrites raw addresses at the edge into anchors on its own
+protection path. That broke twice here. The rewritten `href` is relative, so the PJAX router
+treated it as an internal navigation and **clicking the address performed a page swap** instead of
+opening the mail client. And the replacement markup lands in the parsed document, so a shell
+fetched mid-swap carries obfuscated anchors that nothing ever decodes.
+
+So addresses live in data attributes and are assembled at runtime:
+
+```html
+<a data-email-user="mail" data-email-domain="agora.in.net"
+   data-email-subject="Press inquiry" data-email-label>Press inquiry</a>
+```
+
+`hydrateEmailLinks()` builds `mailto:user@domain`, appends `?subject=` through
+`encodeURIComponent` when asked, and sets `textContent` to the address — unless `data-email-label`
+is present, which means "keep the copy I wrote". The four category cards and the about-page
+callout button are labelled; the footer and the developer bio are not, so the bio's fallback text
+"an email" becomes the address and the sentence reads exactly as it did before this scheme existed.
+
+It runs from `bootPage()`, which is the router's post-swap hook, so one call covers boot *and*
+every navigation — and it runs **before** `initRouting()`, so there is no window in which a click
+lands on an anchor with no destination.
+
+The second half is defensive rather than decorative. If an address ever does reach the HTML again
+— a hand edit, a cached shell from before this change — `hydrateEmailLinks()` also finds the
+anchor Cloudflare produced, decodes `data-cfemail` (the address XORed against its own first byte,
+a stable public format) and restores a working `mailto`. The harness encodes an address exactly
+the way Cloudflare does, injects the resulting anchor, and checks that boot repairs it.
+
+The trade is worth stating plainly: **without JavaScript these links are inert.** An `<a>` with no
+`href` is not focusable and not clickable. That follows directly from the requirement that no
+literal address appear in the static HTML — there is no way to have both — and this site already
+depends on JavaScript for PJAX, the form, the mesh and the wheels. The address itself is also
+assembled from parts inside `app.js` (`['mail', 'agora.in.net'].join('@')`), so no served file
+contains the literal and the claim is checkable with one grep instead of a list of exceptions. The
+only place the full address is written out is `functions/api/contact.js`, which is server-side and
+never sent to a browser.
 
 
 ## Notes

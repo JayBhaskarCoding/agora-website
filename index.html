@@ -46,6 +46,7 @@
         <a class="nav__link" href="/download.html" data-page="download" data-nav-key="download">Download</a>
         <a class="nav__link" href="/about.html" data-page="about" data-nav-key="about">About</a>
         <a class="nav__link" href="/credits.html" data-page="credits" data-nav-key="credits">Credits</a>
+        <a class="nav__link" href="/contact.html" data-page="contact" data-nav-key="contact">Contact</a>
       </nav>
 
       <div class="nav__actions">
@@ -63,6 +64,7 @@
       <a href="/download.html">Download</a>
       <a href="/about.html">About</a>
       <a href="/credits.html">Credits</a>
+      <a href="/contact.html">Contact</a>
       <a class="btn btn--primary btn--get-app" href="/download.html" data-page="download">Get the app</a>
     </nav>
   </header>
@@ -344,13 +346,21 @@
           <a href="#why-agora">Why Agora</a>
           <a href="/download.html">Download</a>
           <a href="/credits.html">Credits</a>
+          <a href="/contact.html">Contact</a>
         </nav>
 
         <div class="site-footer__contact">
           <h4>Contact</h4>
           <p>
             Feedback, questions, press:<br />
-            <a href="mailto:mail@agora.in.net">mail@agora.in.net</a>
+            <a href="/contact.html" data-page="contact">Send a signal</a>
+            &nbsp;·&nbsp;
+            <!-- No literal address anywhere in this file. Cloudflare's Email
+                 Address Obfuscation rewrites raw addresses at the edge into
+                 anchors on a Cloudflare edge path, which break under our CSP and
+                 across PJAX swaps, so app.js assembles the href and the visible
+                 text from these two attributes at runtime. -->
+            <a data-email-user="mail" data-email-domain="agora.in.net">Email the team</a>
           </p>
           <p>Android app · APK, out now<br />iOS &amp; desktop — coming soon</p>
         </div>
