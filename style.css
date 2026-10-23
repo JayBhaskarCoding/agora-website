@@ -156,12 +156,16 @@
   --mesh-glow-rgb: 124, 58, 237;       /* violet-600: the bloom, saturated on purpose */
   --mesh-line-rgb: 139, 92, 246;       /* == --accent-rgb, so the lattice is on-brand */
   /* How hard the whole layer presses on the page -- one dial multiplying every
-     line and vertex alpha. A theme can then match PRESENCE rather than numbers:
-     the alphas above are authored for near-black, and the same alphas over the
-     deepened light channels would print a lavender graph across the content.
-     Measured, ink 1.0 dark against 0.55 light puts both themes' mesh at
-     1.49-3.24:1 over their own --bg, which is the same band of "clearly there,
-     still behind the copy". */
+     line and vertex alpha, so a theme can match PRESENCE rather than numbers.
+
+     Both themes sit at 1 now, and that is a consequence of the calibration rather
+     than an oversight. When the alphas were 0.45-0.60 the light theme needed 0.55:
+     violet-800 at that strength over off-white measures 3.02:1 and prints a
+     lavender graph across body copy. At 0.16-0.22 the deepened light channels land
+     in the same band as dark on their own (line 1.18:1 against 1.08:1, vertex
+     1.44:1 against 1.39:1), so scaling back would make light dimmer than dark for
+     no reason. The dial stays because the parity is asserted on the OUTCOME, and
+     this is the one property that restores it if either palette moves. */
   --mesh-ink: 1;
 
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -248,7 +252,7 @@
     --mesh-node-hi-rgb: 91, 33, 182;
     --mesh-glow-rgb: 76, 29, 149;
     --mesh-line-rgb: 109, 40, 217;
-    --mesh-ink: 0.55;
+    --mesh-ink: 1;
     --text-bright: #0F1216;
     /* The light accent is deep enough to carry white ink, so buttons flip
        from dark-plum-on-violet to white-on-violet (7.2:1).             */
@@ -2564,6 +2568,121 @@ h1, h2, h3 {
   color: var(--text-dim);
 }
 
+/* The four direct-email categories on /contact.html. Modelled on .principle
+   rather than invented: same border, radius, surface gradient, hover lift and
+   accent wash, so a new page reads as part of the same system instead of as an
+   addition to it. Everything is a token -- no literal colour appears here, which
+   is what lets the light theme inherit the whole block unchanged. */
+.contact-categories {
+  display: grid;
+  gap: 1.1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+}
+
+.contact-category {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.75rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: linear-gradient(160deg, var(--surface), rgba(var(--surface-rgb), 0.4));
+  transition: transform 0.35s var(--ease), border-color 0.35s ease, box-shadow 0.35s ease;
+  overflow: hidden;
+}
+
+.contact-category::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(22rem 12rem at 85% -10%, rgba(var(--accent-rgb), 0.09), transparent 60%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+.contact-category:hover,
+.contact-category:focus-within {
+  transform: translateY(-5px);
+  border-color: rgba(var(--accent-rgb), 0.35);
+  box-shadow: 0 30px 60px -34px rgba(var(--glow-rgb), 0.35);
+}
+
+.contact-category:hover::before,
+.contact-category:focus-within::before {
+  opacity: 1;
+}
+
+.contact-category__icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.contact-category__icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.contact-category h3 {
+  font-size: 1.12rem;
+  color: var(--text);
+}
+
+.contact-category p {
+  flex: 1;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.93rem;
+  line-height: 1.65;
+}
+
+/* Pushed to the bottom of the card by the flexible paragraph above it, so the
+   four links line up on a row no matter how uneven the copy lengths are. */
+.contact-category__mail {
+  align-self: flex-start;
+  margin-top: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border-bottom: 1px solid rgba(var(--accent-rgb), 0.35);
+  padding-bottom: 2px;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.contact-category__mail:hover,
+.contact-category__mail:focus-visible {
+  color: var(--text-bright);
+  border-color: rgba(var(--accent-rgb), 0.8);
+}
+
+/* An address assembled at runtime is longer than the authored label, and on a
+   narrow card it must wrap rather than overflow the border. */
+.contact-category__mail[data-email-user] {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contact-category,
+  .contact-category::before {
+    transition: none;
+  }
+
+  .contact-category:hover,
+  .contact-category:focus-within {
+    transform: none;
+  }
+}
+
 /* ---------- 18. Credits rotary screen ---------- */
 .credits-rotary-page {
   position: relative;
@@ -2735,21 +2854,26 @@ h1, h2, h3 {
 }
 
 /* ------------------------------------------------------------------------
-   AUDIO-REACTIVE WHEEL LAYERS
+   WHEEL DECORATION -- no longer audio-reactive
 
-   initWheelReactivity() writes three normalised custom properties onto each
-   .rotary-disc every frame the music is playing: --wheel-bass, --wheel-onset
-   and --wheel-treble. All three default to 0 here, so the wheels are static
-   and correct with the script absent, the music off, or reduced motion
-   requested (in that last case the script deliberately writes nothing).
+   These layers used to read --wheel-bass, --wheel-onset and --wheel-treble,
+   which initWheelReactivity() wrote onto each .rotary-disc every frame the music
+   played. That function, its custom properties and every calc() below that
+   consumed them are gone: the credits screen was running a per-frame analysis
+   loop plus a dozen style recalculations on top of two large rotating discs with
+   masks, conic gradients and drop-shadows, and that is what cost it frames.
 
-   The scale lands ONLY on layers that have no descendants: the rim ticks and
-   the dashed outer ring are pseudo-elements, and the three concentric rings are
-   empty <span>s. The contributor copy, the avatars and the rim tags all live
-   under .rotary-disc__sector-track, which is NOT scaled -- their coordinates
-   are solved against 14 viewports and locked, and a bass pulse that shifted
-   them by 3.5% of a 1260px disc would move the text 44px and break that.
-   The wheels breathe; the copy does not.
+   Every value below is now the RESTING value its calc() evaluated to with the
+   music off, so this is a pure removal -- nothing gets brighter, dimmer or moves.
+   The three scale() transforms are deleted rather than left at scale(1): each
+   rule is position:absolute with its own z-index, so it already forms a stacking
+   context and the transform was not carrying one.
+
+   One thing flagged rather than silently "fixed": a few of these resting values
+   were originally lowered to leave headroom for a flare that no longer exists --
+   the dashed ring's 0.6 opacity and the spokes' 0.4 were 1.0 and 0.48 before the
+   reactivity was added. They are left exactly as authored because restoring them
+   is a visual decision, not part of removing the hook.
    ------------------------------------------------------------------------ */
 
 /* A repeating conic ring supplies the cog silhouette without an image asset. */
@@ -2766,14 +2890,7 @@ h1, h2, h3 {
   );
   -webkit-mask: radial-gradient(transparent 0 68%, var(--mask-solid) 68.5% 76%, transparent 76.5%);
   mask: radial-gradient(transparent 0 68%, var(--mask-solid) 68.5% 76%, transparent 76.5%);
-  /* Bass swells the rim ticks outward by up to 3.5%; treble brightens them, so
-     high notes read as a glint travelling the cog rather than as a change in
-     size. The drop-shadow filter is deliberately left alone -- recalculating a
-     filter on a 1300px element every frame is far more expensive than the
-     opacity change that achieves the same glint. */
-  transform: scale(calc(1 + (var(--wheel-bass, 0) * 0.035)));
-  transform-origin: 50% 50%;
-  opacity: calc(0.78 + (var(--wheel-treble, 0) * 0.22));
+  opacity: 0.78;
   filter: drop-shadow(0 0 12px rgba(var(--glow-rgb), 0.32));
 }
 
@@ -2781,19 +2898,12 @@ h1, h2, h3 {
   content: "";
   position: absolute;
   inset: 8%;
-  border: 1px dashed rgba(var(--violet-soft-rgb), calc(0.28 + (var(--wheel-onset, 0) * 0.42)));
+  border: 1px dashed rgba(var(--violet-soft-rgb), 0.28);
   border-radius: 50%;
-  /* The dashed outer segment. A piano onset flares it from a resting 0.6 to
-     fully opaque -- resting slightly dim is what makes the flare readable, and
-     it keeps the ring from competing with the copy while nothing is happening.
-     The second shadow is the bass glow: it grows and brightens with the low
-     end, which is the "glow" half of the radial scale/glow pulse. */
   box-shadow:
     0 0 0 1px rgba(var(--glow-blue-rgb), 0.08),
-    0 0 calc(16px + (var(--wheel-bass, 0) * 34px)) rgba(var(--glow-rgb), calc(0.08 + (var(--wheel-bass, 0) * 0.26)));
-  opacity: calc(0.6 + (var(--wheel-onset, 0) * 0.4));
-  transform: scale(calc(1 + (var(--wheel-bass, 0) * 0.035)));
-  transform-origin: 50% 50%;
+    0 0 16px rgba(var(--glow-rgb), 0.08);
+  opacity: 0.6;
   z-index: 1;
   pointer-events: none;
 }
@@ -2803,11 +2913,8 @@ h1, h2, h3 {
   display: block;
   border: 1px dashed rgba(var(--muted-rgb), 0.2);
   border-radius: 50%;
-  /* Empty <span>s, concentric with the disc, so scaling about their own centre
-     is a pure radial pulse with nothing inside them to displace. */
-  transform: scale(calc(1 + (var(--wheel-bass, 0) * 0.035)));
-  transform-origin: 50% 50%;
-  opacity: calc(0.72 + (var(--wheel-onset, 0) * 0.28));
+  /* Empty <span>s, concentric with the disc. */
+  opacity: 0.72;
   z-index: 2;
   pointer-events: none;
 }
@@ -2853,10 +2960,9 @@ h1, h2, h3 {
   );
   -webkit-mask: radial-gradient(transparent 0 7%, var(--mask-solid) 7.2% 100%);
   mask: radial-gradient(transparent 0 7%, var(--mask-solid) 7.2% 100%);
-  /* The spokes flare with a piano onset. Opacity only, never a transform: this
-     pseudo-element belongs to the sector track, which is the subtree the
-     contributor copy lives in. */
-  opacity: calc(0.4 + (var(--wheel-onset, 0) * 0.35));
+  /* Opacity only, and never a transform: this pseudo-element belongs to the
+     sector track, which is the subtree the contributor copy lives in. */
+  opacity: 0.4;
   pointer-events: none;
 }
 
@@ -2962,15 +3068,17 @@ h1, h2, h3 {
   inset: -24% -18%;
   z-index: -1;
   border-radius: 50%;
-  /* 0.93/0.74 rather than the 0.9/0.6 this shipped with. The mesh is roughly
-     twice as opaque as it was, so the paragraph sitting directly on a crest now
-     measures 2.39:1 in dark theme with NO scrim -- it would fail on the mesh alone.
-     Through this gradient it is 7.43:1 dark and 6.91:1 light, both clear of AA and
-     the dark one clear of AAA. The scrim stopped being a nicety and became the
-     thing holding the credits copy up, so it got thicker. */
+  /* Back to the 0.9/0.6 this shipped with. It had been thickened to 0.93/0.74 for
+     one round, when the mesh was at 0.45-0.60 alpha and the paragraph measured
+     2.39:1 with no scrim at all -- the scrim was the only thing holding the credits
+     copy up. With the mesh back down to 0.16-0.22 the copy clears AA on the bare
+     mesh (5.59:1 dark, 5.89:1 light), so the scrim is insurance again rather than
+     structure, and the lighter gradient leaves less of a visible blob behind the
+     text. Kept at all because it is what stops the NEXT brightness increase from
+     silently becoming a legibility regression. */
   background: radial-gradient(closest-side,
-    rgba(var(--bg-rgb), 0.93),
-    rgba(var(--bg-rgb), 0.74) 52%,
+    rgba(var(--bg-rgb), 0.9),
+    rgba(var(--bg-rgb), 0.6) 52%,
     rgba(var(--bg-rgb), 0) 78%);
   pointer-events: none;
 }
@@ -3089,18 +3197,16 @@ h1, h2, h3 {
   height: 2.5rem;
   min-width: clamp(8rem, calc(var(--rotary-disc-size) * 0.14), 11rem);
   padding: 8px 16px;
-  /* Treble glints the rim tags: the border tightens toward full opacity and
-     the glow widens with high notes. Not the element's own `opacity` -- that is
-     carrying the active/inactive emphasis on a 0.22s transition, and an
-     audio-driven value fighting a transition is how a glint turns into a
-     stutter. */
-  border: 1px solid rgba(var(--rim-rgb), calc(0.88 + (var(--wheel-treble, 0) * 0.12)));
+  /* 0.88 is a measured value, not a stylistic one: it is the resting rim alpha a
+     contrast check derives its floor from, for a hairline drawn ON a saturated
+     brand-gradient fill. */
+  border: 1px solid rgba(var(--rim-rgb), 0.88);
   border-radius: 0.25rem;
   color: var(--on-gradient);
   background: var(--brand-gradient-ink);
   box-shadow:
     0 10px 28px -14px rgba(var(--glow-blue-rgb), 0.88),
-    0 0 calc(24px + (var(--wheel-treble, 0) * 16px)) rgba(var(--glow-rgb), calc(0.34 + (var(--wheel-treble, 0) * 0.3)));
+    0 0 24px rgba(var(--glow-rgb), 0.34);
   font-family: var(--font-mono);
   font-size: clamp(0.67rem, calc(var(--rotary-disc-size) * 0.011), 0.95rem);
   font-weight: 600;
@@ -4058,12 +4164,11 @@ h1, h2, h3 {
     color: var(--text-faint);
   }
 
-  /* The hanging role sign kept a 0.88 blue bloom under it. The treble glint is
-     carried here too: this rule sits later in the cascade than the shared one,
-     so without it the tag would never react in light mode while its sibling
-     .rotary-sign still did. */
+  /* The hanging role sign kept a 0.88 blue bloom under it, which on white reads
+     as a bruise; this rule sits later in the cascade than the shared one, so it
+     is the value that actually applies in light mode. */
   .rotary-name-tag {
     box-shadow: 0 10px 28px -14px rgba(var(--glow-blue-rgb), 0.4),
-      0 0 calc(24px + (var(--wheel-treble, 0) * 16px)) rgba(var(--glow-rgb), calc(0.16 + (var(--wheel-treble, 0) * 0.2)));
+      0 0 24px rgba(var(--glow-rgb), 0.16);
   }
 }

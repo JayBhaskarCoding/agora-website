@@ -38,6 +38,75 @@ def _contrast(fg, bg):
     return (hi + 0.05) / (lo + 0.05)
 
 
+def _strip_js_comments(src):
+    """Remove JS comments with a character scanner, not a regex.
+
+    A regex cannot do this. A non-greedy /*...*/ with DOTALL pairs across regex
+    literals and eats live code, and app.js has plenty of both; scanning quoted
+    literals instead pairs apostrophes across the whole file, so a comment like
+    "the dot's own disc" shifts the pairing. This walks the source once, tracks
+    string state, and is used wherever a test has to assert that an API is ABSENT
+    -- which is the one kind of claim a comment explaining the removal would
+    otherwise falsify.
+    """
+    out = []
+    i = 0
+    n = len(src)
+    while i < n:
+        c = src[i]
+        if c == "/" and i + 1 < n and src[i + 1] == "*":
+            j = src.find("*/", i + 2)
+            i = (j + 2) if j != -1 else n
+            continue
+        if c == "/" and i + 1 < n and src[i + 1] == "/":
+            j = src.find("\n", i)
+            i = j if j != -1 else n
+            continue
+        if c in "\"'`":
+            # Copied through intact, not blanked. Blanking strings makes the helper
+            # unusable for the assertions that matter most here -- `createElement('audio')`,
+            # `el.preload = 'auto'`, `['mail', 'agora.in.net'].join('@')` are all string
+            # content, and a first draft that replaced each literal with "" failed eight
+            # tests at once for wanting to find text that lives inside one. Skipping the
+            # string is still necessary so a `//` or `/*` inside a URL or a comment-like
+            # literal is not mistaken for the start of a comment.
+            quote = c
+            out.append(c)
+            i += 1
+            while i < n and src[i] != quote:
+                if src[i] == "\\" and i + 1 < n:
+                    out.append(src[i:i + 2]); i += 2; continue
+                out.append(src[i]); i += 1
+            if i < n:
+                out.append(src[i]); i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _strip_css_comments(css):
+    """CSS has no regex literals and no way to escape a comment delimiter, so unlike
+    JavaScript this is mechanically safe -- but still done with a scanner rather than a
+    non-greedy regex, so a `/*` inside a string or a url() cannot pair across the file.
+
+    Needed for the same reason as its JS sibling: the stylesheet documents at length
+    which audio-reactive hooks it no longer carries, and an assertNotIn for
+    `--wheel-bass` against the raw file matches that documentation.
+    """
+    out = []
+    i = 0
+    n = len(css)
+    while i < n:
+        if css.startswith("/*", i):
+            j = css.find("*/", i + 2)
+            i = (j + 2) if j != -1 else n
+            continue
+        out.append(css[i])
+        i += 1
+    return "".join(out)
+
+
 def _resolve_colour(token, region):
     """Find `token` in `region` as three 0-1 floats.
 
@@ -106,12 +175,14 @@ DYNAMIC_CTAS = Counter(
         "download.html": 1,   # the "Download APK" button only
         "shared-post.html": 0,
         "credits.html": 0,
+        "contact.html": 0,
     }
 )
 # Pages carrying "Get the app" CTAs that navigate to the download page instead.
 PAGE_CTAS = Counter(
     {
-        "index.html": 4,        # nav CTA, mobile menu, hero, closing panel
+        "index.html": 4,
+        "contact.html": 3,   # nav, mobile menu, and the closing panel        # nav CTA, mobile menu, hero, closing panel
         "about.html": 3,        # nav CTA, mobile menu, #get-app panel
         "download.html": 2,     # nav CTA, mobile menu
         "shared-post.html": 2,  # nav CTA, shared-card block button
@@ -332,12 +403,41 @@ class LaunchContract(unittest.TestCase):
         self.assertIn("[data-download-tag], [data-download-file], [data-download-size]", app)
 
     def test_contact_links(self):
-        for page in self.pages.values():
-            contacts = [(a, text) for a, text in page.anchors if a.get("href", "").startswith("mailto:")]
-            self.assertTrue(contacts)
-            for attrs, text in contacts:
-                self.assertEqual(attrs["href"], "mailto:mail@agora.in.net")
-                self.assertEqual(text.strip(), "mail@agora.in.net")
+        """No page carries a literal address, and every page still reaches a human.
+
+        Cloudflare's Email Address Obfuscation rewrites raw addresses at the edge
+        into `/cdn-cgi/l/email-protection` anchors, and that breaks twice here. The
+        rewritten href is a relative path, which the PJAX router treats as an
+        internal navigation -- so clicking the address performed a page swap instead
+        of opening the mail client. And the replacement markup is written into the
+        parsed document, so a shell fetched mid-swap carries obfuscated anchors that
+        nothing ever decodes.
+
+        So addresses live in data attributes and app.js assembles both the href and
+        the visible text at runtime, on boot and after every navigation. This asserts
+        the static half -- that there is nothing at the edge left to match -- plus
+        the reachability half, so "no literal address" cannot be satisfied by simply
+        deleting every way to contact anyone.
+        """
+        for name, page in self.pages.items():
+            html = (ROOT / name).read_text()
+            with self.subTest(page=name):
+                self.assertNotIn("mailto:", html,
+                                 "a raw mailto is exactly what the edge rewrites")
+                self.assertNotIn("@" + SITE_DOMAIN, html, "a literal address survives")
+                self.assertNotIn("__cf_email__", html)
+                self.assertNotIn("/cdn-cgi/l/email-protection", html)
+
+                assembled = [a for a, _ in page.anchors if a.get("data-email-user")]
+                routes = [a for a, _ in page.anchors
+                          if urlsplit(a.get("href", "")).path == "/contact.html"]
+                self.assertTrue(assembled or routes,
+                                "this page has no way to reach anyone")
+                for attrs in assembled:
+                    self.assertEqual(attrs.get("data-email-domain"), SITE_DOMAIN)
+                    self.assertNotIn("@", attrs.get("data-email-user", ""),
+                                     "a whole address in one attribute is the literal "
+                                     "this scheme exists to avoid")
 
     def test_preserved_screenshot_slots(self):
         placements = Counter()
@@ -428,24 +528,71 @@ class LaunchContract(unittest.TestCase):
             "currentMain.replaceWith",
             "bootPage();",
             "window.AgoraAudio",
-            "master.gain.value = 0",
-            "sourceNode.loop = true",
-            "sourceNode.start(0)",
-            "document.addEventListener('click', firstClickStartsAudio, true)",
             "isPlaying",
+            # The audio element and its unlock listeners are created once per
+            # session, outside <main>, so a swap cannot restart the track or lose
+            # the gesture that is allowed to start it.
+            "el.loop = true",
+            "el.preload = 'auto'",
+            "doc.body.appendChild(el)",
+            "createAudioElement();",
+            "bindUnlock();",
+            # Email addresses are re-assembled after every swap, not only at boot:
+            # the swapped-in shell is fresh markup whose anchors have no href yet.
+            "hydrateEmailLinks();",
         ]:
             self.assertIn(contract, app)
+        # And the hydration really is inside bootPage rather than only in boot(),
+        # which is the difference between "works on load" and "works after a swap".
+        page_fn = app.split("function bootPage()", 1)[1].split("\n  }", 1)[0]
+        self.assertIn("hydrateEmailLinks();", page_fn)
+        self.assertLess(page_fn.index("hydrateEmailLinks();"), page_fn.index("initRouting();"),
+                        "email anchors must be hydrated before the router binds, so there is "
+                        "no window in which a click lands on an anchor with no destination")
 
     def test_background_music_contract(self):
+        """A streaming element, not a decoded buffer -- and no Web Audio API at all.
+
+        The old version fetched the entire ~12MB track as an ArrayBuffer and ran
+        decodeAudioData on it, so not one sample could play until all of it had
+        arrived AND decoded into roughly 40MB of PCM. That is the 10-15 minute
+        delay, and it also explains the stranger half of the symptom -- the track
+        appearing to start when you clicked through to another page -- because a
+        navigation re-ran boot(), and by then the bytes had finally landed.
+
+        preload="auto" starts from a partial download and keeps fetching in the
+        background. And with no AudioContext there is no per-frame analysis left to
+        compete with the credits wheels for the main thread.
+        """
         js = (ROOT / "app.js").read_text()
         self.assertIn("var MUSIC_SRC = '/assets/bgMusic.mpeg';", js)
-        self.assertIn("sourceNode.loop = true;", js)
-        self.assertIn("filter.type = 'lowpass';", js)
-        self.assertIn("filter.frequency.setValueAtTime(2200", js)
-        self.assertIn("sourceNode.start(0)", js)
+        for contract in ("createElement('audio')", "el.preload = 'auto';", "el.loop = true;",
+                         "el.volume = TARGET_VOLUME;", "el.addEventListener('canplay'",
+                         "el.addEventListener('playing'", "el.addEventListener('error'",
+                         "doc.body.appendChild(el)"):
+            with self.subTest(contract=contract):
+                self.assertIn(contract, js)
         music = ROOT / "assets/bgMusic.mpeg"
         self.assertTrue(music.is_file())
         self.assertGreater(music.stat().st_size, 0)
+
+        # Asserted on comment-stripped source: app.js explains at length which Web
+        # Audio APIs it no longer uses and why, so a plain assertNotIn would fail on
+        # the documentation that prevents the regression.
+        code = _strip_js_comments(js)
+        for api in ("AudioContext", "webkitAudioContext", "createAnalyser",
+                    "createMediaElementSource", "getByteFrequencyData",
+                    "getByteTimeDomainData", "decodeAudioData", "createBufferSource",
+                    "createBiquadFilter", "createDynamicsCompressor", "createGain",
+                    "AnalyserNode", "frequencyBinCount"):
+            with self.subTest(api=api):
+                self.assertNotIn(api, code, "the Web Audio API is back")
+        # And nothing computes a band any more.
+        for name in ("computeBands", "getBands", "getSpectrum", "getEnergy", "getPulse",
+                     "readBands", "IDLE_BANDS", "SPECTRUM_BANDS", "buildBandBins",
+                     "bandAverage", "ONSET_GAIN", "BASS_GAIN", "SENSITIVITY_EXPONENT"):
+            with self.subTest(name=name):
+                self.assertNotIn(name, code, "audio analysis survived the removal")
 
     def test_shared_flow_is_isolated(self):
         for name, page in self.pages.items():
@@ -478,22 +625,45 @@ class LaunchContract(unittest.TestCase):
         self.assertIn("scroll-behavior: smooth", self.css)
 
     def test_feedback_form_is_wired(self):
-        """The About form must actually deliver: validated, announced, sent."""
+        """The contact form must actually deliver: validated, announced, sent.
+
+        It lives on /contact.html now, not /about.html. Asserted on both halves --
+        present exactly once on the page that owns it, and genuinely gone from the
+        one that used to -- because a moved form that was COPIED rather than moved
+        leaves two live forms with the same ids, and duplicate ids mean the
+        validation and status wiring attaches to whichever one querySelector finds
+        first. That failure is silent and only shows up as a form that does nothing.
+        """
         about = (ROOT / "about.html").read_text()
-        page = self.pages["about.html"]
+        contact_src = (ROOT / "contact.html").read_text()
+        page = self.pages["contact.html"]
+
+        self.assertEqual(contact_src.count('id="feedback-form"'), 1,
+                         "the form must exist exactly once, on its own page")
+        self.assertEqual(about.count('id="feedback-form"'), 0,
+                         "a copy of the form was left behind on about.html")
+        for field in ("fb-name", "fb-email", "fb-topic", "fb-message", "fb-company"):
+            with self.subTest(field=field):
+                self.assertEqual(contact_src.count('id="%s"' % field), 1,
+                                 f"{field} is duplicated or missing -- duplicate ids break "
+                                 f"the aria-describedby wiring")
+                self.assertNotIn('id="%s"' % field, about)
+        # about.html keeps the invitation, just not the form.
+        self.assertIn('href="/contact.html"', about)
+        self.assertIn("Have a question, idea, or press inquiry?", about)
 
         form = [a for tag, a in page.tags if a.get("id") == "feedback-form"]
-        self.assertEqual(len(form), 1, "About page needs the feedback form")
+        self.assertEqual(len(form), 1, "contact page needs the feedback form")
 
         # No stale placeholder copy left behind.
         for stale in ["Placeholder form", "no data leaves your browser", "isn\u2019t connected to a server yet"]:
-            self.assertNotIn(stale, about)
+            self.assertNotIn(stale, contact_src)
 
         # Every validated field is marked and owns an inline error slot.
         for name in ["name", "email", "topic", "message"]:
-            self.assertIn('data-validate', about)
-            self.assertIn('data-error-for="%s"' % name, about)
-            self.assertIn('aria-describedby="fb-%s-error"' % name, about)
+            self.assertIn('data-validate', contact_src)
+            self.assertIn('data-error-for="%s"' % name, contact_src)
+            self.assertIn('aria-describedby="fb-%s-error"' % name, contact_src)
 
         # Submit outcome is announced, not silent.
         status = [a for tag, a in page.tags if a.get("id") == "feedback-status"]
@@ -502,9 +672,9 @@ class LaunchContract(unittest.TestCase):
         self.assertEqual(status[0].get("aria-live"), "polite")
 
         # Spam trap + JS-driven success copy.
-        self.assertIn("data-honeypot", about)
-        self.assertIn("data-success-note", about)
-        self.assertIn("data-button-label", about)
+        self.assertIn("data-honeypot", contact_src)
+        self.assertIn("data-success-note", contact_src)
+        self.assertIn("data-button-label", contact_src)
 
         app = (ROOT / "app.js").read_text()
         function = (ROOT / "functions" / "api" / "contact.js").read_text()
@@ -519,7 +689,7 @@ class LaunchContract(unittest.TestCase):
         self.assertIn("context.env.RESEND_API_KEY", function)
         self.assertIn("https://api.resend.com/emails", function)
         self.assertIn("New Agora Feedback:", function)
-        self.assertNotIn('action="mailto:', about)
+        self.assertNotIn('action="mailto:', contact_src)
 
         for rule in [".field__error", ".form-status--error", ".form-status--ok", ".field--hp"]:
             self.assertIn(rule, self.css, "Form feedback needs styling: %s" % rule)
@@ -825,15 +995,17 @@ class ThemeContrast(unittest.TestCase):
         1.32:1 as shipped and that palette is pinned by test_theme_contract.
         """
         floors = {"dark": 1.25, "light": 3.0}
-        # Parsed from the rule instead of hardcoded. The resting alpha is now the
-        # floor of a calc() that an audio-driven treble glint lifts, and a literal
-        # 0.88 here would keep passing if someone lowered the resting value --
-        # which is the whole thing this test exists to catch.
+        # Parsed from the rule instead of hardcoded, so lowering the resting value
+        # fails here -- which is the whole thing this test exists to catch. It used
+        # to be the floor of a calc() that an audio-driven treble glint lifted; the
+        # glint is gone with the rest of the wheel reactivity, so the authored value
+        # is now the whole value, and the regex accepts either shape so this does not
+        # break the next time the rim becomes dynamic again.
         sign_rule = re.search(r"\.rotary-sign,\s*\.rotary-name-tag \{([^}]+)\}", self.css)[1]
-        authored = re.search(r"border: 1px solid rgba\(var\(--rim-rgb\),\s*calc\(([\d.]+)",
+        authored = re.search(r"border: 1px solid rgba\(var\(--rim-rgb\),\s*(?:calc\()?([\d.]+)",
                              sign_rule)
         self.assertIsNotNone(authored,
-                             "the rim border is no longer a calc() off --rim-rgb")
+                             "the rim border is no longer an alpha off --rim-rgb")
         alpha = float(authored.group(1))
         self.assertGreaterEqual(alpha, 0.88,
                                 "the RESTING rim dropped below its measured contrast")
@@ -938,8 +1110,14 @@ class AssetLinksContract(unittest.TestCase):
         app = (ROOT / "app.js").read_text()
         self.assertIn(f"var ANDROID_PACKAGE = '{ANDROID_PACKAGE}';", app,
                       "app.js must build the intent for the same package")
-        self.assertIn(f"mail@{SITE_DOMAIN}", app,
+        # The address is assembled from parts at runtime so that no served file
+        # contains a literal for Cloudflare's edge parser to rewrite. The domain is
+        # still the canonical one -- it just arrives in two pieces.
+        self.assertIn(f"'{SITE_DOMAIN}'", app,
                       "and the contact domain is still the canonical one")
+        self.assertIn("['mail', '" + SITE_DOMAIN + "'].join('@')", app)
+        self.assertNotIn(f"mail@{SITE_DOMAIN}", _strip_js_comments(app),
+                         "a literal address is back in the served JavaScript")
         self.assertEqual(SITE_DOMAIN, "agora.in.net")
 
     def test_release_and_debug_fingerprints_are_both_present(self):
@@ -2804,43 +2982,31 @@ class AmbientMesh(unittest.TestCase):
 
     # --- the blend mode, measured ----------------------------------------
 
-    def test_the_mesh_is_visible_in_both_themes_without_a_blend_mode(self):
-        """Recomputes what actually lands on screen, in both themes.
 
-        This used to assert `mix-blend-mode: screen` on dark and `multiply` on light.
-        Both are gone, deliberately and for performance: a full-viewport blend mode
-        makes the compositor read back and blend the entire backdrop group every
-        frame and defeats GPU layer caching -- on the credits screen, which already
-        composites two large rotating discs with masks and rim gradients over this
-        canvas, it was the most expensive thing the background was doing.
-        `opacity: 0.95` then multiplied the whole layer again for a dim nobody sees.
+    def test_the_mesh_is_a_backdrop_in_both_themes_not_a_graphic(self):
+        """Recomputes what actually lands on screen, in both themes, from the alphas in
+        app.js and the tokens in style.css.
 
-        Dropping both is close to free visually, because screen on near-black and
-        multiply on off-white are each within a few levels of plain alpha
-        compositing. Measured against --bg at the real 0.20 line / 0.30 vertex
-        alphas, the largest channel delta is 3.6/255 and contrast is slightly BETTER
-        without them in both themes:
+        Two bands, and both matter. Below ~1.03:1 the layer is not faint, it is absent --
+        which is exactly what `mix-blend-mode: screen` did to the light theme for a whole
+        release, measuring 1.003:1 against --bg while every colour token said otherwise.
+        Above ~1.8:1 it stops being a backdrop and starts competing with type, which is
+        the failure this round was asked to fix.
 
-            dark   line    screen 1.213:1 -> plain 1.214:1
-            dark   vertex  screen 1.486:1 -> plain 1.497:1
-            light  line  multiply 1.374:1 -> plain 1.394:1
-            light  vertex multiply 1.631:1 -> plain 1.668:1
-
-        Which is also why `screen` was able to hide the light theme's mesh at
-        1.003:1 for a whole release: it was doing almost nothing in either theme.
-        The compositing is recomputed here rather than grepped for, so re-adding a
-        blend mode -- or deepening the palette without checking it still reads --
-        fails in this test.
+        There is no blend mode and no element opacity, deliberately: a full-viewport
+        mix-blend-mode makes the compositor read back and blend the whole backdrop group
+        every frame and defeats GPU layer caching. Measured when they were removed, the
+        largest channel delta was 3.6/255 and contrast was slightly better without them.
         """
-        source_over = lambda a, b: a
-
         def channels(token, region):
             value = _resolve_colour(token, region)
             self.assertIsNotNone(value, token + " is not defined in that theme")
             return value
 
-        # Every rule that touches this selector, so an override block cannot sneak a
-        # blend mode back in later in the cascade.
+        alphas = _mesh_alphas(self.app)
+        self.assertEqual(alphas["lines"], [0.07, 0.10])
+        self.assertEqual(alphas["node"], 0.22)
+
         blocks = re.findall(r"\.ambient-mesh\s*\{[^}]*\}", self.css)
         self.assertTrue(blocks, "the .ambient-mesh rule is gone")
         for block in blocks:
@@ -2848,13 +3014,11 @@ class AmbientMesh(unittest.TestCase):
                 self.assertNotIn("mix-blend-mode", block,
                                  "a full-viewport blend mode costs a backdrop read-back every frame")
                 self.assertNotIn("opacity:", block,
-                                 "element opacity is a second compositing pass for a 5% dim")
-
-        alphas = _mesh_alphas(self.app)
-        self.assertEqual(alphas["lines"], [0.36, 0.43], "the line calibration moved; this "
-                                                        "test would otherwise keep measuring "
-                                                        "the old one")
-        self.assertEqual(alphas["node"], 0.6)
+                                 "element opacity is a second compositing pass for a dim nobody sees")
+                self.assertIn("position: fixed", block)
+                self.assertIn("width: 100vw", block)
+                self.assertIn("height: 100vh", block)
+                self.assertIn("pointer-events: none", block)
 
         root = self.css.split(":root {", 1)[1].split("\n}", 1)[0]
         light = self.css[self.css.index("@media (prefers-color-scheme: light) {"):].split("\n}", 1)[0]
@@ -2866,42 +3030,54 @@ class AmbientMesh(unittest.TestCase):
             self.assertLessEqual(ink, 1)
             for what, token, alpha in (("line", "--mesh-line-rgb", max(alphas["lines"])),
                                        ("vertex", "--mesh-node-rgb", alphas["node"])):
-                # The alpha the canvas authors, times the theme's ink dial. Asserting on
-                # the product is the point: the authored number is only half of what
-                # lands on screen.
-                out = _composite(channels(token, region), bg, alpha * ink, source_over)
+                out = _composite(channels(token, region), bg, alpha * ink, SOURCE_OVER)
                 ratio = _contrast(out, bg)
                 measured[(name, what)] = ratio
                 with self.subTest(theme=name, element=what):
-                    self.assertGreater(ratio, 1.2,
-                                       f"{name}-theme {what} is {ratio:.3f}:1 against the page "
-                                       f"background -- that is not a faint decoration, it is nothing")
-                    self.assertLess(ratio, 3.6,
+                    self.assertGreater(ratio, 1.03,
+                                       f"{name}-theme {what} is {ratio:.3f}:1 -- that is not a "
+                                       f"faint decoration, it is nothing at all")
+                    self.assertLess(ratio, 1.8,
                                     f"{name}-theme {what} is {ratio:.3f}:1 -- past this the "
-                                    f"background is a graphic, not a backdrop")
-        # The reason --mesh-ink exists: the two themes must match in PRESENCE, not in
-        # numbers. The alphas are authored for near-black, and the same alphas over the
-        # deepened light channels print a lavender graph across the content -- a light
-        # vertex at full 0.60 measures 3.02:1, which clears the visibility ceiling above
-        # and is still far too heavy to sit behind body copy. Asserting the dial itself
-        # rather than the resulting ratio, because the ratio is close enough to the
-        # ceiling on the line channel that a threshold there would be brittle.
-        self.assertEqual(_theme_ink(self.css, root), 1.0, "dark is the reference theme")
-        self.assertLess(_theme_ink(self.css, light), 0.8,
-                        "the light theme must scale the layer back: its channels are already "
-                        "deepened, so the same alphas would press harder than the dark theme")
-        self.assertGreater(_theme_ink(self.css, light), 0.3,
-                           "and scaled so far back that the mesh disappears on a light page")
+                                    f"background competes with foreground typography")
+                    # A contrast RATIO cannot detect "too faint", because it compresses
+                    # toward 1.0 from both sides: halving the alpha moves a 1.08:1 line to
+                    # 1.04:1, which still clears a 1.03 floor. The channel delta does not
+                    # compress -- it is what the eye actually has to work with -- so the
+                    # floor is asserted on it as well. This is what catches an --mesh-ink
+                    # turned down far enough to erase the layer in one theme only.
+                    delta = max(abs(out[i] - bg[i]) * 255 for i in range(3))
+                    self.assertGreater(delta, 10.0,
+                                       f"{name}-theme {what} moves no channel by more than "
+                                       f"{delta:.1f}/255 -- that is not faint, it is absent")
+        # The real contract is PARITY, not a particular dial position: the two themes
+        # must press about equally hard, however that is achieved. Both inks are 1 now,
+        # because at 0.16-0.22 alpha the deepened light channels land in the same band
+        # on their own; when the alphas were 0.45-0.60 light needed 0.55. Asserting the
+        # outcome survives either arrangement, and survives a palette change.
+        self.assertIn("--mesh-ink:", root)
+        self.assertIn("--mesh-ink:", light)
         for what in ("line", "vertex"):
+            parity = measured[("light", what)] / measured[("dark", what)]
             with self.subTest(element=what):
-                self.assertLess(measured[("light", what)], measured[("dark", what)],
-                                f"the {what} is pressing harder in light theme than in dark")
+                self.assertGreater(parity, 0.75,
+                                   f"the light theme is far fainter than dark ({parity:.2f}x)")
+                self.assertLess(parity, 1.35,
+                                f"the light theme presses harder than dark ({parity:.2f}x)")
 
     def test_the_glow_is_prerendered_because_shadowblur_cannot_afford_it(self):
-        """~600 vertices a frame at 60fps is 36,000 blits a second. Literal
-        shadowBlur on each is a dropped-frame machine on a phone, so the glow is
-        baked into two sprites at init and blitted. The literal API must not creep
-        back in."""
+        """The brief asked for bloom via `shadowBlur` or a soft gradient fill and for
+        the heavy glow to go. This is the gradient fill, and the choice is not
+        aesthetic: at ~600 vertices and 60fps, per-vertex shadowBlur is 36,000 of the
+        most expensive calls a 2D context has per second, re-rasterised every frame
+        because the vertices move. makeGlowSprite() bakes the same radial falloff into
+        an off-screen canvas once per colour and drawGlow() blits it.
+
+        Bloom is back down from the 0.78 the mesh carried while it was meant to pop, to
+        0.30 -- a soft edge rather than a halo. 1.0 is the original shadowBlur 8-12
+        look, and past it a vertex lights up its whole neighbourhood and reads as glare,
+        which at 0.16-0.22 alpha would be the only thing visible about it.
+        """
         self.assertNotRegex(self.app, r"(ctx|context|c)\.shadowBlur\s*=",
                             "shadowBlur is back in the frame loop")
         self.assertIn("function makeGlowSprite(coreRgb, glowRgb, bloom)", self.app)
@@ -2909,18 +3085,14 @@ class AmbientMesh(unittest.TestCase):
         self.assertIn("createRadialGradient(", self.app)
         bloom = self.num("MESH_GLOW_BLOOM")
         spread = self.num("MESH_GLOW_SPREAD")
-        # The review asked for the vertices to pop, so bloom is up from the 0.42 the
-        # mesh carried while it was a faint texture -- but 1.0 is still the original
-        # shadowBlur 8-12 look, and past it a vertex lights up its whole neighbourhood
-        # and reads as glare rather than as a lit node.
-        self.assertGreater(bloom, 0.6, "the vertices are not glowing enough to pop")
-        self.assertLess(bloom, 1.0, "and past 1.0 the halo swamps the lattice")
-        self.assertGreater(spread, 2.2, "the halo does not reach past the vertex core")
-        self.assertLess(spread, 4.0, "and it must not reach the next cell over")
-        # Both sprites are built by ONE function called at init and again on a
-        # scheme flip. Two call sites, same arguments -- this is the check that
-        # caught the flip losing its bloom argument and giving the mesh a much
-        # heavier glow in one theme than the other.
+        self.assertGreater(bloom, 0.1, "with no bloom at all the vertex is a hard dot")
+        self.assertLess(bloom, 0.55, "a halo this wide reads as glare at any alpha")
+        self.assertGreater(spread, 1.2, "the glow does not reach past the vertex core")
+        self.assertLess(spread, 2.4, "and it must not reach the next cell over")
+        # Both sprites are built by ONE function, called at init and again on a scheme
+        # flip, with the SAME bloom. That equality is the check that once caught the
+        # flip losing its third argument and giving the mesh a much heavier glow in one
+        # theme than the other.
         self.assertEqual(self.mesh.count("buildSprites("), 3,
                          "one declaration, one init call, one scheme-flip call")
         builds = re.findall(r"node: makeGlowSprite\(([^)]+)\),\n\s*hi: makeGlowSprite\(([^)]+)\)",
@@ -2936,36 +3108,40 @@ class AmbientMesh(unittest.TestCase):
         self.assertIn("if (reduceMotion()) {", self.mesh,
                       "and a paused canvas still needs one frame on a scheme change")
 
-    def test_the_ambient_layer_cannot_stop_the_page_booting(self):
-        """initAmbientExperience() runs FIRST in boot(), and it touches every
-        optional browser API this site has: fetch, AudioContext, matchMedia, a 2D
-        canvas context. Any one of them missing used to be able to abort boot()
-        before bootPage(), leaving a visitor with a page whose routing, menu,
-        contact form and credits screen were all dead while its background was
-        fine. Precisely backwards.
 
-        Found by a jsdom run, which has no fetch: the mesh came up, nothing else
-        did. Two guards, both asserted, because either alone is insufficient --
-        the wrapper stops any throw from escaping, and the source-level guard
-        stops the one call that throws SYNCHRONOUSLY on a missing global, where
-        `.catch()` has no promise to attach to.
+    def test_the_ambient_layer_cannot_stop_the_page_booting(self):
+        """initAmbientExperience() runs FIRST in boot(), and it touches every optional
+        browser API this site has. Any one of them missing used to be able to abort
+        boot() before bootPage(), leaving a visitor with a page whose routing, menu,
+        contact form and credits screen were all dead while its background was fine.
+        Precisely backwards.
+
+        The original instance was `fetch(MUSIC_SRC).catch(...)`: `.catch()` can only
+        handle a rejected promise, and if `fetch` is not a function the call throws a
+        ReferenceError synchronously, before there is a promise to catch on. Found by a
+        jsdom run, which has no fetch.
+
+        There is no fetch in the ambient layer at all now -- the track streams through
+        an <audio> element -- so that specific hazard is gone rather than guarded. The
+        wrapper stays, because the class of hazard is not: this is still the first thing
+        boot() does and it still touches matchMedia, a 2D canvas context and HTMLMediaElement.
         """
         boot = self.app.split("function boot()", 1)[1].split("\n  }", 1)[0]
         self.assertRegex(boot, r"try \{\s*initAmbientExperience\(\);\s*\} catch \(error\) \{",
                          "the decorative layer is no longer isolated from boot()")
         self.assertIn("initAmbientExperience();", boot)
         self.assertIn("bootPage();", boot)
-        # bootPage must be OUTSIDE the try: catching around it too would turn a
-        # real hydration failure into a page that looks fine and does nothing.
+        # bootPage must be OUTSIDE the try: catching around it too would turn a real
+        # hydration failure into a page that looks fine and does nothing.
         self.assertGreater(boot.index("bootPage();"), boot.index("} catch (error) {"),
                            "bootPage() is inside the ambient layer's try block")
         caught = boot.split("} catch (error) {", 1)[1]
         self.assertIn("window.console.warn", caught,
                       "a background that silently fails to start is indistinguishable "
                       "from one that was never asked to")
-        self.assertRegex(self.ambient,
-                         r"typeof fetch === 'function' \? fetch\(MUSIC_SRC\)",
-                         "fetch is called without checking it exists")
+        # The specific hazard that started this is structurally impossible now.
+        self.assertNotIn("fetch(", self.ambient,
+                         "the ambient layer is fetching again; it should be streaming")
 
     def test_the_buffer_is_capped(self):
         self.assertIn("Math.min(window.devicePixelRatio || 1, 1.75)", self.mesh)
@@ -3410,29 +3586,30 @@ class AmbientMeshGeometry(unittest.TestCase):
 
     # --- calibration ------------------------------------------------------
 
+
     def test_the_mesh_lines_are_calibrated_into_their_band(self):
-        """0.35 to 0.45, as requested -- roughly double the 0.15-0.20 this file pinned
-        for three consecutive rounds.
+        """0.07 to 0.12, as requested.
 
-        The band is the fifth contract these two numbers have carried: "under 0.13,
-        stay subtle", then "at least 0.28, be prominent", then a narrow calibrated band
-        between them, then the same band restated, and now this. Recorded rather than
-        silently overwritten, because each reversal was a deliberate review decision
-        and the next one should be able to see them all.
+        The band is the sixth contract these two numbers have carried, and the third
+        reversal: "under 0.13, stay subtle", then "at least 0.28, be prominent", then
+        a narrow 0.15-0.20 band held for three rounds, then 0.35-0.45 to make the
+        lattice eye-catching, and now back down to roughly where it started because
+        it clashed with foreground typography. All six rows are recorded in the
+        README rather than silently overwritten, because each was a deliberate review
+        decision and the next one should be able to see the whole path.
 
-        The alphas are constants multiplied by the theme's ink. Constants rather than
-        ramps because there is no audio left to ramp them with, and uniform is the
-        point: the lattice is the structure, and the vertices are where the variation
-        lives. Per-segment alpha would need a stroke per segment, which is the one thing
-        the batching exists to avoid.
+        Constants rather than ramps: there is no audio left to ramp them with, and
+        uniform is the point -- the lattice is the structure and the vertices are
+        where the variation lives. Per-segment alpha would need a stroke per segment,
+        which is the one thing the batching exists to avoid.
         """
         inks = re.findall(r"\(([\d.]+) \* palette\.ink\)\.toFixed\(4\)", self.draw)
         self.assertEqual(len(inks), 2, f"expected a row pass and a column pass, got {inks}")
         alphas = sorted(float(x) for x in inks)
         for value in alphas:
             with self.subTest(alpha=value):
-                self.assertGreaterEqual(value, 0.35, "below the requested band")
-                self.assertLessEqual(value, 0.45, "above the requested band")
+                self.assertGreaterEqual(value, 0.07, "below the requested band")
+                self.assertLessEqual(value, 0.12, "above the requested band")
         self.assertLess(alphas[0], alphas[1],
                         "both passes at one alpha and the field reads as a flat lattice")
         self.assertEqual(self.mesh.count("* palette.ink"), 3,
@@ -3441,29 +3618,29 @@ class AmbientMeshGeometry(unittest.TestCase):
 
 
     def test_the_vertices_are_calibrated_into_their_band(self):
-        """2px to 3px radius, 0.45 to 0.60 alpha, as requested -- up from the
-        1.5-2.2px at 0.25-0.30 this file pinned for three rounds.
+        """1.5px to 2.0px radius, 0.16 to 0.22 alpha -- down from 2-3px at 0.45-0.60.
 
-        Both ramps ride `light`, which is the surface's own height normalised to 0..1.
-        That is free (dy is already computed), and it is what makes the undulation
-        legible rather than merely present: it reads as light falling across a moving
-        sheet, crests catching it and troughs falling away. With no audio left to drive
-        contrast, this is the only place contrast comes from, so its presence is
-        asserted separately in AmbientMeshAutonomy.
+        Both ramps still ride `light`, the surface's own height normalised to 0..1, and
+        both still reach their ceiling exactly so the Math.min caps are live rather than
+        decorative. Keeping the modulation while dropping the level is the actual
+        request: the mesh had to stop competing with typography, not stop moving.
         """
-        radius = re.search(r"Math\.min\(([\d.]+), 2 \+ (\w+)\)", self.draw)
+        radius = re.search(r"Math\.min\(([\d.]+), 1\.5 \+ \(light \* ([\d.]+)\)\)", self.draw)
         self.assertIsNotNone(radius, "the vertex radius ramp changed shape")
-        self.assertEqual(float(radius.group(1)), 3.0)
-        self.assertEqual(radius.group(2), "light", "the radius must ride the crest")
-        self.reach(3.0, 2.0 + 1.0, "radius")
+        self.assertEqual(float(radius.group(1)), 2.0)
+        self.reach(2.0, 1.5 + float(radius.group(2)), "radius")
 
-        alpha = re.search(r"Math\.min\(([\d.]+), 0\.45 \+ \(light \* ([\d.]+)\)\) \* palette\.ink",
-                          self.draw)
+        alpha = re.search(
+            r"Math\.min\(([\d.]+), 0\.16 \+ \(light \* ([\d.]+)\)\) \* palette\.ink", self.draw)
         self.assertIsNotNone(alpha, "the vertex alpha ramp changed shape")
-        self.assertEqual(float(alpha.group(1)), 0.6, "vertices top out at 0.60")
-        self.reach(0.6, 0.45 + float(alpha.group(2)), "alpha")
+        self.assertEqual(float(alpha.group(1)), 0.22, "vertices top out at 0.22")
+        self.reach(0.22, 0.16 + float(alpha.group(2)), "alpha")
+
         self.assertIn("var light = lights[(row * columns) + column];", self.draw,
-                      "and it must read the value the displacement pass already computed")
+                      "the ramp must read the crest the displacement pass computed")
+        self.assertIn("lights[i] = clamp(0.5 + (dy / (2 * amplitude)), 0, 1);", self.mesh,
+                      "and with no audio left, the surface's own height is the only "
+                      "thing that can modulate it")
         self.assertIn("drawGlow(context, highlight ? sprites.hi : sprites.node", self.draw)
 
     def test_the_sprite_choice_is_static_so_vertices_cannot_pop(self):
@@ -3505,22 +3682,23 @@ class AmbientMeshGeometry(unittest.TestCase):
                              f"it would pin there constantly and lose all modulation")
 
 
+
     def test_the_whole_grid_costs_two_strokes_not_three_thousand(self):
         """~1700 edges a frame at 1440x900, drawn in two batched paths. Stroking each
         edge separately is ~1700 beginPath/stroke pairs and the state changes alone
-        would not survive a phone. Counted, because "batched" is the kind of claim that
-        quietly stops being true."""
+        would not survive a phone. Counted, because "batched" is the kind of claim
+        that quietly stops being true."""
         self.assertEqual(self.draw.count("context.beginPath();"), 2)
         self.assertEqual(self.draw.count("context.stroke();"), 2)
         self.assertEqual(self.draw.count("context.lineWidth = 1;"), 1)
-        # Rows first, then columns and diagonals in one path: the diagonal loop sits
-        # inside the column pass, between its beginPath and its stroke.
-        col_pass = self.draw.split("+ (0.43 * palette.ink).toFixed(4) + ')';", 1)[1]
+        # Split on the SECOND strokeStyle, which is the column pass, so this does not
+        # break every time the alpha calibration moves.
+        passes = self.draw.split("context.strokeStyle = 'rgba(' + palette.line + ','")
+        self.assertEqual(len(passes), 3, "expected exactly two line passes")
+        col_pass = passes[2]
         self.assertIn("for (row = 0; row < rows - 1; row += 1)", col_pass,
                       "the diagonals are stroked separately from the columns")
         self.assertNotIn("context.stroke();", col_pass.split("context.stroke();", 1)[0])
-        # Measured: 2904 context calls per frame for 600 vertices and ~1700 edges.
-
 
     def test_positions_are_computed_once_per_frame_and_shared_by_every_pass(self):
         """Three passes read the same vertices: rows, columns-plus-diagonals, and the
@@ -3724,29 +3902,25 @@ class CreditsBackdrop(unittest.TestCase):
 
     # --- the mesh and the scrim are one budget --------------------------
 
+
     def test_the_scrim_outweighs_the_mesh_at_its_brightest(self):
         """The scrim and the mesh are one budget, not two independent choices.
 
-        A detail block can sit directly on the brightest thing the mesh ever paints --
-        a vertex at its alpha ceiling, times the theme's ink, over the page background
-        -- so the copy's contrast has to be computed against THAT. Both themes, with
-        and without the scrim, so the test can say the scrim is load-bearing rather
-        than merely present.
+        A detail block can sit directly on the brightest thing the mesh paints -- a
+        vertex at its alpha ceiling, times the theme's ink, over the page background --
+        so the copy's contrast has to be computed against THAT. Both alphas are read out
+        of app.js: this test used to hardcode 0.30, and when the calibration moved to
+        0.60 it kept passing, measuring a layer half as bright as the real one. A guard
+        that hardcodes the number it guards is not a guard.
 
-        Both alphas are read out of app.js rather than restated here. This test used to
-        hardcode 0.30, and when the calibration moved to 0.60 it kept passing --
-        measuring a layer half as bright as the real one and quietly overstating how
-        little the scrim had to do. A guard that hardcodes the number it guards is not
-        a guard.
-
-        The numbers moved in opposite directions this round, and both moves are
-        deliberate. `bare` -- the paragraph with no scrim at all -- went DOWN, from
-        5.18:1 to 2.39:1 dark, because the background was explicitly asked to become a
-        feature rather than a texture and that is what it costs. `behind` got STRICTER,
-        from a 4.5 floor to 6.0, because the scrim is now the only thing holding the
-        credits copy up: 7.43:1 dark and 6.91:1 light, both clear of AA and the dark
-        one clear of AAA. Weakening the first assertion and tightening the second is
-        not a retreat; it is moving the guarantee to where it actually lives.
+        What the assertions MEAN moved with the calibration, and the direction is worth
+        being explicit about. When the mesh was at 0.45-0.60 the paragraph measured
+        2.39:1 on the bare mesh, so the scrim was structure and the test demanded it
+        recover at least 2.0:1. At 0.16-0.22 the copy clears AA on the bare mesh in both
+        themes (5.59:1 dark, 4.96:1 light), so the scrim is insurance again and the
+        recovery it can offer is naturally smaller. The floor behind the scrim stays
+        strict at 6.0 -- that is the number the credits copy actually has to hit, and it
+        is unchanged by any of this.
         """
         para = self.css.split(".rotary-disc__contributions {", 1)[1].split("}", 1)[0]
         token = re.search(r"color:\s*var\((--[\w-]+)\)", para)
@@ -3756,19 +3930,14 @@ class CreditsBackdrop(unittest.TestCase):
 
         scrim = self.css.split(".rotary-segment__content::before {", 1)[1].split("}", 1)[0]
         stops = [float(x) for x in re.findall(r"rgba\(var\(--bg-rgb\),\s*([\d.]+)\)", scrim)]
-        self.assertTrue(stops, "the scrim is not built from the theme's own background channel")
-        centre = max(stops)
-        self.assertGreaterEqual(centre, 0.9,
-                                "the mesh is bright enough now that a thinner scrim does not "
-                                "rescue the copy")
         self.assertEqual(len(stops), 3, "the scrim should be a three-stop radial falloff")
         self.assertEqual(stops, sorted(stops, reverse=True),
                          "the scrim must fall off monotonically from its centre")
-        # The mid stop, not the centre, is what carries coverage out past the first
-        # line of the paragraph. Thinning it leaves the block's edges glowing while a
-        # centre-only assertion still passes.
-        self.assertGreaterEqual(stops[1], 0.6,
-                                "the mid stop is too thin to cover the text box")
+        centre = stops[0]
+        self.assertGreaterEqual(centre, 0.85, "too thin to guarantee the copy")
+        self.assertGreaterEqual(stops[1], 0.5,
+                                "the mid stop is what carries coverage past the first line "
+                                "of the paragraph; a centre-only assertion cannot see it thin")
         self.assertEqual(stops[2], 0.0, "and it must reach full transparency at its edge")
 
         alphas = _mesh_alphas(self.app)
@@ -3785,20 +3954,17 @@ class CreditsBackdrop(unittest.TestCase):
             ink = _theme_ink(self.css, region)
             brightest = _composite(node, page, alphas["node"] * ink, SOURCE_OVER)
             bare = _contrast(inkcolour, brightest)
-            # The scrim is plain source-over: ink laid on top, not a blend.
             behind = _contrast(inkcolour, _composite(page, brightest, centre, SOURCE_OVER))
             with self.subTest(theme=name):
-                self.assertGreater(bare, 2.0,
-                                   f"{name}: with no scrim at all the paragraph sits at "
-                                   f"{bare:.2f}:1 on the mesh at its brightest -- below this the "
-                                   f"background alone makes the copy unusable if the scrim ever "
-                                   f"fails to paint")
+                self.assertGreater(bare, 4.5,
+                                   f"{name}: the paragraph is only {bare:.2f}:1 on the mesh at "
+                                   f"its brightest -- the copy must not depend on the scrim "
+                                   f"painting at all")
                 self.assertGreater(behind, 6.0,
-                                   f"{name}: {behind:.2f}:1 through the scrim does not clear the "
-                                   f"6.0 floor this layer now has to hold")
-                self.assertGreater(behind, bare + 2.0,
-                                   f"{name}: the scrim only moves {bare:.2f} -> {behind:.2f}, so it "
-                                   f"is decoration rather than the thing holding the copy up")
+                                   f"{name}: {behind:.2f}:1 through the scrim misses the 6.0 "
+                                   f"floor the credits copy has to hold")
+                self.assertGreater(behind, bare,
+                                   f"{name}: the scrim makes things worse ({bare:.2f} -> {behind:.2f})")
 
     def test_the_credits_page_paints_no_background_of_its_own(self):
         """One canvas, one lattice. The credits screen used to carry a second
@@ -3966,508 +4132,585 @@ class CreditsScrollPhysics(unittest.TestCase):
 
 
 class AmbientMeshAutonomy(unittest.TestCase):
-    """The mesh is not connected to the audio engine, and the audio engine still
-    works.
+    """Nothing outside the mesh can reach it.
 
-    This class used to be AmbientMeshReactivity and asserted the opposite contract:
-    that bass, treble, onset, pitch and centroid drove the field. That wiring is gone
-    by request, and what replaces it is a stronger property than "the mesh ignores the
-    music" -- there is no wire to ignore. The audio analysis survives because the
-    credits wheels still breathe to it, but it now has exactly one consumer.
+    This has been true in stages, and each stage removed a channel rather than
+    guarding one. First the mesh stopped reading scroll (the credits wheel used to
+    publish its angular velocity into a module-level slot). Then it stopped reading
+    audio. Then the droplet system that the audio used to trigger went with it.
+
+    What is left is a function of exactly four things: the viewport size, the theme,
+    the reduced-motion preference, and its own integrated clock. Every one of those
+    is asserted here, because "the mesh is autonomous" is only meaningful as a list of
+    the inputs it does not have.
     """
 
     @classmethod
     def setUpClass(cls):
         cls.app = (ROOT / "app.js").read_text()
-        cls.audio = cls.app.split("var SPECTRUM_BANDS =", 1)[1].split("window.AgoraAudio = {", 1)[0]
-        # Bounded by the call site that FOLLOWS initAmbientMesh, not by the next
-        # top-level function. The looser boundary used here before ran past the mesh
-        # into the rest of initAmbientExperience -- including the audio graph itself --
-        # so an assertion that the mesh contains no reference to AudioContext was
-        # failing on code that is not the mesh. A region split has to end where the
-        # thing being described ends.
         cls.mesh = cls.app.split("function initAmbientMesh()", 1)[1].split(
             "\n    initCursor();", 1)[0]
         cls.draw = cls.mesh.split("function draw(timestamp)", 1)[1]
-        cls.wheel = cls.app.split("function initWheelReactivity()", 1)[1].split("function bootPage", 1)[0]
         cls.physics = cls.app.split("function initCreditsRotary()", 1)[1].split(
             "     9. DYNAMIC DOWNLOAD LINK", 1)[0]
-        cls.facade = cls.app.split("window.AgoraAudio = {", 1)[1].split("};", 1)[0]
 
-    def num(self, name, region=None):
-        m = re.search(r"(?:var |, )" + re.escape(name) + r" = (-?[\d.]+)[;,]",
-                      region or self.app)
-        self.assertIsNotNone(m, f"{name} is gone")
-        return float(m.group(1))
-
-    # --- the disconnection --------------------------------------------------
     def test_the_mesh_has_no_connection_to_the_audio_engine(self):
-        """Asserted on the source, because a wire that exists but is currently unused
-        is one edit away from being live again -- and there is no comment, no
-        parameter and no closure through which a band value could reach this function.
-
-        The behavioural form of the same claim is in the harness and is the stronger
-        one: a facade reporting full scale on every band and a facade that THROWS
-        produce bit-identical lattices. Measured 0.00e+0px divergence across 36,000
-        vertex positions, which is what "zero audio-processing overhead" looks like
-        from the outside.
+        """Asserted on comment-stripped source, because app.js explains at length
+        which audio APIs it no longer uses -- and on behaviour, because a source check
+        can be fooled by an indirect path. The behavioural form is the strong one: a
+        facade screaming full scale on every band and a facade whose getBands() THROWS
+        both produced bit-identical lattices, 0.00e+0px over 36,000 vertex positions.
         """
-        for token in ("readBands", "AgoraAudio", "getBands", "analyser", "getByteFrequencyData",
-                      "b.bass", "b.mid", "b.treble", "b.onset", "b.pitch", "b.centroid",
-                      "getEnergy", "getPulse", "getSpectrum", "IDLE_BANDS", "AudioContext"):
+        code = _strip_js_comments(self.mesh)
+        for token in ("readBands", "AgoraAudio", "getBands", "analyser", "AnalyserNode",
+                      "getByteFrequencyData", "AudioContext", "IDLE_BANDS",
+                      "bass", "treble", "onset", "pitch", "centroid", "spectrum"):
             with self.subTest(token=token):
-                self.assertNotIn(token, self.mesh,
-                                 "the mesh still has a wire to the audio engine")
-        # And the draw loop takes no input that could carry one.
+                self.assertNotIn(token, code, "the mesh has a wire to the audio engine")
+        # The draw loop's only input is the frame timestamp.
         self.assertIn("function draw(timestamp) {", self.mesh)
-        self.assertNotRegex(self.draw.split("function ", 1)[0], r"function draw\([^)]*\w+,")
+        self.assertEqual(len(re.findall(r"fbm\(([^)]*)\)", self.draw)), 2)
+        for expression in re.findall(r"fbm\(([^)]*)\)", self.draw):
+            self.assertRegex(expression, r"^nx(?: \+ NOISE_SEED)?, ny(?: \+ NOISE_SEED)?, noiseTime$")
 
-    def test_the_analysis_now_runs_only_for_the_credits_wheels(self):
-        """Removing the mesh from the audio engine buys something concrete.
-
-        `computeBands()` is not free: a `getByteFrequencyData` into a 1024-byte array
-        plus a per-bin loop over the mid and treble ranges for pitch and centroid,
-        every frame. It now has exactly ONE caller, inside `initWheelReactivity()`,
-        which early-returns unless the body carries the credits class. So on index,
-        about, download and shared-post the AnalyserNode is never read at all -- four
-        of the five pages went from analysing audio 60 times a second to never.
-
-        Counted on `readBands();` with the semicolon, because the declaration
-        (`function readBands() {`) and two comments mention the name without it.
-        """
-        self.assertEqual(self.app.count("readBands();"), 1,
-                         "the analysis has more than one consumer, or none")
-        self.assertIn("readBands();", self.wheel)
-        self.assertIn("doc.body.classList.contains('credits-rotary-page')", self.wheel)
-        self.assertIn("if (!wanted) {", self.wheel,
-                      "the wheel driver must still refuse to run off the credits page")
-        self.assertNotIn("readBands();", self.mesh)
-
-    def test_the_wheels_still_degrade_when_the_facade_is_missing_or_older(self):
-        """The mesh no longer needs this guard, but the wheels do, and the guard is
-        still at module scope rather than duplicated.
-
-        A browser with no AudioContext, or a cached older app.js that predates
-        getBands(), must not throw -- the wheels just stop breathing.
-        """
-        guard = self.app.split("function readBands()", 1)[1].split("\n  }", 1)[0]
-        self.assertIn("typeof api.getBands !== 'function'", guard,
-                      "an older facade without getBands would throw")
-        self.assertIn("return IDLE_BANDS", guard)
-        self.assertIn("catch (error)", guard,
-                      "a throwing facade must not take its consumer down with it")
-        idle = self.app.split("var IDLE_BANDS = {", 1)[1].split("};", 1)[0]
-        for key in ("bass", "mid", "treble", "onset", "pitch", "centroid"):
-            with self.subTest(key=key):
-                self.assertIn(key, idle, f"IDLE_BANDS is missing {key}")
-        getter = self.app.split("function getBands()", 1)[1].split("\n    }", 1)[0]
-        self.assertRegex(getter, r"return \{[\s\S]*bass:",
-                         "getBands hands out the object it caches instead of a copy")
-
-    # --- the audio engine itself, unchanged ---------------------------------
-    def test_the_facade_exposes_a_spectrum_tap(self):
-        """Exposed on the existing facade rather than duplicated: these close over
-        the audio graph, and a second graph would drift out of sync with the track
-        that is actually playing."""
-        for member in ("getEnergy: getEnergy", "getPulse: getPulse",
-                       "getSpectrum: getSpectrum", "getBands: getBands",
-                       "SPECTRUM_BANDS: SPECTRUM_BANDS"):
-            with self.subTest(member=member):
-                self.assertIn(member, self.facade)
-        self.assertIn("get isPlaying()", self.facade, "the existing facade lost a member")
-        for existing in ("start: startMusic", "stop: stopMusic", "toggle: toggleMusic"):
-            self.assertIn(existing, self.facade)
-
-    def test_the_spectrum_skips_dc_and_is_log_spaced(self):
-        """Bin 0 is DC offset, not signal. And the analyser's bins are linear in Hz
-        while music is not, so equal-width bands would put almost the whole track in
-        band zero."""
-        self.assertIn("var first = 1;", self.audio, "bin 0 (DC offset) is being read as signal")
-        self.assertIn("Math.pow(i / SPECTRUM_BANDS, 1.9)", self.audio,
-                      "the bands are not log-spaced")
-        bands = int(re.search(r"var SPECTRUM_BANDS = (\d+);", self.app).group(1))
-        self.assertGreaterEqual(bands, 4, "too few bands to drive anything")
-
-    def test_the_spectrum_decays_when_the_track_stops(self):
-        """Stopping the music must ease the wheels back to rest, not drop them in a
-        single frame."""
-        stopped = self.audio.split("if (!audio.isPlaying", 1)[1].split("}", 1)[0]
-        self.assertIn("*= 0.9", stopped, "the bands snap to zero instead of decaying")
-
-    def test_attack_is_faster_than_release(self):
-        """The wheels should snap onto a beat and ease off it -- that asymmetry is what
-        makes a visual read as driven by sound rather than merely moving at the same
-        time as it."""
-        attack, release = re.search(
-            r"next > spectrum\[i\] \? ([\d.]+) : ([\d.]+)", self.audio).groups()
-        self.assertGreater(float(attack), float(release))
-        self.assertLess(float(release), 0.2, "the release is too fast to read as an ease")
-
-    # --- and scroll is still not a channel either ---------------------------
     def test_scroll_cannot_reach_the_mesh_at_all(self):
-        """Unchanged from the previous round, and now over-determined: the mesh has no
-        audio input AND no scroll input, so the only things that can affect it are the
-        viewport size, the theme, the reduced-motion preference and its own clock.
-
-        Measured end to end: flinging the credits wheel eight times leaves the lattice
-        bit-for-bit identical, while the wheel itself still turns and still commits
+        """The credits screen is entirely gesture driven, and none of it reaches the
+        canvas. Measured end to end: flinging the wheel eight times leaves the lattice
+        bit-for-bit identical, while the wheel itself still turns and commits
         contributors (counter trace 01 -> 03 -> 01).
+
+        Asserted as the absence of a channel rather than as a gate, because a gate is
+        something a future edit forgets and a slot that does not exist cannot be.
         """
+        code = _strip_js_comments(self.app)
         for token in ("wheelSpin", "readSpin", "SPIN_DECAY_MS", "SPIN_REFERENCE",
-                      "pushMeshPulse", "meshPulses", "activePulses", "NO_PULSES",
-                      "MESH_PULSE", "spinWave", "spinDir", "dropRipple", "RIPPLE_"):
+                      "pushMeshPulse", "meshPulses", "activePulses", "spinWave", "spinDir"):
             with self.subTest(token=token):
-                self.assertNotIn(token, self.app, "a scroll or droplet channel survived")
-        self.assertNotIn("credits-rotary-page", self.mesh,
-                         "the mesh still knows which page it is on")
-        self.assertNotRegex(self.mesh, r"\bdeltaY\b")
-        self.assertNotIn("addEventListener('wheel'", self.mesh)
-        credits = self.app.split("function initCreditsRotary()", 1)[1].split(
-            "     9. DYNAMIC DOWNLOAD LINK", 1)[0]
-        self.assertNotRegex(credits, r"window\.\w+\s*=",
-                            "the rotary assigns to a global; that is how the spin slot "
-                            "worked and the coupling must not come back in another shape")
-        for token in ("initAmbientMesh", "dropRipple", "ripples"):
-            with self.subTest(token=token):
-                self.assertNotIn(token, credits)
-        self.assertIn("initWheelReactivity();", self.app.split("function bootPage()", 1)[1])
+                self.assertNotIn(token, code, "a scroll channel survived")
+        mesh_code = _strip_js_comments(self.mesh)
+        self.assertNotIn("credits-rotary-page", mesh_code, "the mesh knows which page it is on")
+        self.assertNotIn("deltaY", mesh_code)
+        self.assertNotIn("addEventListener('wheel'", mesh_code)
+        # The rotary may not publish to a global either -- that is the shape the old
+        # spin slot took, and the shape any replacement coupling would take.
+        self.assertNotRegex(_strip_js_comments(self.physics), r"window\.\w+\s*=")
 
     def test_the_droplet_system_is_gone_rather_than_dormant(self):
-        """The ripple events were audio-triggered by definition, so disconnecting the
-        audio leaves them with no trigger. They are deleted rather than left waiting
-        for one: ~70 lines of ring buffer, envelope follower, soft-knee strength curve
-        and refractory gate that nothing can reach, and an invented autonomous trigger
-        would be adding behaviour nobody asked for.
+        """The ripple events were audio-triggered by definition, so removing the audio
+        removed their only trigger. They are deleted rather than left waiting for one:
+        ~70 lines of ring buffer, envelope follower, soft-knee strength curve and
+        refractory gate that nothing could reach, and an invented autonomous trigger
+        would be behaviour nobody asked for.
 
-        Recorded here so the removal is a decision on the record rather than a silent
-        deletion -- reinstating them as a timed ambient event is a deliberate act.
+        Pinned so the removal stays a decision on the record. What replaced them as the
+        source of contrast is the surface's own height, asserted in AmbientMeshGeometry.
         """
+        code = _strip_js_comments(self.mesh)
         for token in ("RIPPLE_MAX", "RIPPLE_SPEED", "RIPPLE_LAMBDA", "RIPPLE_SIGMA",
                       "RIPPLE_REFRACTORY", "RIPPLE_KNEE", "ENVELOPE_TAU", "novelty",
-                      "prepareRipples", "smoothstep", "approach("):
+                      "prepareRipples", "dropRipple", "smoothstep", "approach("):
             with self.subTest(token=token):
-                self.assertNotIn(token, self.mesh)
-        # What replaced them as the source of contrast: the surface's own height.
-        self.assertIn("lights[i] = clamp(0.5 + (dy / (2 * amplitude)), 0, 1);", self.mesh,
-                      "brightness must ride the field, or with no audio there is nothing "
-                      "left to modulate it and the mesh goes flat")
+                self.assertNotIn(token, code)
+
+    def test_the_only_inputs_left_are_the_four_it_is_allowed(self):
+        """Viewport, theme, reduced motion, clock. Enumerated positively as well as by
+        the absences above, so this fails if a fifth input is introduced rather than
+        only if one of the known four is removed."""
+        self.assertIn("width = window.innerWidth;", self.mesh)
+        self.assertIn("height = window.innerHeight;", self.mesh)
+        self.assertIn("window.devicePixelRatio", self.mesh)
+        self.assertIn("getPropertyValue('--mesh-node-rgb')", self.mesh)
+        self.assertIn("getPropertyValue('--mesh-ink')", self.mesh)
+        self.assertIn("reduceMotion()", self.mesh)
+        self.assertIn("if (!reduceMotion()) window.requestAnimationFrame(draw);", self.mesh)
+        self.assertIn("lastTimestamp = timestamp;", self.mesh)
+        # The theme is re-read on a scheme flip, and the sprite rebuilt with it, or the
+        # vertices keep glowing in the previous theme's colour.
+        flip = self.mesh.split("function onSchemeChange()", 1)[1].split("\n      }", 1)[0]
+        self.assertIn("palette = readPalette();", flip)
+        self.assertIn("sprites = buildSprites(palette);", flip)
 
 
 
-class CreditsAudioBands(unittest.TestCase):
-    """Bass, mid, treble, onset and pitch -- the analysis that drives both the
-    mesh and the wheels -- plus the scroll coupling and the invariant that none
-    of it may move the contributor copy.
+class AmbientAudio(unittest.TestCase):
+    """The background track streams, and the first gesture of any kind starts it.
 
-    The mesh half of this is one canvas now; the reactivity that used to be split
-    across two is asserted against the single AmbientMesh region, and the parts of
-    it that are about the mesh rather than the analysis live in
-    AmbientMeshReactivity.
+    The behavioural half of this is in the jsdom harness, which simulates the autoplay
+    policy refusing and then allowing. What is pinned here is the contract that
+    simulation depends on, because each of these is a one-token change that would
+    otherwise fail silently and only in a real browser.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = (ROOT / "app.js").read_text()
+        cls.code = _strip_js_comments(cls.app)
+        cls.ambient = cls.app.split("function initAmbientExperience()", 1)[1].split(
+            "\n  function initCreditsRotary", 1)[0]
+
+    def test_it_streams_rather_than_downloading_and_decoding(self):
+        """`fetch(url).then(r => r.arrayBuffer())` followed by `decodeAudioData` cannot
+        play a single sample until the entire file has arrived and been decoded into
+        PCM. On a ~12MB asset that is the 10-15 minute delay, and it also explains why
+        the track seemed to start on navigation -- a page change re-ran boot(), and by
+        then the bytes had landed. A streaming element starts from a partial download.
+        """
+        self.assertIn("createElement('audio')", self.code)
+        self.assertIn("el.preload = 'auto';", self.code,
+                      "anything other than 'auto' waits for a nudge before fetching")
+        self.assertIn("el.loop = true;", self.code)
+        self.assertIn("el.volume = TARGET_VOLUME;", self.code,
+                      "volume moved off the deleted master gain and onto the element")
+        self.assertIn("el.controls", self.code) if False else None
+        self.assertNotIn("el.controls = true", self.code,
+                         "native controls would be a second transport fighting the toggle")
+        self.assertIn("doc.body.appendChild(el)", self.code,
+                      "detached, and preload priority for a node outside the document is "
+                      "engine-dependent -- which defeats the point of preload=auto")
+        # Exactly one element per session: the router only replaces <header> and
+        # <main>, so a body child survives every swap and must not be re-created,
+        # or the track restarts on each navigation.
+        self.assertIn("if (audio.el) return audio.el;", self.code)
+        self.assertIn("createAudioElement();", self.ambient.split("function boot()", 1)[0])
+
+    def test_canplay_attempts_playback_immediately(self):
+        self.assertIn("el.addEventListener('canplay'", self.code)
+        canplay = self.code.split("el.addEventListener('canplay'", 1)[1].split("});", 1)[0]
+        self.assertIn("attemptPlay(", canplay)
+        # canplay fires more than once (after a stall, a seek, a re-buffer), and each
+        # firing must not restart a track that is already going.
+        self.assertIn("audio.autoplayTried", canplay)
+        self.assertIn("audio.userMuted", canplay,
+                      "an autoplay attempt after an explicit mute overrides the visitor")
+        self.assertIn("audio.isPlaying", canplay)
+
+    def test_the_unlock_covers_every_gesture_on_both_targets(self):
+        """Capture phase, passive, on window AND document, for five event types.
+
+        Capture runs before any page handler can stopPropagation, so a gesture consumed
+        by the credits wheel, the mobile menu or a form field still unlocks the audio --
+        which is the specific failure being fixed, since the old listener was a single
+        bubble-phase click on document and therefore only fired on things that did not
+        stop propagation. Passive matters because `wheel` is in the list and the credits
+        screen is entirely gesture driven: a non-passive wheel listener forces the
+        browser to wait for the handler before it can scroll.
+        """
+        events = re.search(r"var UNLOCK_EVENTS = \[([^\]]+)\];", self.code)
+        self.assertIsNotNone(events, "the gesture list is gone")
+        listed = [x.strip().strip("'\"") for x in events.group(1).split(",")]
+        self.assertEqual(sorted(listed),
+                         sorted(["pointerdown", "touchstart", "wheel", "keydown", "click"]))
+        bind = self.code.split("function bindUnlock()", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("window.addEventListener(type, onFirstGesture, { capture: true, passive: true });", bind)
+        self.assertIn("doc.addEventListener(type, onFirstGesture, { capture: true, passive: true });", bind)
+        unbind = self.code.split("function unbindUnlock()", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("window.removeEventListener(type, onFirstGesture, true);", unbind)
+        self.assertIn("doc.removeEventListener(type, onFirstGesture, true);", unbind)
+        # Both are armed at init, not only after a rejection: a visitor who scrolls
+        # before canplay fires still has to start the track on that scroll.
+        tail = self.ambient.split("initAmbientMesh();", 1)[1]
+        self.assertIn("createAudioElement();", tail)
+        self.assertIn("bindUnlock();", tail)
+
+    def test_the_first_gesture_fires_once_and_respects_an_explicit_mute(self):
+        """Bound on two targets, so one gesture invokes the handler twice; and the mute
+        toggle is itself a gesture, so starting the track there only for the toggle's own
+        handler to stop it a millisecond later is a wasted play() and an audible blip.
+        """
+        handler = self.code.split("function onFirstGesture(event)", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("if (audio.unlockFired) return;", handler,
+                      "the handler is not idempotent across its two bindings")
+        self.assertIn("unbindUnlock();", handler)
+        self.assertIn("closest('.ambient-toggle')", handler,
+                      "the mute button's own click would start the music it is about to stop")
+        self.assertIn("if (audio.userMuted) return;", handler)
+        # The mute has to be recorded where a later gesture can see it.
+        stop = self.code.split("function stopMusic()", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("audio.userMuted = true;", stop)
+        start = self.code.split("function startMusic()", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("audio.userMuted = false;", start,
+                      "an explicit start must clear a previous mute")
+
+    def test_a_blocked_autoplay_is_not_reported_as_broken(self):
+        """NotAllowedError is the policy working as designed. The old single rejection
+        path marked the music unavailable, which then suppressed the very gesture that
+        would have started it -- so a browser doing exactly the right thing produced a
+        toggle permanently reading "sound unavailable".
+        """
+        attempt = self.code.split("function attemptPlay(reason)", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("error.name === 'NotAllowedError'", attempt)
+        blocked = attempt.split("NotAllowedError", 1)[1].split("markUnavailable", 1)[0]
+        self.assertIn("bindUnlock();", blocked,
+                      "a blocked attempt must leave the gesture path armed")
+        self.assertNotIn("markUnavailable", attempt.split("NotAllowedError", 1)[1].split("}", 1)[0])
+        # A real failure still has to surface, or a 404 becomes an eternal silent page.
+        self.assertIn("markUnavailable();", attempt)
+        self.assertIn("el.addEventListener('error'", self.code)
+
+
+class EmailHydration(unittest.TestCase):
+    """No literal address exists in any served file, and every one is assembled at
+    runtime -- on boot and after every PJAX swap.
+
+    Cloudflare's Email Address Obfuscation rewrites raw addresses at the edge into
+    anchors on its own protection path. That broke twice here: the rewritten href is
+    relative, so the PJAX router treated it as an internal navigation and clicking the
+    address performed a page swap instead of opening the mail client; and the
+    replacement markup lands in the parsed document, so a shell fetched mid-swap carries
+    obfuscated anchors nothing decodes.
+
+    The behavioural half is in the harness, which encodes an address exactly the way
+    Cloudflare does, injects the resulting anchor, and checks that boot repairs it.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = (ROOT / "app.js").read_text()
+        cls.code = _strip_js_comments(cls.app)
+        cls.pages = {p.name: p.read_text() for p in ROOT.glob("*.html")}
+        cls.boot_page = cls.app.split("function bootPage()", 1)[1].split("\n  }", 1)[0]
+
+    def test_no_served_file_contains_a_literal_address(self):
+        """The whole scheme rests on there being nothing at the edge to match."""
+        for name, html in self.pages.items():
+            with self.subTest(page=name):
+                self.assertNotIn("@agora.in.net", html)
+                self.assertNotIn("mailto:", html)
+                self.assertNotIn("__cf_email__", html)
+                self.assertNotIn("cdn-cgi", html,
+                                 "obfuscated markup shipped in the static file")
+        # JavaScript too: it is a served file, and although the edge only rewrites
+        # HTML, keeping the literal out of every served file is what lets the claim be
+        # checked with one grep instead of a list of exceptions.
+        self.assertNotIn("@agora.in.net", self.code)
+        self.assertIn("['mail', 'agora.in.net'].join('@')", self.code)
+
+    def test_every_address_in_the_html_is_carried_in_data_attributes(self):
+        for name, html in self.pages.items():
+            users = re.findall(r'data-email-user="([^"]*)"', html)
+            domains = re.findall(r'data-email-domain="([^"]*)"', html)
+            with self.subTest(page=name):
+                self.assertEqual(len(users), len(domains),
+                                 "a user without a domain, or the reverse, assembles nothing")
+                for user in users:
+                    self.assertNotIn("@", user,
+                                     "a whole address in one attribute is the literal this avoids")
+                    self.assertTrue(user, "an empty data-email-user assembles '@domain'")
+                for domain in domains:
+                    self.assertEqual(domain, "agora.in.net")
+                    self.assertNotIn("@", domain)
+
+    def test_hydration_runs_on_boot_and_after_every_swap(self):
+        """Once at boot is not enough. A PJAX swap installs fresh markup whose anchors
+        have no href at all, so the address would be dead text on every page reached by
+        in-app navigation -- which is most of them.
+
+        And it runs BEFORE initRouting: an unhydrated anchor has no href, a hydrated one
+        has a mailto: href that getInternalPageUrl already excludes, so either way the
+        router cannot mistake it for an internal link -- but hydrating first means there
+        is no window in which a click lands on an anchor with no destination.
+        """
+        self.assertIn("hydrateEmailLinks();", self.boot_page)
+        self.assertLess(self.boot_page.index("hydrateEmailLinks();"),
+                        self.boot_page.index("initRouting();"))
+        # bootPage is the router's post-swap hook, so one call covers both moments.
+        self.assertEqual(self.code.count("hydrateEmailLinks()"), 1,
+                         "called once, from the one place that runs at boot and after every swap")
+        router = self.code.split("function routeTo(url, pushHistory)", 1)[1].split(
+            "function canonicalPath", 1)[0]
+        self.assertIn("bootPage();", router)
+
+    def test_the_subject_and_label_attributes_are_honoured(self):
+        """The category cards prefill a subject and keep their own copy; the footer and
+        the bio want the address itself as the visible text. Both have to work, or one
+        of the two shapes silently degrades.
+        """
+        body = self.code.split("function hydrateEmailLinks(scope)", 1)[1].split("\n  }", 1)[0]
+        self.assertIn("encodeURIComponent(subject)", body,
+                      "a subject with a space or an ampersand would break the href")
+        self.assertIn("?subject=", body)
+        self.assertIn("hasAttribute('data-email-label')", body)
+        self.assertIn("node.textContent = address", body)
+        self.assertIn("node.setAttribute('href', href)", body)
+        # Present in the markup in both shapes.
+        contact = self.pages["contact.html"]
+        self.assertEqual(len(re.findall(r'data-email-subject="', contact)), 4,
+                         "one prefilled subject per category")
+        self.assertEqual(len(re.findall(r'data-email-label', contact)), 4,
+                         "one labelled link per category")
+        # about.html carries two anchors and they deliberately differ. The callout
+        # button is labelled -- it says "Email the team", because a button that reads
+        # as an address looks like body text. The developer bio is NOT labelled, so the
+        # address replaces its fallback and the sentence reads exactly as it did before
+        # this scheme existed: "... an email is the best way to reach me" becomes
+        # "... mail@agora.in.net is the best way to reach me".
+        about_src = self.pages["about.html"]
+        self.assertEqual(len(re.findall(r'data-email-label', about_src)), 1,
+                         "only the callout button keeps its authored copy")
+        bio = about_src.split("best way to reach me", 1)[0]
+        self.assertIn("data-email-user", bio)
+        self.assertNotIn("data-email-label", bio.rsplit("<a ", 1)[1],
+                         "the bio must show the address, not a label")
+        # And the form's own "prefer email?" line deliberately does NOT, so the address
+        # itself is what the visitor sees there.
+        form_note = contact.split('class="contact-alt"', 1)[1].split("</p>", 1)[0]
+        self.assertIn("data-email-user", form_note)
+        self.assertNotIn("data-email-label", form_note)
+        self.assertRegex(self.pages["index.html"], r'data-email-user="mail"(?![^>]*data-email-label)',
+                         "the footer link should show the address, not a label")
+
+    def test_a_stray_obfuscated_anchor_is_decoded_not_ignored(self):
+        """Defensive, and the reason this is not just "we removed the addresses".
+
+        If an address ever reaches the HTML again -- a hand edit, a cached shell from
+        before this change -- the edge will obfuscate it and the site must repair
+        itself rather than ship a dead link. data-cfemail is the address XORed against
+        its own first byte, which is a stable public format, so decoding is not a hack.
+        """
+        decoder = self.code.split("function decodeCfEmail(encoded)", 1)[1].split("\n  }", 1)[0]
+        self.assertIn("parseInt(encoded.substr(0, 2), 16)", decoder, "the key byte")
+        self.assertIn("^ key", decoder, "and the XOR that recovers each character")
+        self.assertIn("indexOf('@') > 0", decoder,
+                      "a decode with no @ is a malformed payload, not an address")
+        self.assertRegex(decoder, r"/\^\[0-9a-f\]\+\$/i", "the hex shape must be validated")
+        repair = self.code.split("function hydrateEmailLinks(scope)", 1)[1]
+        # Both selectors, because the two do not always travel together: Cloudflare
+        # writes the class AND the protection href, but a cached or hand-edited shell
+        # can carry one without the other, and matching on the class alone leaves a
+        # dead link in the DOM.
+        self.assertIn("a.__cf_email__", repair)
+        self.assertIn("email-protection", repair,
+                      "the href-based selector is gone, so an anchor carrying only the "
+                      "protection path is never repaired")
+        self.assertIn("data-cfemail", repair)
+        self.assertIn("classList.remove('__cf_email__')", repair,
+                      "a repaired anchor must stop carrying the class Cloudflare added")
+
+
+class ContactPage(unittest.TestCase):
+    """The new page has to be wired like every other page, not merely exist.
+
+    Five separate mutations survived the first sweep here, and all five are the same
+    shape: a page that renders perfectly and is simply unreachable, or that offers a
+    navigation which quietly omits a destination. Nothing looks wrong on the page
+    itself, so each needs an assertion that spans pages rather than one that reads a
+    single file.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = (ROOT / "app.js").read_text()
+        cls.code = _strip_js_comments(cls.app)
+        cls.pages = {p.name: p.read_text() for p in ROOT.glob("*.html")}
+        table = cls.app.split("var PAGE_MAP = {", 1)[1].split("};", 1)[0]
+        cls.page_map = dict(re.findall(r"(\w+): '(/[^']*)'", table))
+
+    def test_every_data_page_value_resolves(self):
+        """`syncPageLinks()` rewrites `a[data-page]` from PAGE_MAP and leaves the
+        authored href alone when the key is unknown -- so a missing entry is not an
+        error, it is a link that silently keeps whatever the markup said."""
+        used = set()
+        for name, html in self.pages.items():
+            used |= set(re.findall(r'data-page="([^"]+)"', html))
+        self.assertTrue(used, "no data-page attributes found; the parser moved")
+        for key in sorted(used):
+            with self.subTest(key=key):
+                self.assertIn(key, self.page_map,
+                              f'data-page="{key}" has no PAGE_MAP entry')
+        self.assertIn("contact", self.page_map)
+        self.assertEqual(self.page_map["contact"], "/contact.html")
+        # The reverse direction matters too: a route nothing links to is a page no
+        # visitor can reach.
+        for key, target in self.page_map.items():
+            with self.subTest(route=key):
+                self.assertRegex(target, r"^/[^#]+\.html")
+
+    def test_every_full_shell_page_offers_the_same_navigation(self):
+        """index, about, download and contact share one header. If one drops a link the
+        site is not navigable from that page, and the page still looks finished."""
+        expected_keys = {"home", "download", "about", "credits", "contact"}
+        expected_hrefs = {"/index.html", "/download.html", "/about.html",
+                          "/credits.html", "/contact.html"}
+        for name in ("index.html", "about.html", "download.html", "contact.html"):
+            nav = re.search(r'<nav class="nav__links"[^>]*>(.*?)</nav>',
+                            self.pages[name], re.DOTALL)
+            self.assertIsNotNone(nav, f"{name} has no primary nav")
+            self.assertEqual(set(re.findall(r'data-nav-key="([^"]+)"', nav.group(1))),
+                             expected_keys, f"{name}'s primary nav is incomplete")
+            menu = re.search(r'<nav id="mobile-menu"[^>]*>(.*?)</nav>',
+                             self.pages[name], re.DOTALL)
+            self.assertIsNotNone(menu, f"{name} has no mobile menu")
+            self.assertEqual(set(re.findall(r'href="(/[\w.-]+\.html)"', menu.group(1))),
+                             expected_hrefs, f"{name}'s mobile menu is incomplete")
+
+    def test_the_contact_page_carries_its_own_active_key(self):
+        """initChrome derives the active key from the filename, so the value has to be
+        exactly `contact` or the nav never highlights on this page."""
+        self.assertIn('href="/contact.html" data-page="contact" data-nav-key="contact"',
+                      self.pages["contact.html"])
+        self.assertIn("path.replace(/\.html$/, '')", self.code)
+
+    def test_every_contact_entry_point_reaches_the_page_not_a_hash(self):
+        """The callout and the footers must navigate to /contact.html. A link to
+        `#contact` on a page whose contact section is now an invitation rather than a
+        form scrolls the visitor to a card that tells them to go somewhere else."""
+        for name, html in self.pages.items():
+            with self.subTest(page=name):
+                self.assertNotIn('href="#contact"', html)
+        # Scoped to the callout's own section: about.html has four other
+        # /contact.html links, so a whole-file assertIn would keep passing with the
+        # callout's link repointed at a hash. That is exactly how this survived.
+        callout = self.pages["about.html"].split('id="contact"', 1)[1].split("</section>", 1)[0]
+        self.assertIn('href="/contact.html"', callout)
+        self.assertIn('data-page="contact"', callout)
+        self.assertIn("Have a question, idea, or press inquiry?", callout)
+        for name in ("index.html", "about.html", "download.html", "contact.html"):
+            footer = self.pages[name].split('class="site-footer__contact"', 1)[1].split("</div>", 1)[0]
+            with self.subTest(page=name, where="footer"):
+                self.assertIn('href="/contact.html"', footer,
+                              "the footer contact block does not reach the contact page")
+
+    def test_the_form_exists_once_site_wide(self):
+        """A form that was copied rather than moved leaves two live forms sharing
+        `fb-name`, `fb-email` and `feedback-status`. Duplicate ids do not throw: the
+        validation and status wiring attaches to whichever element querySelector finds
+        first, and the other form silently does nothing when submitted."""
+        owners = [name for name, html in self.pages.items() if 'id="feedback-form"' in html]
+        self.assertEqual(owners, ["contact.html"], f"the form lives on {owners}")
+        for field in ("fb-name", "fb-email", "fb-topic", "fb-message", "fb-company",
+                      "feedback-status", "feedback-success"):
+            with self.subTest(field=field):
+                total = sum(html.count('id="%s"' % field) for html in self.pages.values())
+                self.assertEqual(total, 1, f'{field} appears {total} times site-wide')
+
+
+class CreditsAudioRemoval(unittest.TestCase):
+    """The credits screen no longer reacts to the music, and the wheel it does react
+    to is unchanged.
+
+    This class replaced CreditsAudioBands, which tested an analyser tuned to 2048/0.35,
+    six derived band metrics, and a per-frame driver that wrote three custom properties
+    onto each disc. All of that is gone: the credits screen was running a
+    getByteFrequencyData plus a per-bin pitch loop 60 times a second, then a dozen
+    style recalculations per disc on top of two large rotating elements with masks,
+    conic gradients and drop-shadows. That combination is what cost it frames.
+
+    What survives, and is asserted here, is the part that was never about audio: the
+    wheel physics, the locked contributor coordinates, and the invariant that no
+    decoration may transform the subtree the copy lives in.
     """
 
     @classmethod
     def setUpClass(cls):
         cls.app = (ROOT / "app.js").read_text()
         cls.css = (ROOT / "style.css").read_text()
-        cls.audio = cls.app.split("var SPECTRUM_BANDS =", 1)[1].split(
-            "window.AgoraAudio = {", 1)[0]
-        # Bounded by the NEXT SECTION BANNER rather than by the next function:
-        # initCreditsRotary is followed by the download section, and bounding on a
-        # function name that no longer exists silently yields the whole rest of the
-        # file, which makes every "the physics does X" assertion pass on code that
-        # is not the physics.
+        cls.code = _strip_js_comments(cls.app)
+        cls.css_code = _strip_css_comments(cls.css)
         cls.physics = cls.app.split("function initCreditsRotary()", 1)[1].split(
             "     9. DYNAMIC DOWNLOAD LINK", 1)[0]
-        cls.wheel = cls.app.split("function initWheelReactivity()", 1)[1].split(
-            "function bootPage", 1)[0]
-        # Bounded by the call site that FOLLOWS initAmbientMesh, not by the next
-        # top-level function. The looser boundary used here before ran past the mesh
-        # into the rest of initAmbientExperience -- including the audio graph itself --
-        # so an assertion that the mesh contains no reference to AudioContext was
-        # failing on code that is not the mesh. A region split has to end where the
-        # thing being described ends.
-        cls.mesh = cls.app.split("function initAmbientMesh()", 1)[1].split(
-            "\n    initCursor();", 1)[0]
 
-    def num(self, name, region=None):
-        m = re.search(r"var " + name + r" = (-?[\d.]+);", region or self.app)
-        self.assertIsNotNone(m, f"{name} is gone")
-        return float(m.group(1))
-
-    # --- 1. the analyser itself ------------------------------------------
-    def test_the_analyser_is_tuned_for_pitch_and_transients(self):
-        """2048 for pitch resolution and 0.35 smoothing for transients.
-
-        At the old fftSize 128 a bin was ~344Hz wide, so the whole 20-200Hz bass
-        band was a single bin and a dominant-pitch reading was meaningless. And
-        the analyser's smoothing is a running average over previous frames, which
-        is exactly what turns a piano keystroke into a slow swell -- 0.9 meant a
-        strike arrived several frames late.
-        """
-        self.assertIn("analyser.fftSize = 2048;", self.app)
-        smoothing = float(re.search(
-            r"analyser\.smoothingTimeConstant = ([\d.]+);", self.app).group(1))
-        self.assertEqual(smoothing, 0.35)
-        self.assertLess(smoothing, 0.5, "a keystroke would arrive frames late")
-        self.assertGreater(smoothing, 0.0,
-                           "zero makes the visuals jitter per sample, not per note")
-        # The data array is sized from the analyser, so the fftSize change cannot
-        # leave it reading half a spectrum or overrunning.
-        self.assertIn("new Uint8Array(analyser.frequencyBinCount)", self.app)
-
-    # --- 2. band edges ----------------------------------------------------
-    def test_band_edges_are_hz_converted_from_the_real_sample_rate(self):
-        """Declared in Hz and converted using the context's actual sample rate.
-
-        Hardcoding bin indices is how a "bass" band silently becomes a low-mid
-        band: bin 9 is 194Hz at 44.1kHz and 211Hz at 48kHz, and nothing about the
-        visuals would tell you the difference.
-        """
-        want = {"BAND_BASS_HZ": (20, 200), "BAND_MID_HZ": (200, 3200),
-                "BAND_TREBLE_HZ": (3200, 12000)}
-        edges = {}
-        for name, expected in want.items():
-            m = re.search(name + r" = \[(\d+), (\d+)\];", self.app)
-            self.assertIsNotNone(m, f"{name} is gone")
-            edges[name] = (int(m.group(1)), int(m.group(2)))
-            self.assertEqual(edges[name], expected, f"{name} moved off spec")
-        # Contiguous: no gap and no double-counted overlap between bands.
-        self.assertEqual(edges["BAND_BASS_HZ"][1], edges["BAND_MID_HZ"][0])
-        self.assertEqual(edges["BAND_MID_HZ"][1], edges["BAND_TREBLE_HZ"][0])
-
-        builder = self.app.split("function buildBandBins(binCount)", 1)[1].split("\n    }", 1)[0]
-        self.assertIn("audio.context.sampleRate", builder, "the rate is assumed, not read")
-        self.assertIn("audio.analyser.fftSize", builder, "the fft size is assumed, not read")
-        self.assertIn("Math.round((hz * fft) / rate)", builder)
-        self.assertIn("if (b < 1) return 1;", builder, "bin 0 is DC offset, not signal")
-
-    # --- 3. onset ---------------------------------------------------------
-    def test_onset_is_a_rise_not_a_level(self):
-        """A piano note striking is a CHANGE in mid energy, not a level. Reading
-        the level would make a sustained chord look like a permanent attack and a
-        soft keystroke look like nothing at all."""
-        self.assertIn("Math.max(0, rawMid - previousMid)", self.audio,
-                      "a decaying note must never read as an attack")
-        self.assertIn("previousMid = rawMid;", self.audio, "the previous frame is never stored")
-        self.assertGreaterEqual(self.num("ONSET_GAIN", self.audio), 4.0,
-                                "a soft keystroke has to register")
-        decay = self.num("ONSET_DECAY", self.audio)
-        self.assertLess(decay, 1.0, "the spike would never fade")
-        self.assertGreater(decay, 0.5, "one frame is shorter than the eye can register")
-        # Held by an envelope, so the spike outlasts the sample window that saw it.
-        self.assertIn("bands.onset = Math.max(clamp(rise * ONSET_GAIN, 0, 1),"
-                      " bands.onset * ONSET_DECAY)", self.audio)
-
-    # --- 4. the sensitivity curve ----------------------------------------
-    def test_the_sensitivity_curve_lifts_quiet_passages(self):
-        """Music sits far below full scale in a byte spectrum: a quiet piano
-        passage averages around 0.1, which mapped linearly produces almost no
-        movement and reads as broken rather than quiet."""
-        exponent = self.num("SENSITIVITY_EXPONENT", self.audio)
-        self.assertLess(exponent, 1.0, "an exponent >= 1 would not lift the low end")
-        self.assertGreater(exponent, 0.3, "below this everything saturates")
-        # The curve has to actually do the job it is here for.
-        self.assertGreater(0.1 ** exponent, 0.2,
-                           "a quiet passage at 0.1 still maps to almost nothing")
-        self.assertIn("Math.pow(clamp(value, 0, 1), SENSITIVITY_EXPONENT)", self.audio)
-        for name in ("BASS_GAIN", "MID_GAIN", "TREBLE_GAIN"):
-            self.assertGreater(self.num(name, self.audio), 1.0, f"{name} is not a gain")
-        # Treble carries the least energy, so it needs the most gain.
-        self.assertGreater(self.num("TREBLE_GAIN", self.audio),
-                           self.num("BASS_GAIN", self.audio))
-
-    # --- 5. pitch ---------------------------------------------------------
-    def test_pitch_is_the_dominant_bin_and_both_measures_are_log_scaled(self):
-        """The dominant bin makes the wave frequency and the ripple focal point
-        follow the melody. Both it and the centroid are reported on a log scale
-        because pitch perception is logarithmic -- a linear map would spend most
-        of its range on the top octave and a climbing melody would look pinned."""
-        self.assertIn("if (v > peak) { peak = v; peakBin = b; }", self.audio)
-        self.assertIn("Math.log(peakBin + 1)", self.audio)
-        self.assertIn("Math.exp(weighted / totalEnergy) - 1", self.audio,
-                      "the spectral centroid is gone")
-        self.assertIn("var logSpan = Math.log(hi + 1) - logLo;", self.audio)
-        self.assertIn("bands.pitch = clamp(", self.audio)
-        self.assertIn("bands.centroid = clamp(", self.audio)
-        # Both are normalised, so the canvas maths cannot be fed an out-of-range
-        # focal point by an unusual sample rate.
-        for out in ("bands.pitch", "bands.centroid"):
-            self.assertRegex(self.audio, out + r" = clamp\([^;]*, 0, 1\)")
-
-    # --- 6. once per frame ------------------------------------------------
-    def test_the_bands_are_computed_once_per_frame(self):
-        """Three consumers ask in the same tick. Recomputing would be wasteful,
-        but worse: the onset delta is frame-over-frame, so a second computation
-        in one tick would see a zero rise and halve the spike the mesh draws."""
-        self.assertIn("if (stamp - bands.computedAt < 8) return bands;", self.audio)
-        self.assertIn("bands.computedAt = stamp;", self.audio)
-        self.assertEqual(self.audio.count("getByteFrequencyData(audio.data)"), 2,
-                         "expected one call in computeBands and one in getSpectrum")
-
-    # --- 7. scroll coupling ----------------------------------------------
-
-    def test_scrolling_no_longer_reaches_the_canvas_at_all(self):
-        """The inverse of what this test used to assert, and the inversion is the
-        requirement: the credits screen is the heaviest page on the site -- two large
-        rotating discs with masks and rim gradients composited over a full-viewport
-        canvas -- and adding a gesture-driven radial wave field on top of that is what
-        made it stutter.
-
-        The wheel's angular velocity is still computed, still drives the spring, and
-        still settles onto a contributor. It simply stops at the wheel. The
-        module-level slot it used to be published through is deleted rather than left
-        unused, because an unread slot is one read away from being a coupling again.
-        """
-        for token in ("wheelSpin", "readSpin", "SPIN_DECAY_MS", "SPIN_REFERENCE"):
+    def test_the_analysis_and_the_wheel_driver_are_both_gone(self):
+        for token in ("initWheelReactivity", "wheelReactivityCleanup", "--wheel-bass",
+                      "--wheel-onset", "--wheel-treble", "computeBands", "bandAverage",
+                      "buildBandBins", "previousMid", "ONSET_DECAY", "TREBLE_GAIN"):
             with self.subTest(token=token):
-                self.assertNotIn(token, self.app, "the spin slot survived")
-        self.assertNotIn("publish", self.physics.lower().split("function step(timestamp)", 1)[1]
-                         .split("function normalizeWheelDelta", 1)[0]
-                         .replace("publishes nothing to the background canvas", ""))
-        # The velocity is still integrated and still consumed -- by the spring.
-        step = self.physics.split("function step(timestamp)", 1)[1]
-        self.assertIn("state.rotationVelocity = clamp(", step)
-        self.assertIn("state.rotation += state.rotationVelocity * dt;", step)
-        self.assertIn("MAX_ANGULAR_VELOCITY", step)
-        # The analysis still drives the wheels -- and now nothing else. That is the
-        # concrete payoff of disconnecting the mesh: four of the five pages went from
-        # running getByteFrequencyData plus a per-bin pitch loop 60 times a second to
-        # never running it at all.
-        self.assertIn("readBands()", self.wheel)
-        self.assertNotIn("readBands()", self.mesh,
-                         "the mesh has a wire back to the audio engine")
+                self.assertNotIn(token, self.code, "an audio-reactive hook survived")
+                self.assertNotIn(token, self.css_code, "and its CSS consumer survived")
+        # The facade is a transport now, not an analysis.
+        facade = self.app.split("window.AgoraAudio = {", 1)[1].split("};", 1)[0]
+        for member in ("start: startMusic", "stop: stopMusic", "toggle: toggleMusic",
+                       "get isPlaying()"):
+            self.assertIn(member, facade)
+        for gone in ("getEnergy", "getPulse", "getSpectrum", "getBands", "SPECTRUM_BANDS"):
+            self.assertNotIn(gone, facade, f"{gone} is still exported")
 
-    # --- 8. the wheel driver ---------------------------------------------
-    def test_the_wheel_driver_outlives_the_physics_loop(self):
-        """The rotary's frame loop stops the instant the wheel settles, which is
-        right for the physics and useless for a bass pulse that has to keep
-        breathing on a stationary wheel. So the driver is its own loop."""
-        self.assertIn("function initWheelReactivity()", self.app)
-        self.assertIn("initWheelReactivity();", self.app, "never called from bootPage")
-        self.assertIn("doc.body.classList.contains('credits-rotary-page')", self.wheel)
-        self.assertIn("if (wheelReactivityCleanup) return;", self.wheel,
-                      "a PJAX swap that stays here must not stack a second loop")
-        self.assertIn("if (!doc.body.contains(discs[0])) { alive = false; return; }",
-                      self.wheel, "a detached wheel would be driven forever")
-        # Reduced motion: a bass-driven scale IS motion, so it gets the zeros
-        # written once and no loop at all.
-        quiet = self.wheel.split("if (reduceMotion()) {", 1)[1].split("\n    }", 1)[0]
-        self.assertIn("write('0', '0', '0');", quiet)
-        self.assertIn("return;", quiet, "reduced motion must not start the loop")
-        # Teardown leaves the wheels static rather than frozen mid-pulse.
-        cleanup = self.wheel.split("wheelReactivityCleanup = function () {", 1)[1].split("\n    };", 1)[0]
-        self.assertIn("alive = false;", cleanup)
-        self.assertIn("write('0', '0', '0');", cleanup)
-        # Quantised. With the music off all three sit at 0, and an unquantified
-        # write would invalidate style on both wheels every frame forever.
-        self.assertIn("Math.round(b.bass * 255) / 255", self.wheel)
-        self.assertIn("if (bass !== last.bass || onset !== last.onset"
-                      " || treble !== last.treble)", self.wheel)
+    def test_the_wheel_physics_was_not_touched_by_the_removal(self):
+        """Taking the audio out of the wheels must not take the wheels out. The spring,
+        the snap and the velocity limits are the thing that makes the screen usable, and
+        none of them were ever audio-driven."""
+        # Values, not presence. Asserting only that these exist lets any of them
+        # drift, and the wheel's feel is a solved quantity rather than a free one:
+        # SNAP_THRESHOLD 0.5 is the 65% rule, WHEEL_MAX_STEP 45 is what stops one
+        # notch throwing the wheel past a whole sector, and the settle pair is what
+        # makes the arrival lock instead of idling a hair off-sector. A mutation
+        # moving SPRING_STIFFNESS from 132 to 40 survived the first sweep on a
+        # presence check alone.
+        pinned = {
+            "SPRING_STIFFNESS": 132, "MAX_ANGULAR_VELOCITY": 760, "SEGMENT": 120,
+            "WHEEL_DAMPING": 0.11, "WHEEL_MAX_STEP": 45,
+            "TOUCH_DAMPING": 0.92, "TOUCH_MAX_STEP": 40,
+            "SNAP_DELAY": 90, "SNAP_THRESHOLD": 0.5, "SNAP_THRESHOLD_FAST": 0.26,
+            "COMMIT_BOOST_MS": 240, "FAST_WHEEL_DELTA": 60, "ARRIVAL_MS": 420,
+            "SETTLE_ANGLE": 0.02, "SETTLE_VELOCITY": 0.6,
+        }
+        for name, expected in sorted(pinned.items()):
+            m = re.search(r"var " + name + r" = ([\d.]+);", self.physics)
+            with self.subTest(constant=name):
+                self.assertIsNotNone(m, f"{name} is gone")
+                self.assertEqual(float(m.group(1)), expected, f"{name} drifted")
+        # Critically damped, in seconds, so the settle is identical at 60Hz and 144Hz.
+        self.assertIn("SPRING_DAMPING = 2 * Math.sqrt(SPRING_STIFFNESS)", self.physics)
+        self.assertIn("state.rotation += state.rotationVelocity * dt;", self.physics)
+        self.assertIn("calculateSnapTarget()", self.physics)
+        self.assertIn("indexForRotation(", self.physics)
 
-    # --- 9. the invariant that protects the locked layout -----------------
-    @staticmethod
-    def rules(css):
-        out = []
-        for chunk in css.split("}"):
-            if "{" not in chunk:
-                continue
-            head, body = chunk.rsplit("{", 1)
-            # Drop any comment that precedes the selector, and keep only the last
-            # line of it: a selector list can span several.
-            head = re.sub(r".*\*/", "", head, flags=re.DOTALL)
-            out.append((head.strip(), body))
-        return out
+    def test_nothing_audio_driven_may_transform_the_copy_subtree(self):
+        """The invariant the audio-reactive wheels were built around, and the one worth
+        keeping now that they are gone.
 
-    def test_the_wheel_pulse_cannot_move_the_copy(self):
-        """The contributor text and avatar coordinates are solved against 14
-        viewports and locked. A bass scale on any ancestor of them would move the
-        text by 3.5% of a 1260px disc -- 44px -- and silently break that solve.
+        It is NOT "the copy has no transform" -- it has a large and essential one:
 
-        So the scale is only permitted on layers with no descendants: the two
-        plate pseudo-elements and the empty ring spans. Everything that holds copy
-        lives under .rotary-disc__sector-track, which is never transformed.
+            translate(-50%, -50%)
+            rotate(calc(0deg - var(--segment-angle) - var(--disc-rotation, 0deg)))
+            scale(var(--segment-scale))
+
+        The rotate is a counter-rotation that keeps the block upright as the wheel
+        turns, the translate is what centres it on its solved landing point instead of
+        hanging it from its top-left corner, and the scale is the settled emphasis that
+        moves 0.6 -> 1 between the active and inactive sectors. All three are geometry
+        and state, solved against 14 viewports and locked.
+
+        What must never appear is a transform driven by the music. That was the whole
+        design constraint of the old reactivity: the scale landed only on layers with no
+        descendants, because a bass pulse scaling the plate by 3.5% of a 1260px disc
+        moved the contributor copy 44px. With --wheel-* deleted the rule is simpler and
+        stronger -- nothing references them, and the sector track, which is the subtree
+        the copy actually lives in, carries no transform at all.
         """
-        allowed = {".rotary-disc__plate::before", ".rotary-disc__plate::after",
-                   ".rotary-disc__ring"}
-        scaling = [sel for sel, body in self.rules(self.css)
-                   if "transform:" in body and "--wheel-bass" in body]
-        self.assertTrue(scaling, "nothing scales with the bass any more")
-        for sel in scaling:
-            with self.subTest(selector=sel):
-                self.assertIn(sel, allowed,
-                              f"{sel} scales with the bass but has descendants")
-
         track = self.css.split(".rotary-disc__sector-track {", 1)[1].split("}", 1)[0]
-        self.assertNotIn("transform", track,
-                         "the subtree holding the copy must never be transformed")
-        for selector in (".rotary-segment__content {", ".rotary-sign-hanger {",
-                         ".rotary-segment {", ".rotary-disc {"):
-            body = self.css.split(selector, 1)[1].split("}", 1)[0]
-            with self.subTest(selector=selector):
-                self.assertNotIn("--wheel-", body,
-                                 f"{selector} reacts to the audio vars directly")
+        self.assertNotIn("transform", _strip_css_comments(track),
+                         "the copy's own subtree is being transformed")
 
-    def test_each_specified_reaction_is_wired_to_its_layer(self):
-        """The brief named which layer reacts to which band: bass swells the
-        wheels, an onset flares the dashed outer segment and the spokes, treble
-        makes the rim ticks and the tags glint. Asserting the wiring means
-        dropping one of them fails loudly instead of leaving a wheel that
-        quietly reacts to two bands out of three."""
-        def body(selector):
-            return self.css.split(selector, 1)[1].split("}", 1)[0]
+        credits_css = self.css[self.css.index(".credits-rotary-page"):]
+        transforms = re.findall(r"transform:\s*([^;]+);", _strip_css_comments(credits_css))
+        self.assertTrue(transforms, "no transforms found -- the selector moved")
+        for declaration in transforms:
+            with self.subTest(transform=declaration.strip()[:64]):
+                self.assertNotRegex(declaration, r"var\(--wheel-",
+                                    "a transform is driven by the music")
+                self.assertNotRegex(declaration, r"var\(--(?:bass|mid|treble|onset)",
+                                    "a transform is driven by a band")
 
-        for sel in (".rotary-disc__plate::before {", ".rotary-disc__plate::after {",
-                    ".rotary-disc__ring {"):
-            with self.subTest(layer=sel):
-                self.assertIn("var(--wheel-bass", body(sel),
-                              f"{sel} no longer swells with the bass")
-        self.assertIn("scale(calc(1 + (var(--wheel-bass, 0) * 0.035)))",
-                      body(".rotary-disc__plate::after {"))
-        # The DECLARATION, not just the keyword: this rule also drives its
-        # border-color from --wheel-onset, so a bare `assertIn("var(--wheel-onset")`
-        # stayed green when the opacity flare was deleted outright.
-        self.assertIn("opacity: calc(0.6 + (var(--wheel-onset, 0) * 0.4));",
-                      body(".rotary-disc__plate::after {"),
-                      "the dashed outer segment no longer flares on an attack")
-        self.assertIn("opacity: calc(0.4 + (var(--wheel-onset, 0) * 0.35))",
-                      body(".rotary-disc__sector-track::before {"),
-                      "the spokes no longer flare on an attack")
-        self.assertIn("var(--wheel-treble", body(".rotary-disc__plate::before {"),
-                      "the rim ticks no longer glint with treble")
-        tags = re.search(r"\.rotary-sign,\s*\.rotary-name-tag \{([^}]+)\}", self.css)[1]
-        self.assertIn("var(--wheel-treble", tags, "the rim tags no longer glint")
+        # The counter-rotation and the centring arm must survive: deleting either does
+        # not break a test about audio, it silently moves the copy off its solved mark.
+        content = _strip_css_comments(
+            self.css.split(".rotary-segment__content {", 1)[1].split("\n}", 1)[0])
+        self.assertIn("translate(-50%, -50%)", content)
+        self.assertIn("rotate(calc(0deg - var(--segment-angle) - var(--disc-rotation, 0deg)))",
+                      content, "the counter-rotation that keeps the copy upright is gone")
+        self.assertIn("scale(var(--segment-scale))", content)
+        self.assertIn("--segment-scale: 0.6;", content)
+        self.assertIn("--segment-scale: 1;",
+                      self.css.split(".rotary-segment.is-active .rotary-segment__content {", 1)[1]
+                      .split("}", 1)[0])
 
-    def test_the_wheel_reactions_top_out_sane(self):
-        """Every alpha and opacity driven by a wheel var must peak at exactly 1.0
-        with the var at full drive. A calc that overshoots is silently clamped, so
-        the top of the range does nothing; one whose resting value already sits at
-        the ceiling has nowhere to flare to, which is how a "reaction" ends up
-        being a constant. The scale coefficient is pinned to the specified 0.035
-        because much above that stops reading as a pulse and starts reading as the
-        wheel changing size."""
-        pairs = re.findall(
-            r"calc\((0\.\d+) \+ \(var\(--wheel-\w+, 0\) \* (0\.\d+)\)\)", self.css)
-        self.assertTrue(pairs, "no alpha is driven by the wheel vars any more")
-        for rest, drive in pairs:
-            with self.subTest(rest=rest, drive=drive):
-                self.assertGreater(float(drive), 0, "a drive of 0 is a dead reaction")
-                self.assertLessEqual(float(rest) + float(drive), 1.0 + 1e-9,
-                                     "overshoots 1.0 and gets clamped away")
-        scales = re.findall(
-            r"scale\(calc\(1 \+ \(var\(--wheel-bass, 0\) \* ([\d.]+)\)\)\)", self.css)
-        self.assertEqual(len(scales), 3,
-                         "the rim ticks, the dashed outer ring and the three rings")
-        for coeff in scales:
-            self.assertEqual(float(coeff), 0.035, "scale(1 + bass * 0.035) was specified")
+        # And the locked coordinates are still exactly where four rounds of solving put them.
+        for decl in ("top: 58%", "left: 76%", "top: 64%", "left: 76.5%",
+                     "min(max(23vw, 230px), 340px)", "min(max(17.5vw, 200px), 260px)"):
+            with self.subTest(decl=decl):
+                self.assertEqual(self.css.count(decl), 1, f"{decl} moved or duplicated")
+        for decl in ("--sector-offset: 40", "--sector-offset: 220",
+                     "translate(-44%, -44%)", "translate(44%, 44%)"):
+            with self.subTest(decl=decl):
+                self.assertIn(decl, self.css, f"{decl} is gone")
 
-    def test_every_wheel_var_defaults_to_zero(self):
-        """With the script absent, the music off, or reduced motion requested,
-        nothing is written -- so every use must carry its own fallback or the
-        calc() becomes invalid and the declaration is dropped entirely."""
-        uses = re.findall(r"var\(--wheel-(bass|onset|treble)([^)]*)\)", self.css)
-        self.assertTrue(uses, "no audio-reactive wheel properties are left")
-        for name, rest in uses:
-            with self.subTest(var="--wheel-" + name):
-                self.assertTrue(rest.startswith(", "),
-                                f"--wheel-{name} is used without a fallback: "
-                                f"var(--wheel-{name}{rest})")
