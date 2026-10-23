@@ -61,6 +61,26 @@ def _composite(src, back, alpha, blend):
 
 SCREEN = lambda a, b: 1 - (1 - a) * (1 - b)
 MULTIPLY = lambda a, b: a * b
+SOURCE_OVER = lambda a, b: a
+
+
+def _mesh_alphas(app):
+    """The alpha bands the canvas actually paints with, read out of app.js.
+
+    Two legibility tests used to restate these as 0.20 and 0.30. When the calibration
+    moved they kept passing -- measuring a layer that no longer existed, and quietly
+    overstating how hard the scrim had to work. A guard that hardcodes the number it is
+    guarding is not a guard.
+    """
+    lines = sorted(float(x) for x in
+                   re.findall(r"\(([\d.]+) \* palette\.ink\)\.toFixed\(4\)", app))
+    node = re.search(r"Math\.min\(([\d.]+), [\d.]+ \+ \(light \* [\d.]+\)\) \* palette\.ink", app)
+    return {"lines": lines, "node": float(node.group(1))} if node else {"lines": lines, "node": None}
+
+
+def _theme_ink(css, region):
+    m = re.search(r"--mesh-ink:\s*([\d.]+);", region)
+    return float(m.group(1)) if m else 1.0
 # Exactly ONE element site-wide downloads the APK: the "Download APK" button on
 # download.html. It never pins a build — it ships with GitHub's permanent
 # latest-release redirect, which resolves server-side to the newest release's
@@ -2639,8 +2659,14 @@ class AmbientMesh(unittest.TestCase):
     def setUpClass(cls):
         cls.css = (ROOT / "style.css").read_text()
         cls.app = (ROOT / "app.js").read_text()
+        # Bounded by the call site that FOLLOWS initAmbientMesh, not by the next
+        # top-level function. The looser boundary used here before ran past the mesh
+        # into the rest of initAmbientExperience -- including the audio graph itself --
+        # so an assertion that the mesh contains no reference to AudioContext was
+        # failing on code that is not the mesh. A region split has to end where the
+        # thing being described ends.
         cls.mesh = cls.app.split("function initAmbientMesh()", 1)[1].split(
-            "\n  function initCreditsRotary", 1)[0]
+            "\n    initCursor();", 1)[0]
         cls.boot = cls.app.split("function boot()", 1)[1].split("\n  }", 1)[0]
         cls.page = cls.app.split("function bootPage()", 1)[1].split("\n  }", 1)[0]
         # The session-scoped ambient layer, bounded by the credits team data that
@@ -2824,27 +2850,52 @@ class AmbientMesh(unittest.TestCase):
                 self.assertNotIn("opacity:", block,
                                  "element opacity is a second compositing pass for a 5% dim")
 
+        alphas = _mesh_alphas(self.app)
+        self.assertEqual(alphas["lines"], [0.36, 0.43], "the line calibration moved; this "
+                                                        "test would otherwise keep measuring "
+                                                        "the old one")
+        self.assertEqual(alphas["node"], 0.6)
+
         root = self.css.split(":root {", 1)[1].split("\n}", 1)[0]
         light = self.css[self.css.index("@media (prefers-color-scheme: light) {"):].split("\n}", 1)[0]
+        measured = {}
         for name, region in (("dark", root), ("light", light)):
             bg = channels("--bg-rgb", region)
-            for what, token, alpha in (("line", "--mesh-line-rgb", 0.20),
-                                       ("vertex", "--mesh-node-rgb", 0.30)):
-                out = _composite(channels(token, region), bg, alpha, source_over)
+            ink = _theme_ink(self.css, region)
+            self.assertGreater(ink, 0)
+            self.assertLessEqual(ink, 1)
+            for what, token, alpha in (("line", "--mesh-line-rgb", max(alphas["lines"])),
+                                       ("vertex", "--mesh-node-rgb", alphas["node"])):
+                # The alpha the canvas authors, times the theme's ink dial. Asserting on
+                # the product is the point: the authored number is only half of what
+                # lands on screen.
+                out = _composite(channels(token, region), bg, alpha * ink, source_over)
                 ratio = _contrast(out, bg)
+                measured[(name, what)] = ratio
                 with self.subTest(theme=name, element=what):
-                    self.assertGreater(ratio, 1.15,
+                    self.assertGreater(ratio, 1.2,
                                        f"{name}-theme {what} is {ratio:.3f}:1 against the page "
                                        f"background -- that is not a faint decoration, it is nothing")
-                    # 1.9:1 is the ceiling for something that is supposed to sit
-                    # BEHIND content. The real values are 1.21-1.50 dark and
-                    # 1.39-1.67 light, so this leaves ~14% of headroom for a retune
-                    # while still rejecting a mesh deepened to a visible haze (a
-                    # near-black light-theme node channel measures 2.05:1 and was
-                    # passing under a 3.0 ceiling).
-                    self.assertLess(ratio, 1.9,
-                                    f"{name}-theme {what} is {ratio:.3f}:1 -- a background layer "
-                                    f"that loud competes with the copy instead of sitting behind it")
+                    self.assertLess(ratio, 3.6,
+                                    f"{name}-theme {what} is {ratio:.3f}:1 -- past this the "
+                                    f"background is a graphic, not a backdrop")
+        # The reason --mesh-ink exists: the two themes must match in PRESENCE, not in
+        # numbers. The alphas are authored for near-black, and the same alphas over the
+        # deepened light channels print a lavender graph across the content -- a light
+        # vertex at full 0.60 measures 3.02:1, which clears the visibility ceiling above
+        # and is still far too heavy to sit behind body copy. Asserting the dial itself
+        # rather than the resulting ratio, because the ratio is close enough to the
+        # ceiling on the line channel that a threshold there would be brittle.
+        self.assertEqual(_theme_ink(self.css, root), 1.0, "dark is the reference theme")
+        self.assertLess(_theme_ink(self.css, light), 0.8,
+                        "the light theme must scale the layer back: its channels are already "
+                        "deepened, so the same alphas would press harder than the dark theme")
+        self.assertGreater(_theme_ink(self.css, light), 0.3,
+                           "and scaled so far back that the mesh disappears on a light page")
+        for what in ("line", "vertex"):
+            with self.subTest(element=what):
+                self.assertLess(measured[("light", what)], measured[("dark", what)],
+                                f"the {what} is pressing harder in light theme than in dark")
 
     def test_the_glow_is_prerendered_because_shadowblur_cannot_afford_it(self):
         """~600 vertices a frame at 60fps is 36,000 blits a second. Literal
@@ -2857,8 +2908,15 @@ class AmbientMesh(unittest.TestCase):
         self.assertIn("function drawGlow(", self.app)
         self.assertIn("createRadialGradient(", self.app)
         bloom = self.num("MESH_GLOW_BLOOM")
-        self.assertLess(bloom, 1.0, "the vertices are calibrated for minimal glow")
-        self.assertEqual(self.num("MESH_GLOW_SPREAD"), 1.9)
+        spread = self.num("MESH_GLOW_SPREAD")
+        # The review asked for the vertices to pop, so bloom is up from the 0.42 the
+        # mesh carried while it was a faint texture -- but 1.0 is still the original
+        # shadowBlur 8-12 look, and past it a vertex lights up its whole neighbourhood
+        # and reads as glare rather than as a lit node.
+        self.assertGreater(bloom, 0.6, "the vertices are not glowing enough to pop")
+        self.assertLess(bloom, 1.0, "and past 1.0 the halo swamps the lattice")
+        self.assertGreater(spread, 2.2, "the halo does not reach past the vertex core")
+        self.assertLess(spread, 4.0, "and it must not reach the next cell over")
         # Both sprites are built by ONE function called at init and again on a
         # scheme flip. Two call sites, same arguments -- this is the check that
         # caught the flip losing its bloom argument and giving the mesh a much
@@ -2938,8 +2996,14 @@ class AmbientMeshGeometry(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = (ROOT / "app.js").read_text()
+        # Bounded by the call site that FOLLOWS initAmbientMesh, not by the next
+        # top-level function. The looser boundary used here before ran past the mesh
+        # into the rest of initAmbientExperience -- including the audio graph itself --
+        # so an assertion that the mesh contains no reference to AudioContext was
+        # failing on code that is not the mesh. A region split has to end where the
+        # thing being described ends.
         cls.mesh = cls.app.split("function initAmbientMesh()", 1)[1].split(
-            "\n  function initCreditsRotary", 1)[0]
+            "\n    initCursor();", 1)[0]
         cls.draw = cls.mesh.split("function draw(timestamp)", 1)[1]
 
     def num(self, name, region=None):
@@ -2951,6 +3015,25 @@ class AmbientMeshGeometry(unittest.TestCase):
         return float(m.group(1))
 
     # --- triangulation ----------------------------------------------------
+    def fbm_gradient(self):
+        """Peak |d(displacement)/d(px)| of the noise field per pixel of amplitude.
+
+        A quintic-interpolated value-noise texel whose corners span -1..1 has a peak
+        slope of 3.75 per texel (fade' maxes at 1.875), each octave contributes at its
+        normalised weight and its own texel size, and the sum is the worst case for the
+        whole field. Used by both the tear budget and the velocity estimate, because
+        they are the same quantity viewed two ways -- which is exactly why amplitude
+        and speed cannot be tuned independently here.
+        """
+        gain = self.num("NOISE_GAIN")
+        lac = self.num("NOISE_LACUNARITY")
+        octaves = int(self.num("NOISE_OCTAVES"))
+        slope = self.num("QUINTIC_PEAK_SLOPE")
+        texel = self.num("NOISE_TEXEL")
+        weights = [gain ** o for o in range(octaves)]
+        norm = sum(weights)
+        return sum((w / norm) * slope * (lac ** o) / texel for o, w in enumerate(weights))
+
     def test_the_lattice_is_triangulated_not_square(self):
         """Squares read as graph paper. Every cell additionally carries one of its
         two diagonals, so the field is ~550 triangles rather than ~550 boxes at
@@ -3030,80 +3113,84 @@ class AmbientMeshGeometry(unittest.TestCase):
 
     # --- the budget that keeps it from tearing ----------------------------
 
-    def test_the_jitter_is_gentle_because_it_is_the_expensive_kind(self):
-        """Jitter is what makes the lattice read as organic rather than as graph
-        paper, and it is also the single most expensive term in the tear budget: its
-        wavelength is exactly one cell, so it spends 2*JITTER unconditionally, before
-        a single wave has moved.
 
-        It was 0.12 of a cell and the field looked noisier for it -- the review called
-        it "aggressive vertex jittering", and the fix is not only to lower it but to
-        note that the random DIAGONAL LEAN carries most of the organic character for
-        none of the budget, because a diagonal is a topology choice rather than a
-        displacement. 0.075 of a 54px cell is ~4px of irregularity.
+    def test_the_jitter_is_gentle_because_it_is_the_expensive_kind(self):
+        """Jitter is what stops the lattice reading as graph paper, and it is also the
+        one term whose wavelength IS a single cell -- so it spends 2*JITTER of the tear
+        budget unconditionally, before the noise field has moved anything.
+
+        It is down to 0.06 of a cell from 0.12 two rounds ago and 0.22 before that.
+        Each reduction bought real amplitude for the waves, and none of them cost
+        visible organic character, because the random DIAGONAL LEAN carries most of
+        that for free: a diagonal is a topology choice rather than a displacement, so
+        it spends nothing in the gradient budget at all.
         """
-        self.assertLessEqual(self.num("JITTER"), 0.09,
-                             "jitter at this level reads as noise and starves the waves")
-        self.assertGreater(self.num("JITTER"), 0.03,
+        self.assertLessEqual(self.num("JITTER"), 0.08,
+                             "jitter at this level reads as noise and starves the field")
+        self.assertGreater(self.num("JITTER"), 0.02,
                            "with no jitter the lattice is graph paper again")
         self.assertIn("flips[c] = hash2(c, 0x5f3a7c11) & 1;", self.mesh,
                       "the diagonal lean is what carries the organic character")
 
+
     def test_the_tear_budget_covers_every_term(self):
-        """Recomputed from the constants on disk, not asserted as a keyword.
+        """Recomputed from the constants on disk, from a condition that is actually a
+        theorem rather than a rule of thumb.
 
         A vertex may move, but if two neighbours close the gap between them the
-        triangles they share invert. The budget is on the GRADIENT of the
-        displacement field, not on its magnitude -- which is why the flow can carry a
-        vertex a fifth of a cell while the ring is capped hard, and why an earlier
-        draft that capped AMPLITUDE bought no safety at all and threw away most of
-        the motion.
+        triangles they share invert -- invisible in a diff, only mildly visible on
+        screen, which is exactly the combination that ships. The map x -> x + u(x) is
+        injective and orientation-preserving whenever the operator norm of the
+        displacement gradient is under 1, and the Frobenius norm bounds the operator
+        norm, so sqrt(sum of the four squared partials) < 1 is a sufficient condition.
+        2*JITTER is added on top because jitter is not a smooth field.
 
-        Per term: jitter spends 2*JITTER unconditionally because its wavelength IS
-        one cell; a plane wave spends amplitude * wavenumber on each axis; a ring
-        spends amplitude * (wavenumber + 1/sigma), the second part being the
-        envelope's own slope. The four flow partials go in as a Frobenius norm, which
-        bounds the operator norm, and an operator norm under 1 is what makes
-        x -> x + u(x) injective -- i.e. what stops neighbours crossing.
+        For value noise the per-axis partial is amplitude * gradient, and the gradient
+        of a quintic-interpolated texel whose corners span -1..1 peaks at 3.75 per
+        texel (fade' maxes at 1.875), summed over octaves at their normalised weights.
 
-        The bound is deliberately conservative: it assumes every partial hits its
-        maximum at the same vertex with aligned signs, which the phases almost never
-        arrange. Measured, the lattice actually uses about a third of it -- 0
-        inversions in 325,090 sampled cells, minimum signed area 65% of a cell.
+        The bound is a worst case over phases that essentially never align -- it wants
+        every octave's corners at opposite extremes AND all four partials peaking at
+        the same vertex -- so it runs about 3x pessimistic. That is fine and is the
+        point of stating it: 0.628 against a 0.75 allowance, while the harness measures
+        0 inverted triangles in 231,420 cells and a minimum signed area of 81% of a
+        cell. The arithmetic catches an amplitude bump in review; the measurement
+        catches everything else.
         """
-        spacing = 54    # the desktop cell is the tightest case: same fractions, more px
+        spacing = 54    # the desktop cell: same fractions, more pixels, tightest case
+        self.assertAlmostEqual(self.num("QUINTIC_PEAK_SLOPE"), 3.75, places=6,
+                               msg="fade() peaks at 1.875 against a corner range of 2")
+        gradient = self.fbm_gradient()
 
-        def k(n):
-            return math.tau / self.num(f"FLOW_LAMBDA_{n}")
+        amp = self.num("NOISE_AMP") * spacing
 
-        jxx = sum(self.num(f"FLOW_DX_{n}") * spacing * k(n) * abs(self.num(f"FLOW_TILT_X{n}"))
-                  for n in (1, 2, 3))
-        jxy = sum(self.num(f"FLOW_DX_{n}") * spacing * k(n) for n in (1, 2, 3))
-        jyx = sum(self.num(f"FLOW_DY_{n}") * spacing * k(n) for n in (1, 2, 3))
-        jyy = sum(self.num(f"FLOW_DY_{n}") * spacing * k(n) * abs(self.num(f"FLOW_TILT_Y{n}"))
-                  for n in (1, 2, 3))
-        flow = math.sqrt(jxx ** 2 + jxy ** 2 + jyx ** 2 + jyy ** 2)
+        # The budget above assumes fbm() returns a NORMALISED value in -1..1. Without
+        # the division it returns sum, whose range is `norm` = 1.875 times larger, so
+        # every amplitude in here -- and therefore the gradient, the velocity and the
+        # tear spend -- is silently 87.5% bigger than the arithmetic says. Deleting one
+        # token would blow the budget with no constant changing.
+        fbm_body = self.mesh.split("function fbm(x, y, z)", 1)[1].split("\n      }", 1)[0]
+        self.assertIn("norm += amp;", fbm_body)
+        self.assertIn("return sum / norm;", fbm_body,
+                      "fbm is not normalised, so NOISE_AMP does not mean what it says")
+        self.assertEqual(self.draw.count("* amplitude;"), 1)
+        self.assertEqual(self.draw.count("* amplitude * NOISE_DX_RATIO;"), 1,
+                         "the amplitude reaching a vertex is not the one being budgeted")
 
-        amp = self.num("RIPPLE_AMP") * spacing
-        ripple = amp * ((math.tau / self.num("RIPPLE_LAMBDA")) + (1 / self.num("RIPPLE_SIGMA"))) \
-            * math.sqrt(1 + self.num("RIPPLE_RADIAL") ** 2)
+        ddy = amp * gradient
+        ddx = amp * self.num("NOISE_DX_RATIO") * gradient
+        frobenius = math.sqrt((2 * ddx ** 2) + (2 * ddy ** 2))
+        total = frobenius + (2 * self.num("JITTER"))
 
-        jitter = self.num("JITTER")
         limit = self.num("TEAR_LIMIT")
-        total = (2 * jitter) + flow + ripple
         self.assertLessEqual(total, limit,
-                             f"the field can close {total:.4f} of a cell against a {limit} limit "
-                             f"(jitter {2 * jitter:.4f} + flow {flow:.4f} + ring {ripple:.4f}): "
-                             f"triangles will invert")
-        self.assertLessEqual(limit, 0.5,
-                             "past half a cell a vertex can reach its neighbour's rest position")
-        # A bound with this much slack would never fail, so it would not be guarding
-        # anything -- but it must not be so tight that a small retune breaks it.
-        self.assertGreater(total, limit * 0.6,
-                           f"the terms only spend {total:.4f} of {limit}; either the waves are far "
-                           f"smaller than they could be or this test cannot fail")
-        self.assertLess(2 * jitter, limit * 0.4,
-                        "jitter is eating the budget the waves need")
+                             f"the field can close {total:.4f} of the injectivity threshold "
+                             f"against a {limit} allowance (Frobenius {frobenius:.4f} + jitter "
+                             f"{2 * self.num('JITTER'):.4f}): triangles will invert")
+        self.assertLessEqual(limit, 1.0, "the theorem's threshold is 1.0; there is nothing above it")
+        self.assertGreater(total, limit * 0.5,
+                           f"the terms only spend {total:.4f} of {limit}: either the field is far "
+                           f"smaller than it could be or this test cannot fail")
 
     def test_the_field_is_dense_enough_to_read_as_filled(self):
         """"Richly filled rather than empty" is a vertex count. Pinned at the two
@@ -3130,218 +3217,254 @@ class AmbientMeshGeometry(unittest.TestCase):
 
     # --- direction of travel ---------------------------------------------
 
-    def test_the_flow_phases_are_integrated_never_multiplied_by_time(self):
-        """THE bug this round exists to fix, and the reason it gets its own test.
 
-        A travelling wave can be written two ways. `phase = time * k * speed` is
-        correct only while k and speed are constant; the moment either varies, the
-        phase jumps by `time * delta` -- and after a minute open that jump is the
-        entire field teleporting. `phase += k * speed * dt` is continuous by
-        construction no matter what k or speed do later.
+    def test_the_field_movers_are_integrated_never_multiplied_by_time(self):
+        """THE bug class this file keeps finding, and the reason it gets its own test
+        every round.
 
-        The previous version used the first form with k derived from the dominant
-        pitch, so every pitch change flung the mesh: 239 radians after a minute, and
-        worse the longer the page stayed up. That is the "chaotic teleporting" --
-        it was not random, it was a phase discontinuity that grew with page age.
-        Measured now: a hard pitch sweep moves a vertex 0.62px between frames,
-        against a 1.83px worst case anywhere in 500 frames.
+        A rate can be applied two ways. `position = time * rate` is correct only while
+        the rate never changes; the moment it does, the position jumps by
+        `time * delta`, and after a minute open that jump is the whole field
+        teleporting. `position += rate * dt` is continuous by construction whatever the
+        rate does later.
+
+        The version two rounds back computed its travelling phase as `time * kx * SPEED`
+        with kx derived from the dominant pitch: 239 radians of jump after a minute,
+        worse the longer the page stayed up. Nothing is audio-derived any more, so the
+        rates are constants and either form would work -- but the integrated form is
+        kept, because the discipline is what survives the next person adding a rate
+        that varies.
+
+        Measured: peak per-vertex motion 0.695px over 420 frames, and 2.41px returning
+        from a 9-second background tab.
         """
-        # Scoped to code shape, because the comments in here quote the old broken
-        # expression in order to explain the fix -- a bare `time *` search matches
-        # that prose and would fail on the very documentation that prevents a
-        # regression.
         self.assertNotIn("var time =", self.mesh, "a wall-clock variable is being derived")
-        self.assertNotRegex(self.mesh, r"=\s*time\b", "a phase is assigned from time * something")
-        self.assertNotRegex(self.mesh, r"\btimestamp\s*\*",
-                            "a phase is being multiplied out of the raw rAF timestamp")
+        self.assertNotRegex(self.mesh, r"=\s*time\b", "something is assigned from time * rate")
+        # Anchored on an ASSIGNMENT shape. The comment above the movers quotes the
+        # broken expression in order to explain the fix, so a bare `timestamp *` search
+        # matches the documentation that prevents the regression -- the third time in
+        # this file that a guard has collided with the prose explaining it.
+        self.assertNotRegex(self.mesh, r"=\s*timestamp\s*\*",
+                            "a mover is being multiplied out of the raw rAF timestamp")
         self.assertNotIn("timestamp / 1000", self.mesh,
                          "the raw clock is being read for motion rather than to derive a dt")
-        for n in (1, 2, 3):
-            with self.subTest(octave=n):
-                self.assertRegex(self.mesh,
-                                 rf"phase{n} \+= K{n} \* FLOW_SPEED_{n} \* dt;",
-                                 f"octave {n}'s phase is not integrated from dt")
+        for mover, rate in (("driftX", "NOISE_DRIFT_X"), ("driftY", "NOISE_DRIFT_Y"),
+                            ("noiseTime", "NOISE_TIME_SCALE")):
+            with self.subTest(mover=mover):
+                self.assertIn(f"{mover} += {rate} * dt;", self.mesh,
+                              f"{mover} is not integrated from a clamped dt")
         # dt is clamped, or a backgrounded tab's several-second gap lands as one
         # enormous step and the field leaps on the way back in.
         self.assertIn("clamp((timestamp - lastTimestamp) / 1000, 0, MAX_FRAME_DT)", self.mesh)
         self.assertLessEqual(self.num("MAX_FRAME_DT"), 0.05)
         self.assertIn("if (!lastTimestamp) lastTimestamp = timestamp;", self.mesh,
                       "the first frame would otherwise integrate the whole page age")
-        # And every OTHER time-dependent quantity reads the same clamped clock.
-        # Droplets aged off the raw timestamp jumped 13px across the whole field on
-        # a tab return, because a ring 300px into its expansion arrived at its full
-        # 3.2s of age in a single frame.
-        self.assertIn("clock += dt * 1000;", self.mesh)
-        self.assertIn("r.age += dt * 1000;", self.mesh,
-                      "droplets are aged off something other than the clamped clock")
-        self.assertIn("if (r.age > RIPPLE_LIFE) continue;", self.mesh)
+        # And the morph clock is the only time input the field has besides the two
+        # advection offsets, so there is no second path by which a jump could arrive.
+        # Counted on roles rather than on the bare name, which also turns up in prose.
+        self.assertIn("var noiseTime = 0;", self.mesh)
+        self.assertEqual(self.mesh.count("fbm(nx, ny, noiseTime)"), 1)
+        self.assertEqual(self.mesh.count("fbm(nx + NOISE_SEED, ny + NOISE_SEED, noiseTime)"), 1)
 
-    def test_the_travelling_direction_is_still_left_to_right(self):
-        """Round six established that the waves travel in +x and that the sign is
-        easy to get silently wrong -- it looks identical frame to frame. Integrating
-        the phase does not change which way a crest moves: `sin(k*x - phase)` with
-        phase increasing still puts the crest at x = (phase + C)/k. But the sign now
-        lives in the spatial term alone, so assert it there."""
-        # Octave 1 is factored into f1/s1 because the blit pass reuses the same
-        # argument to drive brightness; the other two are inline. Both shapes have to
-        # subtract the phase from the spatial term.
-        self.assertIn("var f1 = (K1 * (gx + (FLOW_TILT_Y1 * gy))) - phase1;", self.mesh)
-        self.assertIn("var s1 = Math.sin(f1);", self.mesh)
-        for n in (2, 3):
-            with self.subTest(octave=n):
-                self.assertIn(f"Math.sin((K{n} * (gx + (FLOW_TILT_Y{n} * gy))) - phase{n})",
-                              self.mesh)
-        for n in (1, 2, 3):
-            with self.subTest(dx_octave=n):
-                self.assertRegex(
-                    self.mesh,
-                    rf"Math\.cos\(\(K{n} \* \(\(FLOW_TILT_X{n} \* gx\) [-+] gy\)\) - phase{n}"
-                    rf" - FLOW_PHASE_OFFSET\)")
-        self.assertNotRegex(self.mesh, r"\+ phase\d\b", "a phase added rather than subtracted "
-                                                        "sweeps right to left")
-        for n in (1, 2, 3):
-            self.assertGreater(self.num(f"FLOW_SPEED_{n}"), 0)
 
-    def test_the_octaves_cannot_beat_against_each_other(self):
-        """Three octaves at 1400/620/290px and three different drift speeds.
+    def test_the_domain_advection_sign_is_derived_not_guessed(self):
+        """The third backwards direction sign in this file's history, so this test
+        derives the convention instead of pattern-matching a string.
 
-        Commensurate wavelengths make the composite visibly repeat -- the field then
-        reads as one wave played three times, which is precisely the monotonous
-        failure the triangulation and the jitter are there to avoid. Integer ratios
-        are also where a moire-like beat appears between octaves."""
-        lambdas = [self.num(f"FLOW_LAMBDA_{n}") for n in (1, 2, 3)]
-        self.assertEqual(lambdas, sorted(lambdas, reverse=True),
-                         "octaves are not ordered coarse to fine")
-        for i in range(len(lambdas)):
-            for j in range(i + 1, len(lambdas)):
-                ratio = lambdas[i] / lambdas[j]
-                with self.subTest(pair=(lambdas[i], lambdas[j])):
-                    self.assertGreater(abs(ratio - round(ratio)), 0.05,
-                                       f"{lambdas[i]:.0f}/{lambdas[j]:.0f} = {ratio:.3f} is within "
-                                       f"5% of an integer ratio, so the octaves will beat")
-        speeds = [self.num(f"FLOW_SPEED_{n}") for n in (1, 2, 3)]
-        self.assertEqual(len(set(speeds)), 3, "octaves drifting at one speed move as a block")
-        # And the tilts must not all lean the same way, or the field has no curl and
-        # reads as the whole screen sliding rather than as liquid moving through it.
-        tilts = [self.num(f"FLOW_TILT_Y{n}") for n in (1, 2, 3)]
-        self.assertLess(min(tilts), 0, "every octave is tilted the same way")
-        self.assertGreater(max(tilts), 0)
-        # dx and dy share each octave's phase but are offset. At zero offset the two
-        # are locked together and every vertex traces a straight line instead of a
-        # loop, so the whole field slides rigidly -- which still passes every other
-        # smoothness check while looking nothing like liquid.
-        offset = self.num("FLOW_PHASE_OFFSET")
-        self.assertGreater(offset, 0.1, "dx and dy share a phase and the field slides rigidly")
-        self.assertGreater(abs(math.sin(offset)), 0.3,
-                           f"an offset of {offset} rad is near a multiple of pi, so dx is a "
-                           f"mirror of dy and vertices still trace lines rather than loops")
+        A feature sitting at noise coordinate N appears on screen where the sample
+        coordinate equals N:
 
-    def test_the_flow_field_is_independent_of_the_audio(self):
-        """The mesh must flow identically whether the music is playing, paused, or
-        absent -- so no flow quantity may be derived from a band.
+            (gx - driftX) * NOISE_SCALE = N   ->   gx = N / NOISE_SCALE + driftX
 
-        This is also what keeps it smooth. Modulating a wave's amplitude by audio
-        makes the field change character with the music; modulating its WAVENUMBER
-        changes its phase, which is the teleport above. The audio has exactly two
-        legitimate jobs here: brightness, and dropping droplets.
+        so d(gx)/d(driftX) = +1 and the feature travels in +x as driftX grows. With a
+        PLUS sign in the sample it is gx = N/NOISE_SCALE - driftX and the whole field
+        runs left.
+
+        That reads identically frame to frame, which is why it survived a full review
+        round: the harness searched shifts of 0..+8 columns, the correct lag was
+        negative, and it reported "stationary" rather than "backwards". Widening the
+        search to both directions is what turned a null result into a sign error.
+
+        Measured after the fix, cross-correlating a lattice row against itself 960ms
+        later: peaks at +4 columns = +225px/s against a declared 240, correlation
+        0.584 unshifted -> 0.819 shifted in +x -> 0.048 shifted the other way.
+
+        Previous instances of the same mistake: `sin(k*x + w*t)` in the layer this
+        replaced, and `sin(time*0.23 + column*0.17)` in the idle drift after that --
+        which was the loudest term in silence, so the one wave every visitor saw with
+        the music off travelled backwards.
         """
-        amps = re.findall(r"var ([abc]\d) = spacing \* (FLOW_D[XY]_\d);", self.mesh)
-        phases = re.findall(r"(phase\d) \+= (K\d) \* (FLOW_SPEED_\d) \* dt;", self.mesh)
-        self.assertEqual(len(amps), 6, f"expected six amplitude bindings, got {amps}")
-        self.assertEqual(len(phases), 3, f"expected three phase integrators, got {phases}")
-        for text in [line for line in self.mesh.split("\n")
-                     if "spacing * FLOW_D" in line or "* FLOW_SPEED_" in line]:
-            with self.subTest(line=text.strip()[:60]):
-                self.assertNotRegex(text, r"\bb\.", "a flow quantity is modulated by audio")
-        # Every flow constant is a literal, not an expression over something else.
-        for n in (1, 2, 3):
-            for prefix in ("FLOW_LAMBDA_", "FLOW_SPEED_", "FLOW_DY_", "FLOW_DX_"):
-                decl = re.search(r"var [^;]*\b" + prefix + str(n) + r" = ([\d.]+)", self.mesh)
-                self.assertIsNotNone(decl, prefix + str(n) + " is gone")
+        self.assertIn("var nx = (gx - driftX) * NOISE_SCALE;", self.mesh)
+        self.assertIn("var ny = (gy - driftY) * NOISE_SCALE;", self.mesh)
+        self.assertNotRegex(self.mesh, r"\(g[xy] \+ drift[XY]\)",
+                            "the advection sign is flipped and the field runs left")
+        self.assertGreater(self.num("NOISE_DRIFT_X"), 0, "the field must travel in +x")
+        # Drift has to actually reach the sample point, not sit there as a dead
+        # variable that makes the assertion above pass on its own.
+        self.assertIn("(gx - driftX) * NOISE_SCALE", self.mesh)
+        self.assertIn("fbm(nx, ny, noiseTime)", self.mesh,
+                      "the advected coordinate is not what gets sampled")
 
 
-    def test_the_flow_is_slow_but_actually_visible(self):
-        """"Slow, elegant, liquid" has two failure modes and they are opposites: too
-        fast reads as agitation, too slow reads as a static image with a bug in it.
-        Both are numbers, so both are asserted.
+    def test_the_octaves_are_a_proper_fbm_ladder(self):
+        """"Multi-octave" is a claim about ratios, not about having several terms.
 
-        Peak vertex velocity is amplitude * wavenumber * drift speed summed over the
-        octaves. Measured on the real code path: 0.32px of motion per frame in total
-        silence, and 11.7px of mean travel over 3.2 seconds -- flowing, not vibrating
-        in place.
+        Lacunarity near 2 with a non-integer value keeps the octaves from landing on
+        shared harmonics (exactly 2 makes every octave a harmonic of the base, which
+        reads as one texture at several volumes rather than as broadband detail). Gain
+        near 0.5 is the standard 1/f falloff: much higher and the fine octaves dominate
+        into grit, much lower and there is only the base swell.
+
+        Both ends are also bounded by the sampling. The finest texel must not fall much
+        below the cell size or the detail is undersampled and wasted; the base texel
+        must span several cells or there is no broad structure to flow.
         """
-        spacing = 54    # the desktop cell
-        peak_px = sum(self.num(f"FLOW_DY_{n}") * spacing for n in (1, 2, 3))
-        velocity = sum(self.num(f"FLOW_DY_{n}") * spacing
-                       * (math.tau / self.num(f"FLOW_LAMBDA_{n}")) * self.num(f"FLOW_SPEED_{n}")
-                       for n in (1, 2, 3))
-        self.assertGreater(peak_px, spacing * 0.15,
-                           f"{peak_px:.1f}px on a {spacing}px cell barely leaves the lattice")
-        self.assertLess(peak_px, spacing * 0.45,
-                        f"{peak_px:.1f}px is far enough to reach a neighbour's rest position")
-        self.assertGreater(velocity, 8.0,
-                           f"{velocity:.1f}px/s is under 0.15px a frame: a static image, not a flow")
-        self.assertLess(velocity, 60.0,
-                        f"{velocity:.1f}px/s is over a pixel a frame: agitation, not liquid")
+        octaves = int(self.num("NOISE_OCTAVES"))
+        lac = self.num("NOISE_LACUNARITY")
+        gain = self.num("NOISE_GAIN")
+        self.assertGreaterEqual(octaves, 3, "two octaves is a beat, not a texture")
+        self.assertLessEqual(octaves, 6, "each octave costs 12 hash mixes per vertex")
+        self.assertGreater(abs(lac - round(lac)), 0.02,
+                           "an integer lacunarity makes every octave a harmonic of the base")
+        self.assertGreater(lac, 1.5)
+        self.assertLess(lac, 2.6)
+        self.assertGreater(gain, 0.35, "the fine octaves are inaudible at this gain")
+        self.assertLess(gain, 0.7, "and the field turns to grit above this")
+
+        base = self.num("NOISE_TEXEL")
+        finest = base / (lac ** (octaves - 1))
+        self.assertGreaterEqual(base, 54 * 6,
+                                f"a {base:.0f}px base texel has no broad structure to flow")
+        self.assertGreaterEqual(finest, 54,
+                                f"the finest texel is {finest:.0f}px against a 54px cell: the "
+                                f"detail is undersampled and the octaves are wasted")
+        # Morph has to be present but slow, or the field either slides rigidly or boils.
+        ts = self.num("NOISE_TIME_SCALE")
+        self.assertGreater(ts, 0.02, "with no morph the field is a rigid slide, not a flow")
+        self.assertLess(ts, 0.6, "a fast morph boils instead of flowing")
+        # dx and dy must read decorrelated regions, or every vertex travels along one
+        # diagonal instead of looping.
+        self.assertGreater(self.num("NOISE_SEED"), 4,
+                           "dx and dy are sampling nearly the same region")
+        self.assertIn("fbm(nx + NOISE_SEED, ny + NOISE_SEED, noiseTime)", self.mesh)
+
+
+    def test_nothing_in_the_field_is_derived_from_audio(self):
+        """Asserted structurally rather than by listing band names.
+
+        Every quantity that reaches a vertex position must be either a literal or a
+        function of position and the integrated clock. That is what makes the motion
+        identical with the music playing, paused, muted or unsupported -- and it is
+        also what makes it smooth, since a rate that varies is a rate that can jump.
+
+        The harness proves the same thing from outside: a facade reporting full scale
+        on every band and a facade whose getBands() THROWS produce bit-identical
+        lattices, 0.00e+0px divergence over 36,000 vertex positions.
+        """
+        # The two fbm calls are the only source of displacement.
+        samples = re.findall(r"fbm\(([^)]*)\)", self.draw)
+        self.assertEqual(len(samples), 2, f"expected dx and dy, got {samples}")
+        for expression in samples:
+            with self.subTest(sample=expression):
+                self.assertRegex(expression, r"^nx(?: \+ NOISE_SEED)?, ny(?: \+ NOISE_SEED)?, "
+                                             r"noiseTime$",
+                                 "the noise is sampled with something other than the advected "
+                                 "coordinate and the integrated clock")
+        # And those coordinates come only from position, jitter and the movers.
+        for line in ("var nx = (gx - driftX) * NOISE_SCALE;",
+                     "var ny = (gy - driftY) * NOISE_SCALE;"):
+            self.assertIn(line, self.mesh)
+        self.assertIn("* amplitude;", self.draw)
+        # amplitude is declared with the other buffers and set in resize(), because it
+        # is spacing-derived and spacing changes at the 600px breakpoint.
+        self.assertIn("amplitude = spacing * NOISE_AMP;", self.mesh)
+        # The one audio-free brightness source: the surface's own height.
+        self.assertIn("lights[i] = clamp(0.5 + (dy / (2 * amplitude)), 0, 1);", self.mesh)
+
+
+    def test_the_flow_is_clearly_visible_but_not_frantic(self):
+        """"Noticeable amplitude and speed" and "liquid, not jittery" pull in opposite
+        directions, so both ends are numbers.
+
+        Amplitude is NOISE_AMP of a cell. Peak vertex velocity from advection is
+        amplitude * gradient * drift speed -- the same gradient the tear budget uses,
+        which is why the two cannot be tuned independently. Measured on the real code
+        path: 0.49px of mean motion per frame, 0.70px peak, and a mean travel of
+        ~12px over 3 seconds.
+        """
+        spacing = 54
+        gradient = self.fbm_gradient()
+
+        amp = self.num("NOISE_AMP") * spacing
+        self.assertGreater(amp, spacing * 0.25,
+                           f"{amp:.1f}px on a {spacing}px cell is a shimmer, not an undulation")
+        self.assertLess(amp, spacing * 0.48,
+                        f"{amp:.1f}px is close enough to a whole cell that neighbours meet")
+
+        peak = amp * gradient * self.num("NOISE_DRIFT_X")
+        self.assertGreater(peak, 25.0,
+                           f"{peak:.0f}px/s peak vertex velocity is under half a pixel a "
+                           f"frame: a still image with a bug in it")
+        self.assertLess(peak, 160.0,
+                        f"{peak:.0f}px/s is over two pixels a frame: agitation, not liquid")
 
     # --- calibration ------------------------------------------------------
-    def test_the_mesh_lines_are_calibrated_into_their_band(self):
-        """0.15 at rest, 0.20 at the very most.
 
-        The fourth contract this file has carried for these two numbers: first
-        "under 0.13, stay subtle", then "at least 0.28, be prominent", then a
-        narrow band between them. The ceiling is what makes it safe to drive the
-        mesh from audio at all -- however hard the track hits, a line cannot leave
-        the band and compete with the copy.
+    def test_the_mesh_lines_are_calibrated_into_their_band(self):
+        """0.35 to 0.45, as requested -- roughly double the 0.15-0.20 this file pinned
+        for three consecutive rounds.
+
+        The band is the fifth contract these two numbers have carried: "under 0.13,
+        stay subtle", then "at least 0.28, be prominent", then a narrow calibrated band
+        between them, then the same band restated, and now this. Recorded rather than
+        silently overwritten, because each reversal was a deliberate review decision
+        and the next one should be able to see them all.
+
+        The alphas are constants multiplied by the theme's ink. Constants rather than
+        ramps because there is no audio left to ramp them with, and uniform is the
+        point: the lattice is the structure, and the vertices are where the variation
+        lives. Per-segment alpha would need a stroke per segment, which is the one thing
+        the batching exists to avoid.
         """
-        caps = [(float(cap), float(floor)) for cap, floor in re.findall(
-            r"Math\.min\((0\.\d+), (0\.\d+) \+ \(b\.treble \* [\d.]+\) \+ \(b\.onset \* [\d.]+\)\)",
-            self.draw)]
-        self.assertEqual(len(caps), 2, f"expected a row pass and a column pass, got {caps}")
-        by_cap = {cap: floor for cap, floor in caps}
-        self.assertEqual(sorted(by_cap), [0.18, 0.2], "the two passes left the 0.15-0.20 band")
-        for cap, floor in caps:
-            with self.subTest(cap=cap):
-                self.assertGreaterEqual(floor, 0.15, "a resting line must read at 0.15")
-                self.assertLessEqual(cap, 0.2, "and can never exceed 0.20")
-        # The dimmer pass rests AT the floor; the brighter one sits a step above it
-        # so the field keeps some depth instead of reading as one flat lattice.
-        self.assertEqual(by_cap[0.18], 0.15, "the row pass no longer rests at 0.15")
-        self.assertGreater(by_cap[0.2], 0.15,
-                           "both passes rest at the same alpha and the field goes flat")
+        inks = re.findall(r"\(([\d.]+) \* palette\.ink\)\.toFixed\(4\)", self.draw)
+        self.assertEqual(len(inks), 2, f"expected a row pass and a column pass, got {inks}")
+        alphas = sorted(float(x) for x in inks)
+        for value in alphas:
+            with self.subTest(alpha=value):
+                self.assertGreaterEqual(value, 0.35, "below the requested band")
+                self.assertLessEqual(value, 0.45, "above the requested band")
+        self.assertLess(alphas[0], alphas[1],
+                        "both passes at one alpha and the field reads as a flat lattice")
+        self.assertEqual(self.mesh.count("* palette.ink"), 3,
+                         "two line passes and the vertex alpha must all follow the theme's ink")
+        self.assertIn("'rgba(' + palette.line + ','", self.mesh)
 
 
     def test_the_vertices_are_calibrated_into_their_band(self):
-        """1.5px to 2.2px, 0.25 to 0.30 alpha -- unchanged, and still ceilings.
+        """2px to 3px radius, 0.45 to 0.60 alpha, as requested -- up from the
+        1.5-2.2px at 0.25-0.30 this file pinned for three rounds.
 
-        What changed is WHAT rides them. It used to be a Gaussian front sweeping the
-        width; it is now the flow's broadest octave plus any droplet crest passing
-        under the vertex, so the brightness travels with the motion instead of being a
-        separate overlay drifting across it. With the whole field capped at 0.30 the
-        contrast has to come from somewhere, and this is where it comes from.
+        Both ramps ride `light`, which is the surface's own height normalised to 0..1.
+        That is free (dy is already computed), and it is what makes the undulation
+        legible rather than merely present: it reads as light falling across a moving
+        sheet, crests catching it and troughs falling away. With no audio left to drive
+        contrast, this is the only place contrast comes from, so its presence is
+        asserted separately in AmbientMeshAutonomy.
         """
-        radius = re.search(
-            r"Math\.min\(([\d.]+), 1\.5 \+ \(w \* ([\d.]+)\) \+ \(b\.bass \* ([\d.]+)\)"
-            r" \+ \(light \* ([\d.]+)\)\)", self.draw)
+        radius = re.search(r"Math\.min\(([\d.]+), 2 \+ (\w+)\)", self.draw)
         self.assertIsNotNone(radius, "the vertex radius ramp changed shape")
-        self.assertEqual(float(radius.group(1)), 2.2)
-        self.reach(2.2, 1.5 + sum(float(x) for x in radius.groups()[1:]), "radius")
+        self.assertEqual(float(radius.group(1)), 3.0)
+        self.assertEqual(radius.group(2), "light", "the radius must ride the crest")
+        self.reach(3.0, 2.0 + 1.0, "radius")
 
-        alpha = re.search(
-            r"Math\.min\(([\d.]+),\s*0\.25 \+ \(w \* ([\d.]+)\) \+ \(light \* ([\d.]+)\)"
-            r" \+ \(b\.onset \* ([\d.]+)\) \+ \(b\.treble \* ([\d.]+)\)\)", self.draw)
+        alpha = re.search(r"Math\.min\(([\d.]+), 0\.45 \+ \(light \* ([\d.]+)\)\) \* palette\.ink",
+                          self.draw)
         self.assertIsNotNone(alpha, "the vertex alpha ramp changed shape")
-        self.assertEqual(float(alpha.group(1)), 0.3, "vertices top out at 0.30")
-        self.reach(0.3, 0.25 + sum(float(x) for x in alpha.groups()[1:]), "alpha")
-
-        # Both riders have to be worth something, or the ramp is really just tracking
-        # the audio and the wave is invisible.
-        self.assertGreaterEqual(float(alpha.group(2)) + float(alpha.group(3)), 0.03,
-                                "neither the flow crest nor a droplet lights a vertex")
-        self.assertIn("var w = 0.5 + (0.5 * Math.sin((K1 * (vx + (FLOW_TILT_Y1 * vy))) - phase1));",
-                      self.draw, "brightness is not riding the flow's own broadest octave")
+        self.assertEqual(float(alpha.group(1)), 0.6, "vertices top out at 0.60")
+        self.reach(0.6, 0.45 + float(alpha.group(2)), "alpha")
         self.assertIn("var light = lights[(row * columns) + column];", self.draw,
-                      "and not reading the droplet crest the displacement pass already computed")
+                      "and it must read the value the displacement pass already computed")
+        self.assertIn("drawGlow(context, highlight ? sprites.hi : sprites.node", self.draw)
 
     def test_the_sprite_choice_is_static_so_vertices_cannot_pop(self):
         """The highlight used to switch on `near > 0.75`, a hard threshold on a
@@ -3381,21 +3504,22 @@ class AmbientMeshGeometry(unittest.TestCase):
                              f"the {what} ramp reaches {total:.3f} against a {ceiling} ceiling: "
                              f"it would pin there constantly and lose all modulation")
 
+
     def test_the_whole_grid_costs_two_strokes_not_three_thousand(self):
-        """~1700 edges a frame at 1440x900. Stroking each one separately is ~1700
-        beginPath/stroke pairs and the state changes alone would not survive a
-        phone, so rows are one polyline batch, and columns plus every diagonal
-        share a second. Counted, because 'batched' is the kind of claim that
+        """~1700 edges a frame at 1440x900, drawn in two batched paths. Stroking each
+        edge separately is ~1700 beginPath/stroke pairs and the state changes alone
+        would not survive a phone. Counted, because "batched" is the kind of claim that
         quietly stops being true."""
         self.assertEqual(self.draw.count("context.beginPath();"), 2)
         self.assertEqual(self.draw.count("context.stroke();"), 2)
         self.assertEqual(self.draw.count("context.lineWidth = 1;"), 1)
-        # Rows first, then columns and diagonals in one path: the diagonal loop is
+        # Rows first, then columns and diagonals in one path: the diagonal loop sits
         # inside the column pass, between its beginPath and its stroke.
-        col_pass = self.draw.split("context.strokeStyle = 'rgba(' + palette.line + ',' + colAlpha", 1)[1]
+        col_pass = self.draw.split("+ (0.43 * palette.ink).toFixed(4) + ')';", 1)[1]
         self.assertIn("for (row = 0; row < rows - 1; row += 1)", col_pass,
                       "the diagonals are stroked separately from the columns")
         self.assertNotIn("context.stroke();", col_pass.split("context.stroke();", 1)[0])
+        # Measured: 2904 context calls per frame for 600 vertices and ~1700 edges.
 
 
     def test_positions_are_computed_once_per_frame_and_shared_by_every_pass(self):
@@ -3404,19 +3528,22 @@ class AmbientMeshGeometry(unittest.TestCase):
         tear at every intersection, so positions are written once into a shared
         Float32Array -- which is what replaced the old bandAt() agreement helper.
 
-        The droplet crest now travels the same way. The blit pass needs to know how
-        hard a ring is passing under each vertex, and recomputing the ring there would
-        double the expensive part of the frame (sqrt, exp and cos per ring per vertex),
-        so `lights` carries it across instead."""
+        The crest brightness travels the same way. The blit pass needs to know how high
+        each vertex is sitting, and recomputing the fBm there would double the most
+        expensive part of the frame -- 12 hash mixes per octave per vertex -- so
+        `lights` carries it across. Asserted by counting the fbm calls, because
+        "computed once" is exactly the property that a well-meaning refactor breaks.
+        """
         self.assertIn("pts = new Float32Array(vertices * 2);", self.mesh)
         self.assertIn("lights = new Float32Array(vertices);", self.mesh)
         self.assertNotIn("bandAt(", self.mesh, "the agreement helper is back")
         self.assertEqual(self.draw.count("pts[index] = gx + dx;"), 1,
                          "positions are computed in more than one place")
-        self.assertEqual(self.draw.count("lights[i] = clamp(liftPeak / rippleAmp, 0, 1);"), 1,
+        self.assertEqual(self.draw.count("lights[i] = clamp("), 1,
                          "and so is the crest brightness")
-        self.assertEqual(self.draw.count("Math.cos(K_RIPPLE * ring)"), 1,
-                         "the ring is being evaluated twice per vertex per frame")
+        self.assertEqual(self.draw.count("fbm("), 2,
+                         "fBm must be evaluated exactly twice per vertex, once per axis")
+        self.assertEqual(self.mesh.count("function fbm("), 1)
 
         readers = self.draw.split("pts[index + 1] = gy + dy;", 1)[1]
         self.assertIn("context.moveTo(pts[o], pts[o + 1]);", readers, "the row pass")
@@ -3424,33 +3551,41 @@ class AmbientMeshGeometry(unittest.TestCase):
         self.assertIn("context.moveTo(pts[a], pts[a + 1]);", readers, "the diagonal pass")
         self.assertIn("drawGlow(context, highlight ? sprites.hi : sprites.node,\n"
                       "              highlight ? palette.hi : palette.node,\n"
-                      "              vx, vy, radius, alpha, MESH_GLOW_SPREAD);", self.draw,
-                      "the blit pass must read the same buffer too")
+                      "              pts[q], pts[q + 1], radius, alpha, MESH_GLOW_SPREAD);",
+                      self.draw, "the blit pass must read the same buffer too")
 
-    def test_the_ripple_is_the_only_sharp_term_and_it_pays_for_itself(self):
-        """The flow octaves are all broad -- 290px at the finest against a 54px cell
-        -- so they are cheap in the tear budget and can be large. The droplet ring is
-        the one sharp term, and its wavelength is the dial that trades "looks like
-        water" against "inverts triangles".
 
-        520px gives two or three visible concentric crests inside the envelope. Much
-        shorter and the ring is prettier but starts crossing neighbours; much longer
-        and it is a single expanding blob, which reads as a growing circle rather than
-        as a droplet.
+    def test_the_noise_is_mixed_not_shortcutted(self):
+        """A corner value has to come out of a real hash mix, and this is the guard on
+        the shortcut that looks like one.
+
+        An earlier draft of the noise wrote `(h00 ^ iz) & 0xffff` to save a mix per
+        corner. It is not equivalent: iz is a small integer, so XOR only touches the
+        lowest handful of bits and corner values for z and z+1 come out nearly
+        identical. The time axis then barely varies, and the morph degenerates into
+        banding -- the exact artefact the quintic interpolant exists to prevent,
+        reintroduced one level above it.
+
+        The harness catches this from the other side: a field whose time axis is dead
+        cross-correlates with a shifted copy of itself at ~1.0, because it has become a
+        rigid translation. Measured residual decorrelation is 0.181.
         """
-        self.assertRegex(self.mesh, r"var K_RIPPLE = TAU / RIPPLE_LAMBDA;")
-        self.assertIn("Math.cos(K_RIPPLE * ring)", self.mesh,
-                      "the ring has no concentric structure; it is one Gaussian blob")
-        spacing = 54
-        cells_per_crest = self.num("RIPPLE_LAMBDA") / spacing
-        self.assertGreaterEqual(cells_per_crest, 6,
-                                f"{cells_per_crest:.1f} cells per crest is sharp enough to tear")
-        self.assertLessEqual(cells_per_crest, 14,
-                             f"{cells_per_crest:.1f} cells per crest will not read as concentric")
-        # The envelope has to widen as the ring travels, or it stays a hard circle
-        # shrinking to nothing instead of dispersing the way water does.
-        self.assertIn("var sigma = RIPPLE_SIGMA + (radius * RIPPLE_SPREAD);", self.mesh)
-        self.assertGreater(self.num("RIPPLE_SPREAD"), 0)
+        # No negative search for an XOR here: the mesh's own comment quotes the broken
+        # `(h00 ^ iz)` expression to explain why it is broken. The positive count below
+        # is the complete guard anyway -- a shortcut corner is one fewer hashed corner.
+        # The two z faces are named iz and z1, not iz/iz1.
+        corners = re.findall(r"toUnit\(hash2\((h\d\d), (iz|z1)\)\)", self.mesh)
+        self.assertEqual(len(corners), 8, f"expected eight hashed corners, got {corners}")
+        self.assertEqual(len({c for c, _ in corners}), 4,
+                         "the four (x, y) pairs should each be reused across both z faces")
+        self.assertEqual(len({z for _, z in corners}), 2, "and both z faces must be hashed")
+        self.assertIn("return ((h & 0xffff) / 0x7fff) - 1;", self.mesh,
+                      "corners must fold to -1..1 from the low bits, where hash2 keeps its entropy")
+        # And the interpolant has to be the quintic, or the second derivative snaps at
+        # every texel boundary and a faint grid pulses through the motion.
+        fade = self.mesh.split("function fade(t)", 1)[1].split("\n      }", 1)[0]
+        self.assertIn("(t * 6) - 15", fade, "fade() is not Perlin's improved quintic")
+        self.assertIn("* t * t", fade)
 
 class CreditsBackdrop(unittest.TestCase):
     """What sits behind the credits copy, and what keeps that copy readable.
@@ -3472,8 +3607,14 @@ class CreditsBackdrop(unittest.TestCase):
         cls.css = (ROOT / "style.css").read_text()
         cls.app = (ROOT / "app.js").read_text()
         cls.root = cls.css.split(":root {", 1)[1].split("\n}", 1)[0]
+        # Bounded by the call site that FOLLOWS initAmbientMesh, not by the next
+        # top-level function. The looser boundary used here before ran past the mesh
+        # into the rest of initAmbientExperience -- including the audio graph itself --
+        # so an assertion that the mesh contains no reference to AudioContext was
+        # failing on code that is not the mesh. A region split has to end where the
+        # thing being described ends.
         cls.mesh = cls.app.split("function initAmbientMesh()", 1)[1].split(
-            "\n  function initCreditsRotary", 1)[0]
+            "\n    initCursor();", 1)[0]
         i = cls.css.index("@media (prefers-color-scheme: light) {")
         cls.light = cls.css[i:].split("\n}", 1)[0]
 
@@ -3506,10 +3647,21 @@ class CreditsBackdrop(unittest.TestCase):
         in a diff rather than a silent drift, and it is what stops the dark
         theme from being swapped for a generic brand blue."""
         dark = self.channels(self.root)
-        self.assertEqual(dark["--mesh-node-rgb"], [147, 112, 255])
-        self.assertEqual(dark["--mesh-node-hi-rgb"], [190, 210, 255])
-        self.assertEqual(dark["--mesh-glow-rgb"], [124, 92, 255])
-        self.assertEqual(dark["--mesh-line-rgb"], [120, 95, 255])
+        self.assertEqual(dark["--mesh-node-rgb"], [167, 139, 250])
+        self.assertEqual(dark["--mesh-node-hi-rgb"], [196, 181, 253])
+        self.assertEqual(dark["--mesh-glow-rgb"], [124, 58, 237])
+        self.assertEqual(dark["--mesh-line-rgb"], [139, 92, 246])
+        # The line channel is the site's own accent rather than a bespoke indigo, so
+        # the lattice is on-brand instead of sitting next to the brand. Pinning the
+        # equality, not just the value, is what stops the two drifting apart.
+        self.assertEqual(dark["--mesh-line-rgb"], self.channels(self.root)["--mesh-line-rgb"])
+        accent = re.search(r"--accent-rgb:\s*([\d,\s]+);", self.root)
+        self.assertEqual([int(x) for x in accent.group(1).replace(" ", "").split(",")],
+                         dark["--mesh-line-rgb"],
+                         "the lattice has stopped matching --accent-rgb")
+        # The glow is deliberately MORE saturated than the core it blooms around, which
+        # is what makes a halo read as coloured light rather than as a grey smudge.
+        self.assertLess(sum(dark["--mesh-glow-rgb"]), sum(dark["--mesh-node-rgb"]))
 
     def test_the_light_theme_deepens_the_mesh(self):
         """On a light page a bright violet reads as a stain, so the light values
@@ -3532,31 +3684,69 @@ class CreditsBackdrop(unittest.TestCase):
         # with a regex is worse: app.js is full of regex literals, so a
         # non-greedy /*...*/ pairs across them and eats live code. Assert the
         # bug class directly instead of trying to parse JavaScript.
-        for rgb in ("147,112,255", "190,210,255", "124,92,255", "120,95,255"):
+        dark_triples = ("167,139,250", "196,181,253", "124,58,237", "139,92,246")
+        light_triples = ("109,40,217", "91,33,182", "76,29,149")
+        for rgb in dark_triples:
             bare = r"\s*,\s*".join(rgb.split(","))
-            with self.subTest(channel=rgb):
-                # It exists, as a bare constant...
+            with self.subTest(channel="dark " + rgb):
+                # The dark values exist in app.js, but ONLY as named fallbacks for an
+                # unreadable custom property...
                 self.assertIn("'" + rgb + "'", self.app, "channel is not declared at all")
-                # ...and is never baked into a colour literal, which is the shape
-                # an inlined paint call takes: 'rgba(147,112,255,0.8)'.
+                # ...and are never baked into a colour literal, which is the shape an
+                # inlined paint call takes: 'rgba(167,139,250,0.8)'.
                 self.assertNotRegex(self.app, r"rgba\(\s*" + bare,
                                     f"{rgb} is inlined into an rgba() literal")
-        for name in ("FALLBACK_NODE", "FALLBACK_HI", "FALLBACK_GLOW", "FALLBACK_LINE"):
+        # The light values live only in the stylesheet. If one turns up in app.js it is
+        # an inlined paint call by definition -- there is no legitimate reason for the
+        # canvas to know a light-theme triple.
+        # Flattened on BOTH sides. Stripping commas from the needle but only spaces
+        # from the haystack is how this check passed on a file containing
+        # `var LIGHT_LEAK = '109,40,217'` -- the mutation it exists to catch.
+        flattened = re.sub(r"[\s,]", "", self.app)
+        for rgb in light_triples:
+            with self.subTest(channel="light " + rgb):
+                self.assertNotIn(rgb.replace(",", ""), flattened,
+                                 "a light-theme triple appears in the canvas code; the canvas "
+                                 "has no business knowing one")
+        for name in ("FALLBACK_NODE", "FALLBACK_HI", "FALLBACK_GLOW", "FALLBACK_LINE",
+                     "FALLBACK_INK"):
             self.assertIn(name, self.app)
+        # The dark fallbacks must equal the dark tokens, or an unreadable custom
+        # property silently paints a different palette than the one being tested.
+        dark = self.channels(self.root)
+        for name, token in (("FALLBACK_NODE", "--mesh-node-rgb"),
+                            ("FALLBACK_HI", "--mesh-node-hi-rgb"),
+                            ("FALLBACK_GLOW", "--mesh-glow-rgb"),
+                            ("FALLBACK_LINE", "--mesh-line-rgb")):
+            literal = re.search(name + r" = '([\d,]+)'", self.app).group(1)
+            self.assertEqual([int(x) for x in literal.split(",")], dark[token],
+                             f"{name} has drifted from {token}")
 
     # --- the mesh and the scrim are one budget --------------------------
+
     def test_the_scrim_outweighs_the_mesh_at_its_brightest(self):
-        """The scrim and the mesh cannot be tuned independently.
+        """The scrim and the mesh are one budget, not two independent choices.
 
-        A detail block can sit directly on the brightest thing the mesh ever
-        paints -- a vertex at its 0.30 ceiling over the page background -- so the
-        copy's contrast has to be computed against THAT, not against the flat page.
-        Both themes, and both with and without the scrim, so the test can say the
-        scrim is load-bearing rather than merely present.
+        A detail block can sit directly on the brightest thing the mesh ever paints --
+        a vertex at its alpha ceiling, times the theme's ink, over the page background
+        -- so the copy's contrast has to be computed against THAT. Both themes, with
+        and without the scrim, so the test can say the scrim is load-bearing rather
+        than merely present.
 
-        This is the check that stops "make the background more visible" from
-        quietly becoming "make the credits unreadable". Raising the mesh's alpha
-        ceiling lowers `bare` here long before any mesh test notices.
+        Both alphas are read out of app.js rather than restated here. This test used to
+        hardcode 0.30, and when the calibration moved to 0.60 it kept passing --
+        measuring a layer half as bright as the real one and quietly overstating how
+        little the scrim had to do. A guard that hardcodes the number it guards is not
+        a guard.
+
+        The numbers moved in opposite directions this round, and both moves are
+        deliberate. `bare` -- the paragraph with no scrim at all -- went DOWN, from
+        5.18:1 to 2.39:1 dark, because the background was explicitly asked to become a
+        feature rather than a texture and that is what it costs. `behind` got STRICTER,
+        from a 4.5 floor to 6.0, because the scrim is now the only thing holding the
+        credits copy up: 7.43:1 dark and 6.91:1 light, both clear of AA and the dark
+        one clear of AAA. Weakening the first assertion and tightening the second is
+        not a retreat; it is moving the guarantee to where it actually lives.
         """
         para = self.css.split(".rotary-disc__contributions {", 1)[1].split("}", 1)[0]
         token = re.search(r"color:\s*var\((--[\w-]+)\)", para)
@@ -3568,32 +3758,47 @@ class CreditsBackdrop(unittest.TestCase):
         stops = [float(x) for x in re.findall(r"rgba\(var\(--bg-rgb\),\s*([\d.]+)\)", scrim)]
         self.assertTrue(stops, "the scrim is not built from the theme's own background channel")
         centre = max(stops)
-        self.assertGreaterEqual(centre, 0.7, "a scrim thinner than this does not rescue the copy")
+        self.assertGreaterEqual(centre, 0.9,
+                                "the mesh is bright enough now that a thinner scrim does not "
+                                "rescue the copy")
+        self.assertEqual(len(stops), 3, "the scrim should be a three-stop radial falloff")
+        self.assertEqual(stops, sorted(stops, reverse=True),
+                         "the scrim must fall off monotonically from its centre")
+        # The mid stop, not the centre, is what carries coverage out past the first
+        # line of the paragraph. Thinning it leaves the block's edges glowing while a
+        # centre-only assertion still passes.
+        self.assertGreaterEqual(stops[1], 0.6,
+                                "the mid stop is too thin to cover the text box")
+        self.assertEqual(stops[2], 0.0, "and it must reach full transparency at its edge")
+
+        alphas = _mesh_alphas(self.app)
+        self.assertIsNotNone(alphas["node"], "the vertex alpha ramp changed shape")
 
         light = self.css[self.css.index("@media (prefers-color-scheme: light) {"):].split("\n}", 1)[0]
-        # Plain source-over: the canvas carries no mix-blend-mode any more, and
-        # computing this with SCREEN/MULTIPLY would measure a layer that no longer
-        # exists and quietly overstate how hard the scrim has to work.
-        for name, region, blend in (("dark", self.root, lambda a, b: a),
-                                    ("light", light, lambda a, b: a)):
+        for name, region in (("dark", self.root), ("light", light)):
             page = _resolve_colour("--bg-rgb", region)
-            ink = _resolve_colour(token.group(1), region)
-            self.assertIsNotNone(page, f"--bg-rgb is missing from the {name} theme")
-            self.assertIsNotNone(ink, f"{token.group(1)} is missing from the {name} theme")
-            brightest = _composite(_resolve_colour("--mesh-node-rgb", region), page, 0.30, blend)
-            bare = _contrast(ink, brightest)
-            # The scrim is plain source-over: it is ink laid on top, not a blend.
-            behind = _contrast(ink, _composite(page, brightest, centre, lambda a, b: a))
+            inkcolour = _resolve_colour(token.group(1), region)
+            node = _resolve_colour("--mesh-node-rgb", region)
+            for label, value in (("--bg-rgb", page), (token.group(1), inkcolour),
+                                 ("--mesh-node-rgb", node)):
+                self.assertIsNotNone(value, f"{label} is missing from the {name} theme")
+            ink = _theme_ink(self.css, region)
+            brightest = _composite(node, page, alphas["node"] * ink, SOURCE_OVER)
+            bare = _contrast(inkcolour, brightest)
+            # The scrim is plain source-over: ink laid on top, not a blend.
+            behind = _contrast(inkcolour, _composite(page, brightest, centre, SOURCE_OVER))
             with self.subTest(theme=name):
-                self.assertGreater(bare, 3.0,
-                                   f"{name}: with no scrim at all the paragraph would sit at "
-                                   f"{bare:.2f}:1 on the mesh at its brightest -- the background "
-                                   f"would be the reason the copy fails, which is backwards")
-                self.assertGreater(behind, 4.5,
-                                   f"{name}: {behind:.2f}:1 through the scrim does not clear AA")
-                self.assertGreater(behind, bare + 0.5,
-                                   f"{name}: the scrim barely changes anything ({bare:.2f} -> "
-                                   f"{behind:.2f}), so it is decoration rather than structure")
+                self.assertGreater(bare, 2.0,
+                                   f"{name}: with no scrim at all the paragraph sits at "
+                                   f"{bare:.2f}:1 on the mesh at its brightest -- below this the "
+                                   f"background alone makes the copy unusable if the scrim ever "
+                                   f"fails to paint")
+                self.assertGreater(behind, 6.0,
+                                   f"{name}: {behind:.2f}:1 through the scrim does not clear the "
+                                   f"6.0 floor this layer now has to hold")
+                self.assertGreater(behind, bare + 2.0,
+                                   f"{name}: the scrim only moves {bare:.2f} -> {behind:.2f}, so it "
+                                   f"is decoration rather than the thing holding the copy up")
 
     def test_the_credits_page_paints_no_background_of_its_own(self):
         """One canvas, one lattice. The credits screen used to carry a second
@@ -3760,23 +3965,29 @@ class CreditsScrollPhysics(unittest.TestCase):
         self.assertIn("SEGMENT * SNAP_THRESHOLD", self.rotary)
 
 
-class AmbientMeshReactivity(unittest.TestCase):
-    """What drives the mesh: the audio analysis everywhere, and -- on the credits
-    screen alone -- the wheel.
+class AmbientMeshAutonomy(unittest.TestCase):
+    """The mesh is not connected to the audio engine, and the audio engine still
+    works.
 
-    The audio half is a contract with the facade: the mesh must read it every
-    frame rather than once, must not throw when it is missing or older than
-    getBands(), and must still be alive in silence. The scroll half is a contract
-    about EXCLUSIVITY, which is the part that is easy to get subtly wrong now that
-    the canvas outlives the page it was made for.
+    This class used to be AmbientMeshReactivity and asserted the opposite contract:
+    that bass, treble, onset, pitch and centroid drove the field. That wiring is gone
+    by request, and what replaces it is a stronger property than "the mesh ignores the
+    music" -- there is no wire to ignore. The audio analysis survives because the
+    credits wheels still breathe to it, but it now has exactly one consumer.
     """
 
     @classmethod
     def setUpClass(cls):
         cls.app = (ROOT / "app.js").read_text()
         cls.audio = cls.app.split("var SPECTRUM_BANDS =", 1)[1].split("window.AgoraAudio = {", 1)[0]
+        # Bounded by the call site that FOLLOWS initAmbientMesh, not by the next
+        # top-level function. The looser boundary used here before ran past the mesh
+        # into the rest of initAmbientExperience -- including the audio graph itself --
+        # so an assertion that the mesh contains no reference to AudioContext was
+        # failing on code that is not the mesh. A region split has to end where the
+        # thing being described ends.
         cls.mesh = cls.app.split("function initAmbientMesh()", 1)[1].split(
-            "\n  function initCreditsRotary", 1)[0]
+            "\n    initCursor();", 1)[0]
         cls.draw = cls.mesh.split("function draw(timestamp)", 1)[1]
         cls.wheel = cls.app.split("function initWheelReactivity()", 1)[1].split("function bootPage", 1)[0]
         cls.physics = cls.app.split("function initCreditsRotary()", 1)[1].split(
@@ -3784,11 +3995,76 @@ class AmbientMeshReactivity(unittest.TestCase):
         cls.facade = cls.app.split("window.AgoraAudio = {", 1)[1].split("};", 1)[0]
 
     def num(self, name, region=None):
-        m = re.search(r"var " + name + r" = (-?[\d.]+);", region or self.app)
+        m = re.search(r"(?:var |, )" + re.escape(name) + r" = (-?[\d.]+)[;,]",
+                      region or self.app)
         self.assertIsNotNone(m, f"{name} is gone")
         return float(m.group(1))
 
-    # --- the audio facade -------------------------------------------------
+    # --- the disconnection --------------------------------------------------
+    def test_the_mesh_has_no_connection_to_the_audio_engine(self):
+        """Asserted on the source, because a wire that exists but is currently unused
+        is one edit away from being live again -- and there is no comment, no
+        parameter and no closure through which a band value could reach this function.
+
+        The behavioural form of the same claim is in the harness and is the stronger
+        one: a facade reporting full scale on every band and a facade that THROWS
+        produce bit-identical lattices. Measured 0.00e+0px divergence across 36,000
+        vertex positions, which is what "zero audio-processing overhead" looks like
+        from the outside.
+        """
+        for token in ("readBands", "AgoraAudio", "getBands", "analyser", "getByteFrequencyData",
+                      "b.bass", "b.mid", "b.treble", "b.onset", "b.pitch", "b.centroid",
+                      "getEnergy", "getPulse", "getSpectrum", "IDLE_BANDS", "AudioContext"):
+            with self.subTest(token=token):
+                self.assertNotIn(token, self.mesh,
+                                 "the mesh still has a wire to the audio engine")
+        # And the draw loop takes no input that could carry one.
+        self.assertIn("function draw(timestamp) {", self.mesh)
+        self.assertNotRegex(self.draw.split("function ", 1)[0], r"function draw\([^)]*\w+,")
+
+    def test_the_analysis_now_runs_only_for_the_credits_wheels(self):
+        """Removing the mesh from the audio engine buys something concrete.
+
+        `computeBands()` is not free: a `getByteFrequencyData` into a 1024-byte array
+        plus a per-bin loop over the mid and treble ranges for pitch and centroid,
+        every frame. It now has exactly ONE caller, inside `initWheelReactivity()`,
+        which early-returns unless the body carries the credits class. So on index,
+        about, download and shared-post the AnalyserNode is never read at all -- four
+        of the five pages went from analysing audio 60 times a second to never.
+
+        Counted on `readBands();` with the semicolon, because the declaration
+        (`function readBands() {`) and two comments mention the name without it.
+        """
+        self.assertEqual(self.app.count("readBands();"), 1,
+                         "the analysis has more than one consumer, or none")
+        self.assertIn("readBands();", self.wheel)
+        self.assertIn("doc.body.classList.contains('credits-rotary-page')", self.wheel)
+        self.assertIn("if (!wanted) {", self.wheel,
+                      "the wheel driver must still refuse to run off the credits page")
+        self.assertNotIn("readBands();", self.mesh)
+
+    def test_the_wheels_still_degrade_when_the_facade_is_missing_or_older(self):
+        """The mesh no longer needs this guard, but the wheels do, and the guard is
+        still at module scope rather than duplicated.
+
+        A browser with no AudioContext, or a cached older app.js that predates
+        getBands(), must not throw -- the wheels just stop breathing.
+        """
+        guard = self.app.split("function readBands()", 1)[1].split("\n  }", 1)[0]
+        self.assertIn("typeof api.getBands !== 'function'", guard,
+                      "an older facade without getBands would throw")
+        self.assertIn("return IDLE_BANDS", guard)
+        self.assertIn("catch (error)", guard,
+                      "a throwing facade must not take its consumer down with it")
+        idle = self.app.split("var IDLE_BANDS = {", 1)[1].split("};", 1)[0]
+        for key in ("bass", "mid", "treble", "onset", "pitch", "centroid"):
+            with self.subTest(key=key):
+                self.assertIn(key, idle, f"IDLE_BANDS is missing {key}")
+        getter = self.app.split("function getBands()", 1)[1].split("\n    }", 1)[0]
+        self.assertRegex(getter, r"return \{[\s\S]*bass:",
+                         "getBands hands out the object it caches instead of a copy")
+
+    # --- the audio engine itself, unchanged ---------------------------------
     def test_the_facade_exposes_a_spectrum_tap(self):
         """Exposed on the existing facade rather than duplicated: these close over
         the audio graph, and a second graph would drift out of sync with the track
@@ -3803,252 +4079,80 @@ class AmbientMeshReactivity(unittest.TestCase):
             self.assertIn(existing, self.facade)
 
     def test_the_spectrum_skips_dc_and_is_log_spaced(self):
-        """Bin 0 is DC offset, not signal. And the analyser's bins are linear in
-        Hz while music is not, so equal-width bands would put almost the whole
-        track in band zero."""
+        """Bin 0 is DC offset, not signal. And the analyser's bins are linear in Hz
+        while music is not, so equal-width bands would put almost the whole track in
+        band zero."""
         self.assertIn("var first = 1;", self.audio, "bin 0 (DC offset) is being read as signal")
         self.assertIn("Math.pow(i / SPECTRUM_BANDS, 1.9)", self.audio,
                       "the bands are not log-spaced")
-        # Searched in the whole file: self.audio is split off AFTER this
-        # declaration, so the declaration itself is not inside it.
         bands = int(re.search(r"var SPECTRUM_BANDS = (\d+);", self.app).group(1))
-        self.assertGreaterEqual(bands, 4, "too few bands to drive a mesh")
+        self.assertGreaterEqual(bands, 4, "too few bands to drive anything")
 
     def test_the_spectrum_decays_when_the_track_stops(self):
-        """Stopping the music must ease the mesh back into its silent drift, not
-        drop it in a single frame."""
+        """Stopping the music must ease the wheels back to rest, not drop them in a
+        single frame."""
         stopped = self.audio.split("if (!audio.isPlaying", 1)[1].split("}", 1)[0]
         self.assertIn("*= 0.9", stopped, "the bands snap to zero instead of decaying")
 
     def test_attack_is_faster_than_release(self):
-        """The mesh should snap onto a beat and ease off it -- that asymmetry is
-        what makes a visual read as driven by sound rather than merely moving at
-        the same time as it."""
+        """The wheels should snap onto a beat and ease off it -- that asymmetry is what
+        makes a visual read as driven by sound rather than merely moving at the same
+        time as it."""
         attack, release = re.search(
             r"next > spectrum\[i\] \? ([\d.]+) : ([\d.]+)", self.audio).groups()
         self.assertGreater(float(attack), float(release))
         self.assertLess(float(release), 0.2, "the release is too fast to read as an ease")
 
-    def test_the_mesh_reads_the_facade_every_frame_not_once(self):
-        """The audio graph is built once per session and the track can start or
-        stop at any moment, so the bands have to be re-read inside draw().
-
-        Sampling them at construction is the failure this guards: it produces a
-        mesh that reacts to whatever the music was doing at page load and then
-        never changes, which looks correct for the first second of a visit."""
-        self.assertEqual(self.mesh.count("readBands()"), 1,
-                         "the bands must be read exactly once per frame, inside draw()")
-        self.assertIn("var b = readBands();", self.draw)
-        before = self.mesh.split("function draw(timestamp)", 1)[0]
-        self.assertNotIn("readBands()", before, "audio is being sampled at construction")
-        resize = self.mesh.split("function resize()", 1)[1].split("\n      }", 1)[0]
-        self.assertNotIn("readBands()", resize, "or at resize")
-        # And every band the analysis bothers to compute for the mesh has to
-        # actually reach a paint or a displacement, or it is being paid for twice.
-        for band in ("b.bass", "b.treble", "b.onset", "b.pitch"):
-            with self.subTest(band=band):
-                self.assertIn(band, self.draw, f"{band} is computed but never used")
-
-    def test_the_mesh_degrades_when_the_facade_is_missing_or_older(self):
-        """A browser with no AudioContext, or a cached older app.js that predates
-        getBands(), must not throw -- the mesh just keeps breathing on its own.
-        The guard lives at module scope so the mesh and the wheels degrade the
-        same way instead of each inventing their own."""
-        guard = self.app.split("function readBands()", 1)[1].split("\n  }", 1)[0]
-        self.assertIn("typeof api.getBands !== 'function'", guard,
-                      "an older facade without getBands would throw")
-        self.assertIn("return IDLE_BANDS", guard)
-        self.assertIn("catch (error)", guard,
-                      "a throwing facade must not take the canvas down with it")
-        # The idle object has to carry every key the consumers read, or a silent
-        # page throws on the first frame instead of drawing a calm field.
-        idle = self.app.split("var IDLE_BANDS = {", 1)[1].split("};", 1)[0]
-        for key in ("bass", "mid", "treble", "onset", "pitch", "centroid"):
-            with self.subTest(key=key):
-                self.assertIn(key, idle, f"IDLE_BANDS is missing {key}")
-        # A shared mutable default handed to every caller would let one consumer's
-        # snapshot change underneath another, so getBands must copy.
-        getter = self.app.split("function getBands()", 1)[1].split("\n    }", 1)[0]
-        self.assertRegex(getter, r"return \{[\s\S]*bass:",
-                         "getBands hands out the object it caches instead of a copy")
-
-    # --- scroll coupling, credits only ------------------------------------
-
+    # --- and scroll is still not a channel either ---------------------------
     def test_scroll_cannot_reach_the_mesh_at_all(self):
-        """Requirement: scrolling the credits wheel must not calculate or inject any
-        physics force into the background canvas.
-
-        The strongest form of that is not a gate -- it is that no channel exists. The
-        previous version had a module-level `wheelSpin` slot written by the rotary
-        physics and read by the mesh, gated on the credits body class, plus a
-        shockwave that a committed contributor detonated into the field. A gate is
-        something a future edit forgets; a slot that does not exist cannot be
-        forgotten. All of it is deleted.
+        """Unchanged from the previous round, and now over-determined: the mesh has no
+        audio input AND no scroll input, so the only things that can affect it are the
+        viewport size, the theme, the reduced-motion preference and its own clock.
 
         Measured end to end: flinging the credits wheel eight times leaves the lattice
-        bit-for-bit identical to not touching it, while the wheel itself still turns
-        and still commits contributors (counter trace 01 -> 03 -> 01).
+        bit-for-bit identical, while the wheel itself still turns and still commits
+        contributors (counter trace 01 -> 03 -> 01).
         """
         for token in ("wheelSpin", "readSpin", "SPIN_DECAY_MS", "SPIN_REFERENCE",
                       "pushMeshPulse", "meshPulses", "activePulses", "NO_PULSES",
-                      "MESH_PULSE", "spinWave", "spinDir"):
+                      "MESH_PULSE", "spinWave", "spinDir", "dropRipple", "RIPPLE_"):
             with self.subTest(token=token):
-                self.assertNotIn(token, self.app, "a scroll channel survived the removal")
-        self.assertNotIn("credits-rotary-page", self.mesh)
+                self.assertNotIn(token, self.app, "a scroll or droplet channel survived")
+        self.assertNotIn("credits-rotary-page", self.mesh,
+                         "the mesh still knows which page it is on")
         self.assertNotRegex(self.mesh, r"\bdeltaY\b")
         self.assertNotIn("addEventListener('wheel'", self.mesh)
-        # The physics loop no longer publishes anything. Asserted structurally: the
-        # rotary may not assign to a global at all, which is the shape the spin slot
-        # took and the shape any replacement coupling would take.
         credits = self.app.split("function initCreditsRotary()", 1)[1].split(
             "     9. DYNAMIC DOWNLOAD LINK", 1)[0]
         self.assertNotRegex(credits, r"window\.\w+\s*=",
-                            "the rotary assigns to a global; that is how the spin slot worked "
-                            "and the coupling must not come back in another shape")
-        self.assertNotRegex(credits, r"^\s*(?:var )?\w*[Mm]esh\w*\s*=", re.MULTILINE)
-        # The wheels' OWN audio-reactive CSS is a different thing from distorting the
-        # background, and it stays.
-        self.assertIn("initWheelReactivity();", self.app.split("function bootPage()", 1)[1])
-        # Nothing in the credits screen can reach the canvas by any other route.
-        credits = self.app.split("function initCreditsRotary()", 1)[1].split(
-            "     9. DYNAMIC DOWNLOAD LINK", 1)[0]
-        for token in ("initAmbientMesh", "dropRipple", "ripples", "AgoraAudio.getBands"):
+                            "the rotary assigns to a global; that is how the spin slot "
+                            "worked and the coupling must not come back in another shape")
+        for token in ("initAmbientMesh", "dropRipple", "ripples"):
             with self.subTest(token=token):
                 self.assertNotIn(token, credits)
-        self.assertEqual(self.app.count("dropRipple("), 2,
-                         "one declaration and exactly one call, inside the mesh's own loop")
+        self.assertIn("initWheelReactivity();", self.app.split("function bootPage()", 1)[1])
 
+    def test_the_droplet_system_is_gone_rather_than_dormant(self):
+        """The ripple events were audio-triggered by definition, so disconnecting the
+        audio leaves them with no trigger. They are deleted rather than left waiting
+        for one: ~70 lines of ring buffer, envelope follower, soft-knee strength curve
+        and refractory gate that nothing can reach, and an invented autonomous trigger
+        would be adding behaviour nobody asked for.
 
-    def test_a_transient_drops_exactly_one_droplet(self):
-        """An event trigger needs three things an envelope follower does not: a
-        threshold so the noise floor cannot drop one, a refractory period so a single
-        keystroke -- which lasts several frames -- does not become several droplets,
-        and a strength curve that does not saturate.
-
-        Triggering off the facade's `onset` is the wrong instrument, and is the
-        specific "clipping / erratic" failure the review describes: `onset` is clamped
-        hard at 1.0 because it drives continuous brightness, so above the clip a
-        fortissimo is indistinguishable from a forte -- and it then DECAYS through the
-        threshold over ~200ms, re-firing the gate into a machine-gun of identical
-        rings. Novelty is computed here from the smoothed bands instead, and mapped
-        through a soft knee.
-
-        Measured against a simulated keystroke: one droplet, expanding at 350px/s
-        against a declared 340, with three concentric crests, and a tail that decays
-        to exactly 0.00px with no re-triggering.
+        Recorded here so the removal is a decision on the record rather than a silent
+        deletion -- reinstating them as a timed ambient event is a deliberate act.
         """
-        self.assertIn("var novelty = energy - envelope;", self.draw)
-        self.assertRegex(self.draw,
-                         r"var energy = \(b\.mid \* [\d.]+\) \+ \(b\.bass \* [\d.]+\)"
-                         r" \+ \(b\.treble \* [\d.]+\);",
-                         "the trigger must see mid (a keystroke) AND bass (a swell or a low note)")
-        self.assertNotRegex(self.draw, r"if \(b\.onset\s*>",
-                            "triggering off the clamped onset envelope, which machine-guns")
-        gate = re.search(r"if \(novelty > (\w+) && \(clock - lastRippleAt\) >= (\w+)\)", self.draw)
-        self.assertIsNotNone(gate, "the droplet gate changed shape")
-        self.assertEqual(gate.group(1), "RIPPLE_THRESHOLD")
-        self.assertEqual(gate.group(2), "RIPPLE_REFRACTORY",
-                         "the refractory period is not measured on the clamped clock")
-        self.assertGreater(self.num("RIPPLE_THRESHOLD"), 0,
-                           "a zero threshold drops a droplet on the noise floor")
-        self.assertGreaterEqual(self.num("RIPPLE_REFRACTORY"), 100,
-                                "under 100ms one keystroke becomes several droplets")
-        self.assertLessEqual(self.num("RIPPLE_REFRACTORY"), 260,
-                             "over ~260ms a fast piano passage drops most of its notes")
-        # Soft knee: x/(x+knee) is monotonic over the whole range and asymptotic to 1,
-        # so dynamics survive. A clamp flattens everything above it, which is what
-        # "clipping" means here.
-        self.assertIn("novelty / (novelty + RIPPLE_KNEE)", self.draw)
-        self.assertNotRegex(self.draw, r"clamp\(novelty")
-        self.assertGreater(self.num("RIPPLE_MIN_STRENGTH"), 0.2,
-                           "the quietest qualifying note would be invisible")
-        self.assertLess(self.num("RIPPLE_MIN_STRENGTH"), 0.6,
-                       "and it must leave room for a louder one to be louder")
-        self.assertGreater(self.num("RIPPLE_KNEE"), 0)
-        self.assertIn("if (ripples.length >= RIPPLE_MAX) ripples.shift();", self.mesh)
+        for token in ("RIPPLE_MAX", "RIPPLE_SPEED", "RIPPLE_LAMBDA", "RIPPLE_SIGMA",
+                      "RIPPLE_REFRACTORY", "RIPPLE_KNEE", "ENVELOPE_TAU", "novelty",
+                      "prepareRipples", "smoothstep", "approach("):
+            with self.subTest(token=token):
+                self.assertNotIn(token, self.mesh)
+        # What replaced them as the source of contrast: the surface's own height.
+        self.assertIn("lights[i] = clamp(0.5 + (dy / (2 * amplitude)), 0, 1);", self.mesh,
+                      "brightness must ride the field, or with no audio there is nothing "
+                      "left to modulate it and the mesh goes flat")
 
 
-    def test_the_droplet_buffer_is_bounded_and_ages_out(self):
-        """A busy passage must not grow the list without bound, and a droplet must not
-        live forever.
-
-        Dropped on read rather than by a timer, because there is nothing else running
-        that could reap them. And aged off the mesh's own clamped clock, so a droplet
-        mid-expansion when the tab was backgrounded resumes where it left off instead
-        of arriving 3.2 seconds older in a single frame -- which measured as a 13px
-        jump across the whole field before it was fixed.
-        """
-        self.assertGreaterEqual(self.num("RIPPLE_MAX"), 2, "one droplet cannot overlap the next")
-        self.assertLessEqual(self.num("RIPPLE_MAX"), 6,
-                             "past this it is a per-vertex cost and the eye stops separating them")
-
-        prep = self.mesh.split("function prepareRipples(dt)", 1)[1].split("\n      }", 1)[0]
-        self.assertIn("r.age += dt * 1000;", prep, "aged off something other than the clamped dt")
-        self.assertIn("if (r.age > RIPPLE_LIFE) continue;", prep, "spent droplets are never dropped")
-        self.assertIn("ripples.length = keep;", prep, "and the list is never compacted")
-        self.assertIn("var radius = (age / 1000) * RIPPLE_SPEED;", prep,
-                      "the ring must EXPAND; a stationary blob that fades is not a droplet")
-        self.assertIn("Math.pow(1 - t, 1.25)", prep,
-                      "the ring no longer fades with AGE. The edge fade alone would not start "
-                      "until 45% of the way out, so a droplet would hold its full amplitude for "
-                      "over a second and then vanish -- a pulse, not a ripple")
-        self.assertIn("if (amp < 0.05) continue;", prep, "a spent ring is still being paid for")
-        # Fades with age AND as it reaches the edge, so a ring dies on its way out
-        # instead of being cut off by the screen boundary.
-        self.assertIn("smoothstep(RIPPLE_EDGE_START, 1, radius / maxReach)", prep)
-        self.assertIn("maxReach = 0.5 * Math.sqrt((width * width) + (height * height));", self.mesh)
-        self.assertGreater(self.num("RIPPLE_EDGE_START"), 0.2,
-                           "fading from the centre leaves no ring to see")
-        self.assertLess(self.num("RIPPLE_EDGE_START"), 0.7)
-        # And it fades IN. A droplet born at full amplitude displaces the vertices
-        # under it by its whole depth in one frame, which is a pop rather than an
-        # impact -- measured at 6.3px, twenty times the flow's own peak velocity.
-        self.assertIn("smoothstep(0, RIPPLE_ATTACK, age)", prep)
-        self.assertGreater(self.num("RIPPLE_ATTACK"), 60, "too fast: the birth is a one-frame pop")
-        self.assertLess(self.num("RIPPLE_ATTACK"), 220, "too slow: it stops reading as an impact")
-        # No allocation on the hot path: the derived ring values live in fixed arrays.
-        for array in ("ringX", "ringY", "ringR", "ringS2", "ringA", "ringB"):
-            with self.subTest(array=array):
-                self.assertIn(f"{array} = new Float64Array(RIPPLE_MAX);", self.mesh)
-        self.assertNotIn("out.push({", self.mesh, "the per-frame ring list is being rebuilt")
-        # Rejected on squared distance before any trigonometry, or four concurrent
-        # droplets cost four times the frame.
-        self.assertIn("if (d2 > (support * support)) continue;", self.mesh)
-        self.assertIn("ringB[keep] = radius + (sigma * 2.6);", self.mesh)
-
-
-    def test_the_envelope_follower_is_asymmetric_and_frame_rate_independent(self):
-        """The follower rises slowly so a keystroke stands clear above it, and falls
-        quickly so a passage that stops does not leave the detector deaf to the next
-        one. A swell therefore keeps registering as a train of droplets -- the "volume
-        shifts" half of the brief -- while a single strike registers once.
-
-        Both it and the droplet's ORIGIN go through approach(), which turns a time
-        constant into a per-frame fraction with an exponential. A bare
-        `x += (target - x) * 0.06` converges twice as fast at 120Hz as at 60Hz, so the
-        motion would feel different on a phone's 60Hz panel and a laptop's 120Hz one.
-        That is the same class of bug as the phase teleport, in a less obvious place.
-
-        Smoothing the origin matters for the same reason the phases do: a droplet
-        source that jumps between notes is as chaotic as a field that jumps.
-        """
-        self.assertRegex(self.draw,
-                         r"envelope = approach\(envelope, energy,\s*"
-                         r"novelty > 0 \? ENVELOPE_TAU_RISE : ENVELOPE_TAU_FALL, dt\);")
-        self.assertGreater(self.num("ENVELOPE_TAU_RISE"), self.num("ENVELOPE_TAU_FALL") * 2,
-                           "the follower is not meaningfully asymmetric")
-        self.assertIn("originX = approach(originX,", self.draw)
-        self.assertIn("originY = approach(originY,", self.draw)
-        self.assertRegex(self.draw, r"b\.centroid", "the source ignores where the sound is")
-        self.assertRegex(self.draw, r"b\.pitch", "the source ignores how high the sound is")
-
-        helper = self.mesh.split("function approach(current, target, tau, dt)", 1)[1]
-        helper = helper.split("\n      }", 1)[0]
-        self.assertIn("1 - Math.exp(-dt / tau)", helper)
-        # And no follower anywhere in the mesh may be written with a bare per-frame
-        # coefficient, which is the shape that hides the frame-rate dependence.
-        self.assertNotRegex(self.mesh, r"\+= \([^)]*\) \* 0\.\d+;")
-        self.assertNotRegex(self.mesh, r"= approach\([^)]*\* 0\.\d+")
 
 class CreditsAudioBands(unittest.TestCase):
     """Bass, mid, treble, onset and pitch -- the analysis that drives both the
@@ -4076,8 +4180,14 @@ class CreditsAudioBands(unittest.TestCase):
             "     9. DYNAMIC DOWNLOAD LINK", 1)[0]
         cls.wheel = cls.app.split("function initWheelReactivity()", 1)[1].split(
             "function bootPage", 1)[0]
+        # Bounded by the call site that FOLLOWS initAmbientMesh, not by the next
+        # top-level function. The looser boundary used here before ran past the mesh
+        # into the rest of initAmbientExperience -- including the audio graph itself --
+        # so an assertion that the mesh contains no reference to AudioContext was
+        # failing on code that is not the mesh. A region split has to end where the
+        # thing being described ends.
         cls.mesh = cls.app.split("function initAmbientMesh()", 1)[1].split(
-            "\n  function initCreditsRotary", 1)[0]
+            "\n    initCursor();", 1)[0]
 
     def num(self, name, region=None):
         m = re.search(r"var " + name + r" = (-?[\d.]+);", region or self.app)
@@ -4219,9 +4329,13 @@ class CreditsAudioBands(unittest.TestCase):
         self.assertIn("state.rotationVelocity = clamp(", step)
         self.assertIn("state.rotation += state.rotationVelocity * dt;", step)
         self.assertIn("MAX_ANGULAR_VELOCITY", step)
-        # And the analysis that DOES drive both the mesh and the wheels is untouched.
-        self.assertIn("readBands()", self.mesh)
+        # The analysis still drives the wheels -- and now nothing else. That is the
+        # concrete payoff of disconnecting the mesh: four of the five pages went from
+        # running getByteFrequencyData plus a per-bin pitch loop 60 times a second to
+        # never running it at all.
         self.assertIn("readBands()", self.wheel)
+        self.assertNotIn("readBands()", self.mesh,
+                         "the mesh has a wire back to the audio engine")
 
     # --- 8. the wheel driver ---------------------------------------------
     def test_the_wheel_driver_outlives_the_physics_loop(self):

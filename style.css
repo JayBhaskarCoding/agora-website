@@ -140,16 +140,29 @@
   --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%239aa8bf' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
 
 
-  /* ---- 1h. Credits mesh ----
-     Deliberately bright: on the credits screen the mesh is a feature, not a
-     texture. Tokenised rather than hardcoded in the canvas for two reasons --
-     the light theme needs deep equivalents instead of dark-theme neon on white,
-     and the whole background should be retunable from one place. The four
-     values are the ones the design review asked for. */
-  --mesh-node-rgb: 147, 112, 255;      /* electric violet */
-  --mesh-node-hi-rgb: 190, 210, 255;   /* cyan-white highlight */
-  --mesh-glow-rgb: 124, 92, 255;       /* bloom around each dot and node */
-  --mesh-line-rgb: 120, 95, 255;       /* the connecting grid lines */
+  /* ---- 1h. Site mesh ----
+     The background is a feature, not a texture, and these are authored to be
+     conspicuous against the dark canvas: lines at 0.36-0.43 alpha and vertices at
+     0.45-0.60 over near-black. Tokenised rather than hardcoded in the canvas for
+     two reasons -- the light theme needs deep equivalents instead of dark-theme
+     neon on white, and the whole background should be retunable from one place.
+
+     The line channel is the site's own --accent-rgb rather than a bespoke indigo,
+     so the lattice is on-brand instead of sitting next to the brand. The glow is a
+     step MORE saturated than the core it blooms around, which is what makes a halo
+     read as coloured light rather than as a grey smudge. */
+  --mesh-node-rgb: 167, 139, 250;      /* violet-400: the vertex core */
+  --mesh-node-hi-rgb: 196, 181, 253;   /* lavender: the quarter of vertices that catch light */
+  --mesh-glow-rgb: 124, 58, 237;       /* violet-600: the bloom, saturated on purpose */
+  --mesh-line-rgb: 139, 92, 246;       /* == --accent-rgb, so the lattice is on-brand */
+  /* How hard the whole layer presses on the page -- one dial multiplying every
+     line and vertex alpha. A theme can then match PRESENCE rather than numbers:
+     the alphas above are authored for near-black, and the same alphas over the
+     deepened light channels would print a lavender graph across the content.
+     Measured, ink 1.0 dark against 0.55 light puts both themes' mesh at
+     1.49-3.24:1 over their own --bg, which is the same band of "clearly there,
+     still behind the copy". */
+  --mesh-ink: 1;
 
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -224,13 +237,18 @@
     /* 5.02:1 on the darkest light surface; still visibly fainter than --text-dim. */
     --text-faint: #5A6472;
 
-    /* The dark mesh values are neon on near-black and would wash out to nothing
-       on off-white, so they are deepened the same way --lavender and --accent
-       are: same hue, enough ink to read as a line rather than a haze. */
+    /* The dark mesh values are neon on near-black, so they are deepened the same
+       way --lavender and --accent are: same hue, enough ink to read as a line
+       rather than a haze. Deepening alone is not enough now that the alphas are
+       roughly double what they were -- violet-800 at 0.60 alpha is a solid purple
+       dot on off-white -- so --mesh-ink scales the layer back as well. Both moves
+       together are what keep the light theme matching the dark one's presence
+       instead of its numbers. */
     --mesh-node-rgb: 109, 40, 217;
-    --mesh-node-hi-rgb: 29, 78, 216;
-    --mesh-glow-rgb: 91, 33, 182;
+    --mesh-node-hi-rgb: 91, 33, 182;
+    --mesh-glow-rgb: 76, 29, 149;
     --mesh-line-rgb: 109, 40, 217;
+    --mesh-ink: 0.55;
     --text-bright: #0F1216;
     /* The light accent is deep enough to carry white ink, so buttons flip
        from dark-plum-on-violet to white-on-violet (7.2:1).             */
@@ -2944,9 +2962,15 @@ h1, h2, h3 {
   inset: -24% -18%;
   z-index: -1;
   border-radius: 50%;
+  /* 0.93/0.74 rather than the 0.9/0.6 this shipped with. The mesh is roughly
+     twice as opaque as it was, so the paragraph sitting directly on a crest now
+     measures 2.39:1 in dark theme with NO scrim -- it would fail on the mesh alone.
+     Through this gradient it is 7.43:1 dark and 6.91:1 light, both clear of AA and
+     the dark one clear of AAA. The scrim stopped being a nicety and became the
+     thing holding the credits copy up, so it got thicker. */
   background: radial-gradient(closest-side,
-    rgba(var(--bg-rgb), 0.9),
-    rgba(var(--bg-rgb), 0.6) 52%,
+    rgba(var(--bg-rgb), 0.93),
+    rgba(var(--bg-rgb), 0.74) 52%,
     rgba(var(--bg-rgb), 0) 78%);
   pointer-events: none;
 }
