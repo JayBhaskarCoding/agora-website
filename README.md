@@ -947,9 +947,11 @@ pulled back.
 | unified, frequency-budgeted | 1.5-2.2px @ 0.25-0.30 | 0.15-0.20 | up to 0.75 cell |
 | smooth flow + audio droplets | 1.5-2.2px @ 0.25-0.30 | 0.15-0.20 | flow 0.24 cell |
 | autonomous noise, "make it pop" | 2-3px @ 0.45-0.60 | 0.36-0.43 | 0.42 cell |
-| **current** | **1.5-2px @ 0.16-0.22** | **0.07-0.10** | **0.42 cell, autonomous** |
+| dimmed for readability | 1.5-2px @ 0.16-0.22 | 0.07-0.10 | 0.42 cell, autonomous |
+| **current** (elevation-shaded) | **1.5-2.0px @ 0.06 / 0.18 / 0.35** | **0.03 / 0.10 / 0.24** | **0.42 cell, autonomous** |
 
-Hold the current row. Note what it is: the sixth calibration, and the third reversal.
+Hold the current row, and read it as three numbers rather than a range: trough, flat
+baseline, crest. Note what it is: the seventh calibration, and the third reversal.
 The band has now been "under 0.13, stay subtle", "at least 0.28, be prominent", a narrow
 0.15-0.20, "0.35-0.45, make the lattice eye-catching", and 0.07-0.12 — which is very
 nearly where it started. Every row is recorded rather than overwritten, because each was
@@ -999,12 +1001,12 @@ variation lives in alpha and radius, which cannot pop.
 **`--mesh-ink` is one dial on how hard the layer presses, and both themes currently sit
 at 1.** That is a consequence of the calibration, not an oversight: when the alphas were
 0.45-0.60, light needed 0.55, because violet-800 at that strength over off-white measures
-3.02:1 and prints a lavender graph across body copy. At 0.16-0.22 the deepened light
-channels land in the same band as dark on their own — line 1.18:1 against 1.08:1, vertex
-1.44:1 against 1.39:1 — so scaling back would make light *fainter* than dark for no
-reason. The dial stays, and the test asserts the **outcome** (both themes within 0.75-1.35×
-of each other) rather than the dial's value, so it survives either arrangement and survives
-a palette change.
+3.02:1 and prints a lavender graph across body copy. At the current bands the deepened
+light channels land in the same place as dark on their own — at the crest, line 1.46:1
+against 1.29:1 and vertex 1.83:1 against 1.83:1, a parity of 0.999 — so scaling back would
+make light *fainter* than dark for no reason. The dial stays, and the test asserts the
+**outcome** (both themes within 0.75-1.35× of each other, measured at the crest) rather
+than the dial's value, so it survives either arrangement and survives a palette change.
 
 **Glow is back to a soft edge.** `bloom` 0.78 → **0.30** and `spread` 2.8 → **1.8**. There
 has never been a literal `shadowBlur` in this file — at ~600 vertices and 60fps that is
@@ -1112,6 +1114,73 @@ One trap worth recording: `fbm()` dividing by its normaliser is load-bearing. De
 gradient, the velocity and the tear spend — is silently 87.5% bigger than the arithmetic
 says, with no constant changing. That mutation survived the first sweep.
 
+### Opacity follows elevation, in five buckets
+
+A mesh at a uniform opacity has to be bright enough to see, which is bright enough to
+fight the type — that tension is what the last three calibrations kept flipping
+between. Shading the surface by its own height resolves it: the flat majority can sit
+at 0.10 while only the crests reach 0.24, so the lattice reads as a lit surface with
+relief rather than as a grid printed over the page.
+
+| band | 0 trough | 1 | **2 flat** | 3 | 4 crest |
+| --- | --- | --- | --- | --- | --- |
+| line alpha | 0.03 | 0.07 | **0.10** | 0.16 | 0.24 |
+| vertex alpha | 0.06 | 0.11 | **0.18** | 0.26 | 0.35 |
+| vertex radius | 1.50 | 1.62 | **1.75** | 1.87 | 2.00 |
+
+Elevation is `dy` normalised against the field's amplitude, so it is free — the
+displacement is already computed. An edge takes the band its **midpoint** is in, not its
+first endpoint's, or it flickers between two as the wave passes.
+
+**Five buckets is a performance decision with a hard edge to it.** A stroke carries
+exactly one `strokeStyle`, so continuous per-edge opacity would mean one
+`beginPath`/`stroke` pair per edge — ~1700 of them a frame, and the state changes alone
+would drop frames on the credits screen, which is the page least able to afford them.
+Quantising means five `strokeStyle` assignments and five strokes for the whole lattice,
+and five `globalAlpha` changes instead of ~600. Measured: **4012 context calls and 15
+state changes per frame, 0.54ms of JavaScript** — 3.2% of a 16.7ms budget.
+
+The trade is that rows can no longer be contiguous polylines. A row whose elevation
+varies along its length spans several bands, so every edge is emitted as its own
+two-point segment: ~1700 `moveTo`/`lineTo` pairs where the row-batched version needed
+~600. Path operations are cheap appends to the current path and strokes are the
+expensive part, so that is the right way round — but it is a real cost and it is why
+the call count went *up* (2904 → 4012) while the state changes went *down* (2 → 15
+per frame, against ~1701 for per-edge stroking).
+
+Five is also enough. The step between adjacent bands is ~0.05 on lines and ~0.07 on
+vertices, both below the just-noticeable difference at these sizes, so the
+quantisation is invisible while the shading it produces is not. Which matters, because
+quantising *is* thresholding, and a threshold on a moving value is exactly what made
+vertices pop between two baked sprites in an earlier version. The difference is
+magnitude: a band crossing nudges a 1.9px dot's alpha by 0.07, where a sprite swap
+changes its texture outright.
+
+#### The normalisation had to be measured, not assumed
+
+`ELEVATION_SPREAD` is the one constant here whose correct value comes from a
+measurement. Dividing the elevation by `2 × amplitude` assumes the field reaches its
+theoretical ±1 — and it does not. Over 336,000 vertex samples the normalised fBm sum
+has sd **0.264** and 1st/99th percentiles of **-0.57/+0.64**. With the naive divisor the
+band occupancy was:
+
+| | trough | 1 | flat | 3 | crest |
+| --- | --- | --- | --- | --- | --- |
+| spread 1.00 (naive) | 0.7% | 22.4% | **54.6%** | 20.9% | 1.5% |
+| spread 0.50 (shipped) | 11.8% | 26.1% | **28.8%** | 19.2% | 14.1% |
+| spread 0.35 | 21.8% | 20.8% | 20.3% | 15.6% | 21.4% |
+
+At 1.00 the specified 0.03 trough and 0.24 crest were **dead code** — the bands existed
+in the table and nothing ever painted them. At 0.35 a fifth of the field is clipped at
+each end, which is posterisation rather than shading. 0.50 puts both extremes in play
+with 5.9% clipping, which is what makes a peak read as a peak instead of stretching the
+ramp so thin that nothing arrives.
+
+This touches brightness only; the displacement is untouched, so the tear budget and the
+geometry are exactly as they were. Verified: 0 inverted triangles in 77,140 sampled
+cells, minimum signed area 82% of a cell, peak per-frame vertex motion 0.52px, and all
+five bands populated in both the edge and vertex passes.
+
 ### Nothing is audio-reactive any more
 
 Three rounds of this site drove visuals from the music: the mesh read six band metrics,
@@ -1195,7 +1264,8 @@ What replaced it as the source of contrast is the surface's own height: each ver
 rides its normalised vertical displacement, which is free because `dy` is already computed, and
 it reads as light falling across a moving sheet. With no audio left to modulate anything, that
 is the only place contrast comes from — and it survived the dimming pass intact, measured at an
-alpha span of 0.054 and a radius span of 0.45px across the 0.16-0.22 / 1.5-2.0px bands.
+alpha span of 0.054 and a radius span of 0.45px, which elevation shading has since taken
+over — see the bucket table above.
 
 #### Scrolling still cannot reach the canvas either
 
@@ -1342,104 +1412,106 @@ the first thing `boot()` does, and it still touches `matchMedia`, a 2D canvas co
 
 ### Verifying the screen
 
-There is no browser in CI and jsdom performs no layout, so the site is proved four ways. The
-`/tmp` harnesses are not checked in — they need `jsdom`, which is deliberately not a dependency of
-a zero-build static site — so they are rebuilt per session; what matters is what they assert, and
-the numbers below are what they produced against the current code.
+There is no browser in CI and jsdom performs no layout, so the site is proved four ways.
+The `/tmp` harnesses are not checked in — they need `jsdom`, which is deliberately not a
+dependency of a zero-build static site — so they are rebuilt per session; what matters is
+what they assert, and the numbers below are what they produced against the current code.
 
 ```bash
-npm test                     # 178 tests
-node /tmp/wh/meshverify.js   # mesh: integrity, continuity, calibration, direction, cost
-node /tmp/wh/site.js         # pages: email hydration, Cloudflare repair, audio unlock
-python3 /tmp/_mc7.py         # mutation sweep, all must be killed
+npm test                     # 207 tests
+node /tmp/wh/elev.js         # mesh: the five bands, edge coverage, integrity, cost
+node /tmp/wh/flow.js         # the three-step contact flow, driven click by click
+node /tmp/wh/site.js         # every page: email hydration, audio unlock, credits wheel
+python3 /tmp/_mc9.py         # 51 mutations, all must be killed
+python3 /tmp/audit.py        # the site-wide tidy-up audit, re-runnable
 ```
 
-`CreditsRotaryGeometry` does not eyeball anything: it reads `--segment-angle`, `--sector-offset`,
-`--rotary-disc-size`, each disc's `translate()`, and the rim labels' own `clamp()`/`min()` chains
-back out of the stylesheet on disk, then recomputes every landing box, every rim clearance and the
-visible wheel fraction across 14 viewports. It passed unchanged through the removal of the audio
-reactivity, which is the evidence that the wheels themselves were not touched.
+`CreditsRotaryGeometry` does not eyeball anything: it reads `--segment-angle`,
+`--sector-offset`, `--rotary-disc-size`, each disc's `translate()`, and the rim labels' own
+`clamp()`/`min()` chains back out of the stylesheet on disk, then recomputes every landing
+box, every rim clearance and the visible wheel fraction across 14 viewports. It passed
+unchanged through the removal of the audio reactivity and through the chrome declutter,
+which is the evidence that the wheels themselves were not touched.
 
-**The mesh harness instruments a stub 2D context and reads the geometry back out of the recorded
-draw calls**, which is the only way to test a canvas without a browser. The row pass is `rows`
-contiguous polylines of `columns` points in row-major order, so the whole lattice can be
-reconstructed from the path alone; the blit pass is recovered from `drawImage` plus the
-`globalAlpha` in force at the time.
+**The mesh harness instruments a stub 2D context and reads the geometry back out of the
+recorded draw calls.** Bucketing broke the easy version of this: vertices used to be blitted
+in row-major order, so the lattice could be read straight off the blit list, and now they
+arrive band by band. It reconstructs the grid by walking the row-family edges instead —
+identifiable by direction, and sortable because displacement stays under half a cell on both
+axes.
 
 | check | result |
 | --- | --- |
-| inverted triangles, 420 frames | **0 of 77,140 cells**, min signed area 81% of a cell |
-| peak per-vertex motion between consecutive frames | **0.695px** |
+| painted line alphas | **0.03, 0.07, 0.10, 0.16, 0.24** — the declared table, in order |
+| painted vertex alphas / radii | **0.06, 0.11, 0.18, 0.26, 0.35** / 1.50-2.00px |
+| strokes per frame | **5**, not one per edge |
+| state changes per frame | **15**, against ~1701 for per-edge stroking |
+| segments drawn | **1701 of 1701** — no edge twice, none omitted |
+| each edge's band vs its own endpoints' elevation | **0 of 1701** off by more than one band |
+| bands actually populated | **all five**, so neither extreme is decoration |
+| inverted triangles | **0 of 66,120 cells**, min signed area 82% of a cell |
+| peak per-frame vertex motion | **0.521px** |
 | …returning from a 9-second background tab | **1.50px** |
-| typical vertex motion | 0.144px/frame ≈ 9 px/s |
-| displacement range | **±25.5px**, 47% of a 54px cell |
 | drift, cross-correlating a row 960ms apart | **+225 px/s** (declared 240) |
 | …correlation unshifted / +4 cols / −4 cols | 0.584 / **0.819** / 0.048 |
-| residual decorrelation at the best shift | 0.181 — morphing, not a rigid slide |
-| line alphas / dot alphas / dot radii | 0.070, 0.100 / 0.160-0.214 / 1.50-1.95px |
-| crest modulation span after the dimming pass | alpha 0.054, radius 0.45px |
-| JavaScript per frame | **0.50ms = 3.0% of a 16.7ms budget** |
+| JavaScript per frame | **0.54ms = 3.2% of a 16.7ms budget** |
 
-**The site harness boots all six real pages** and exercises the two things that cannot be checked
-by reading: runtime email assembly and the audio unlock path, including the autoplay policy
-*refusing*, which is the normal case rather than an error.
+**The flow harness drives the real page** through every path: card click, empty gate,
+one-character name, valid gate, both topic modes, a trip back to step 1 and through step 2
+again, submission, success, restart.
 
 | check | result |
 | --- | --- |
-| literal address or `mailto:` or `cdn-cgi` in any of the six HTML files | **none** |
-| addresses assembled at runtime | index 1, about 3, download 1, contact 6; credits and shared-post route to `/contact.html` instead |
-| four category subjects, distinct and correctly encoded | General enquiry / Feedback & ideas / Question about Agora / Press inquiry |
-| a Cloudflare-encoded anchor injected before boot | **decoded and repaired** to a working `mailto` |
-| `<audio>` count, placement, `preload`, `loop`, `volume` | 1, child of `<body>`, `auto`, true, 0.075 |
-| `canplay` attempts `play()` | yes |
-| a refused autoplay leaves the toggle honest | reads "sound off", not "unavailable" |
-| unlock bindings | **10** — five gesture types × window and document, all capture + passive |
-| a `wheel` gesture starts the music and removes the listeners | yes |
-| an explicit mute survives four later gestures | yes, and `play()` is not even attempted |
+| initial view | step 1 only; steps 2 and 3 `hidden` |
+| card click | opens **step 2**, not step 3; focus moves to its heading; the rail follows |
+| empty gate / one-character name | refused, with inline errors and a status line |
+| valid gate | step 3, name and email carried over and still editable, **nothing posted** |
+| fixed category | topic filled and `readOnly`, `aria-readonly` set, locked styling on |
+| `FormData.get('topic')` on the locked field | **"Press"** — present, not dropped |
+| "Anything else" | topic editable, empty, placeholder "What is this regarding?" |
+| step-3 name corrected, then 3 → 1 → 2 → 3 | correction **survives**; topic follows the new category |
+| submission | exactly one `POST /api/contact`, payload carries the corrected name and the locked topic |
+| success / restart | panel replaces the form; restart clears and returns to step 1 |
 
-Four harness details are load-bearing and non-obvious:
+**The site harness boots all six pages.** No literal address, `mailto:`, `cdn-cgi` or
+`__cf_email__` in any static HTML; addresses assembled at runtime (index 1, about 3,
+download 1, contact 2; credits and shared-post route onward instead); a Cloudflare-encoded
+anchor injected before boot is **decoded and repaired**; one `<audio>` on `<body>` with
+`preload=auto`, `loop`, volume 0.075; `canplay` attempts `play()`; a refusal leaves the
+toggle reading "sound off" rather than "unavailable"; **10** unlock bindings (five gesture
+types × window and document, all capture + passive); a `wheel` gesture starts the music and
+removes the listeners; an explicit mute survives four later gestures without `play()` being
+attempted; and the credits wheel still turns and commits (`01 → 03 → 01`) with exactly one
+header link and a live colophon year.
 
-* **One synthetic clock has to drive everything.** `performance.now()`, the rAF timestamp and
-  `setTimeout` are three separate clocks and the app reads all three. A real `setTimeout` also
-  never fires inside a synchronous frame pump, which is how an earlier harness silently measured a
-  wheel that turned but never committed a contributor.
-* **A stub must be installed before the app runs, but a facade must be replaced after it.**
-  `initAmbientExperience()` guards with `if (window.AgoraAudio) return;`, so planting a hostile
-  facade in advance stopped the whole ambient layer from being built and the test measured nothing.
-* **Search a shift in both directions.** A backwards advection sign reports itself as *"stationary"*
-  rather than *"backwards"* if the search only tries positive lags. A null result from a one-sided
-  search is not evidence of absence.
+Five harness details are load-bearing and non-obvious:
+
+* **One synthetic clock has to drive everything.** `performance.now()`, the rAF timestamp
+  and `setTimeout` are three separate clocks and the app reads all three. A real
+  `setTimeout` also never fires inside a synchronous frame pump, which is how an earlier
+  harness silently measured a wheel that turned but never committed a contributor.
+* **Bucketing invalidates any assumption about emission order.** The lattice can no longer
+  be read off the blit list; it has to be reconstructed from the geometry.
+* **Search a shift in both directions.** A backwards advection sign reports itself as
+  *"stationary"* rather than *"backwards"* if the search only tries positive lags.
 * **Mean-centre before cross-correlating.** Uncentred, the product of the two fields' means
   dominates at every shift and the correlation comes out ~0.77 however far you slide it.
+* **A stub goes in before the app runs; a facade gets replaced after.** `initAmbientExperience`
+  guards with `if (window.AgoraAudio) return;`, so planting a hostile facade in advance stops
+  the ambient layer from being built at all and the test measures nothing.
 
 Both suites are mutation-tested, and the report names the guard that saw each mutation — a
 mutation killed by an unrelated test is a mutation that is not really covered.
 
-Four of this round's mutations survived the first sweep and all four were real gaps rather than
-bad mutations:
-
-* **`fbm()` left unnormalised.** Deleting `/ norm` grows the field's range 1.875×, so every
-  amplitude — and therefore the gradient, the velocity and the tear spend — is silently 87.5%
-  bigger than the arithmetic says, with no constant changing.
-* **A guard that hardcodes the number it guards.** The scrim test restated the mesh's alpha as
-  0.30; when the calibration moved to 0.60 it kept passing, measuring a layer half as bright as
-  the real one. It now reads both alphas out of `app.js`.
-* **An assertion that stripped one side only.** The "no light-theme triple in the canvas" check
-  removed commas from the needle and spaces from the haystack, so it passed on a file containing
-  `'109,40,217'` — the exact mutation it exists to catch.
-* **A test that read `max(stops)` on a three-stop gradient.** Thinning the scrim's *mid* stop
-  collapsed the coverage that carries it past the first line of the paragraph while the centre
-  stayed put, and nothing noticed.
-
-A fifth was not a gap but a collision, and it is the sixth time this file has hit it: guards that
-assert an identifier is *absent* match the prose explaining its absence. `--wheel-bass` survived in
-a stylesheet comment, `/cdn-cgi/l/email-protection` survived in an HTML comment, `AudioContext` and
-`time * rate` and `(h00 ^ iz)` all survived in `app.js` comments. The fix is not one rule. Where
-the prose is load-bearing documentation of the bug being prevented, the assertion is retargeted at
-the *code shape* (`= timestamp *`, `toUnit(hash2(`) or run against comment-stripped source. Where
-the prose was incidental — an example address in a comment about whitespace formatting — the
-example was changed to `12, 34, 56`. Renaming the prose beats weakening the guard, but only
-because that prose was not doing any work.
+Seven of this round's mutations survived the first sweep. Five were real gaps: the
+elevation spread had no bound, so it could be widened back to the value that killed the
+outer bands; the bucket index clamp was unasserted, and removing it indexes one past all
+three tables, interpolating `undefined` into an `rgba()` string — not an exception, just a
+crest that silently does not paint; the footer's missing About and its bare-hash "Why Agora"
+were both invisible to any single-page test; and `PAGE_MAP` completeness was only checked in
+one direction. Two were bad mutations rather than gaps: adding an unused second rule table
+changes no behaviour, and a card mutation that left `border:` in the body was still caught
+by the guard it was meant to defeat.
 
 
 ## Background music, the contact page, and email addresses
@@ -1523,28 +1595,143 @@ Two cases needed specific handling:
 An explicit stop sets `audio.userMuted`, which every later gesture checks, so muting survives
 navigation and any amount of scrolling.
 
-### `/contact.html`
+### `/contact.html`, and the three-step flow
 
-The form lived in the middle of `about.html`, between the creator biography and the closing
-call-to-action, which made the about page do two unrelated jobs. It has its own page now, and the
-shape follows the site rather than being invented for it: the header, mobile menu, footer, tokens
-and reveal animations are the ones every other page uses, and `.contact-category` is modelled
-directly on `.principle` — same border, radius, surface gradient, hover lift and accent wash — so
-a new page reads as part of the system instead of as an addition to it. No literal colour appears
-anywhere in the new CSS.
+The form used to sit in the middle of `about.html`, between the creator biography and
+the closing call-to-action, which made that page do two unrelated jobs. It has its own
+page now, and last round's two sections — a category grid, then a separate form with its
+own unrelated topic dropdown — are one progressive component:
 
-It carries the four direct-email categories (General, Feedback & Ideas, Questions, Press), each
-prefilling its own subject, and then the form — moved intact, including its honeypot, its
-`aria-describedby` wiring and its `role="status"` announcement. `about.html` keeps an editorial
-callout in the same slot, so its three-part rhythm survives without carrying a second copy of the
-form to keep in sync. Duplicate ids would have been the quiet failure here: two live forms sharing
-`fb-name` means the validation and status wiring attaches to whichever one `querySelector` finds
-first, and the second form silently does nothing.
+1. **Category.** Five cards: General, Feedback & Ideas, Questions, Press, Anything else.
+   Each is a real `<button type="button">`, so the whole card is the control: clicking
+   anywhere on it selects, it is reachable by keyboard with no extra markup, and it has
+   an accessible name from its own text. The per-card email sub-links are gone — a link
+   inside a button is invalid HTML, and beyond that it is a small target inside a large
+   one that people miss.
+2. **Identity.** Name and email, both required, with the same inline validation the
+   message form uses. A deliberate extra step: it means the visitor has committed to
+   being reachable before investing in writing a message, and it means step 3 opens with
+   two fields already correct.
+3. **Message.** Name and email carried over and left **editable** — the gate is there to
+   save typing, not to lock anyone into a typo.
 
-`data-page="contact"` is in `PAGE_MAP`, and `initChrome` derives the active nav key from the
-filename, so `data-nav-key="contact"` highlights with no extra code. Every page's desktop nav,
-mobile menu and footer now reach it; `credits.html` and `shared-post.html` have their own header
-shapes and were updated to match.
+Inactive panels are `hidden`, not merely styled away: a hidden panel is out of the tab
+order and out of the accessibility tree, so a keyboard visitor meets one step at a time
+instead of tabbing through a form whose fields are invisible. Focus moves to the new
+panel's heading on every transition, because otherwise it stays on the control that was
+just clicked — now inside a hidden panel — and a screen reader announces nothing.
+
+#### The topic field, and the trap in it
+
+For the first four categories the topic is filled with the category name and **locked**;
+for "Anything else" it becomes a freely typed input with the placeholder "What is this
+regarding?". Both are the same `<input>`, with `readOnly` flipped — one control, so
+there is only ever one `topic` in the FormData. A `<select>` plus a text input would mean
+two controls with the same name and only one of them submitted.
+
+It is `readOnly` and **never `disabled`**, and that single word is the whole bug class:
+a disabled control is omitted from FormData, so the locked topic would silently vanish
+from the submission and the Function would reject the message for a missing field — at
+the last step, after the visitor had written the whole thing. `readOnly` keeps it in the
+payload, keeps it focusable for a screen reader, and still refuses edits. The harness
+proves the payload half by building a real `FormData` and reading `topic` back out.
+
+`collect()` needed the same attention from the other side: it read
+`topic.options[topic.selectedIndex].text`, which is a `TypeError` on an `<input>` because
+an input has no `options`. That would have thrown inside the submit handler *after*
+validation had passed, killing the message at the last step with no error shown.
+
+#### Prefill has to be one-directional in practice
+
+Going 3 → 1 → 2 → 3 is the documented path for changing the topic. If step 2 blindly
+overwrote step 3 on every arrival, a name corrected directly in step 3 would be silently
+reverted to the older value on the way back through. So the flow tracks whether each
+identity field was edited in step 3, and step 2 only fills the ones that were not.
+
+The shape follows the site rather than being invented for it: same header, mobile menu,
+footer, tokens and reveal animations as every other page, and `.contact-category` is
+modelled directly on `.principle` — same border, radius, surface gradient, hover lift and
+accent wash. No literal colour appears anywhere in the new CSS. Both forms share one
+`RULES` table through `form[data-contact-form]`, so the gate cannot grow its own
+half-copy of the validation that then drifts.
+
+### The credits screen keeps one way out
+
+`credits.html` is a single-viewport composition the visitor drives with a wheel, so
+every extra piece of chrome competes with it. The header now carries exactly one link —
+**Back to Square**, to `/index.html` — where it used to carry "Why Agora" (duplicating
+the home page), "Contact" (duplicating every other page's footer) and the exit. The
+bottom bar's contact address is replaced by a colophon, `Agora · © <year> Agora`, with
+the year in the shared `#year` span so `initChrome` keeps it current like every other
+page's footer instead of going stale in 2027. The wheel hint and the JS-driven
+`01 / 03` counter stay: those are the mechanics, not the clutter.
+
+Decluttering a header is where the cascade bites, and three rules had to go with the
+markup:
+
+* `.credits-screen-actions > a:first-child { display: none }` existed to hide the second
+  header link **on phones**. With one link left, that selector matched the only link — so
+  a phone visitor would have had no way off the credits screen at all, and nothing on
+  desktop would have shown it.
+* `.credits-screen-exit { font-size: 0 }` with `.credits-screen-exit span { font-size:
+  1.1rem }` hid the label and showed only an arrow `<span>`. The declutter removed the
+  span, so the link would have been invisible a second time over.
+* `.credits-screen-exit` carried the `.mono` class *and* its own `font-size` and
+  `letter-spacing`, so two rules fought over the same properties. It now sets its own
+  type once, to exactly `.nav__link`'s metrics — 0.78rem, 500, 0.16em, uppercase — which
+  is the "match the rest of the website" requirement stated as a value a test can
+  compare rather than as an intention.
+
+### What the site-wide audit actually found
+
+Run as a script over all six pages rather than by eye: duplicate ids, blocks appearing
+twice on one page, internal links that resolve to nothing, placeholder copy, CSS
+selectors matching no element, duplicate rule blocks, `data-page` values against
+`PAGE_MAP`, and the nav/footer link sets page by page.
+
+Fixed:
+
+* **Every footer omitted About.** The header listed six destinations and the footer five,
+  on all four full-shell pages, so About was unreachable from the bottom of every other
+  page. All four now carry identical six-link header and footer navs, asserted as a set.
+* **The footer's "Why Agora" was a bare `#why-agora`** while the header's was
+  `/index.html#why-agora`. Same destination, two hrefs, and the bare one only resolves on
+  the page that owns the anchor — `app.js` papered over it by routing a bare hash home, so
+  it worked with JavaScript and was dead without it. Now absolute, and the test allows a
+  bare hash *only* on a page that contains that anchor id, which is the one place
+  `index.html`'s header is legitimately different.
+* **`PAGE_MAP.why` was unreachable** — a route nothing carried `data-page="why"` for, so
+  `syncPageLinks` never used it. Removed, and the reachability check now runs in both
+  directions.
+* **`.contact-grid` and `.rotary-disc__rule` were dead** — leftovers from markup removed
+  in earlier rounds, one with a media query and a sticky descendant rule still attached.
+* **`about.html` ended with two identical `.cta-panel`s** back to back, the contact
+  callout and "Get the app". The callout is now a hairline band with a different register.
+* **A duplicate `.credits-screen-exit:hover` rule**, introduced by editing one block
+  without checking what followed it.
+
+Reported rather than changed: `.visually-hidden` is unused. It is a standard a11y utility
+rather than leftover markup, and deleting it to hit a "no dead CSS" number is the wrong
+trade — its absence is how someone hand-rolls a worse one later.
+
+#### The audit's own worst bug
+
+Removing `.contact-grid` was done by slicing to the second close-brace-on-its-own-line,
+which skipped the indented inner braces of its media query and swallowed the next
+top-level rule with it: **`.form-card`**. The class survived in the `@supports`
+backdrop-filter group, so it still counted as "styled", every structural check passed,
+the braces balanced — and both contact panels lost their border, radius, padding,
+background and shadow. Caught only by diffing the selector inventory against `HEAD`.
+
+`StylesheetIntegrity` now exists because of it: brace balance, no selector list left
+dangling into the rule that follows, no empty selector in a list, no empty rule, and no
+declaration sitting outside a rule at all. Plus
+`test_every_card_class_still_declares_its_own_box`, which pins the fourteen card/panel
+classes to actually declaring a box — verified by deleting `.form-card`'s rule again and
+confirming it fails. A general "every container class has a box rule" version produced 15
+false positives (modifier classes, typography-only blocks, children that inherit their
+box), so it pins the classes that *are* cards instead: narrower, but it fails on the real
+failure and not on the design.
 
 ### No literal email address exists in any served file
 

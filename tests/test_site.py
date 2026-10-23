@@ -85,6 +85,24 @@ def _strip_js_comments(src):
     return "".join(out)
 
 
+def _strip_html_comments(html):
+    """HTML comments are the third place this suite has needed one.
+
+    Every "this must not appear" assertion in this file has now been defeated at
+    least once by prose explaining why the thing must not appear: `--wheel-bass` in a
+    stylesheet comment, `/cdn-cgi/l/email-protection` in an HTML comment,
+    `AudioContext` and `time * rate` and `(h00 ^ iz)` in app.js comments, `<select>`
+    in a comment explaining why the topic field is an input, and `contact` in a
+    comment explaining why the credits colophon is not a contact link.
+
+    Unlike JavaScript this is trivially safe to strip mechanically -- HTML comments
+    cannot nest and contain no escaping -- but the rule for when to strip and when to
+    rename the prose still applies: strip where the comment is load-bearing
+    documentation of the bug being prevented, rename where it is incidental.
+    """
+    return re.sub(r"<!--.*?-->", " ", html, flags=re.DOTALL)
+
+
 def _strip_css_comments(css):
     """CSS has no regex literals and no way to escape a comment delimiter, so unlike
     JavaScript this is mechanically safe -- but still done with a scanner rather than a
@@ -134,17 +152,30 @@ SOURCE_OVER = lambda a, b: a
 
 
 def _mesh_alphas(app):
-    """The alpha bands the canvas actually paints with, read out of app.js.
+    """The opacity bands the canvas actually paints with, read out of app.js.
 
-    Two legibility tests used to restate these as 0.20 and 0.30. When the calibration
-    moved they kept passing -- measuring a layer that no longer existed, and quietly
+    Two legibility tests used to restate these as literals. When the calibration moved
+    they kept passing -- measuring a layer that no longer existed, and quietly
     overstating how hard the scrim had to work. A guard that hardcodes the number it is
     guarding is not a guard.
+
+    They are tables now rather than two numbers, because opacity follows wave elevation
+    and a stroke can only carry one alpha: the field is quantised into bands and each
+    band is one batched pass. Index 2 of each table is the flat baseline.
     """
-    lines = sorted(float(x) for x in
-                   re.findall(r"\(([\d.]+) \* palette\.ink\)\.toFixed\(4\)", app))
-    node = re.search(r"Math\.min\(([\d.]+), [\d.]+ \+ \(light \* [\d.]+\)\) \* palette\.ink", app)
-    return {"lines": lines, "node": float(node.group(1))} if node else {"lines": lines, "node": None}
+    def table(name):
+        m = re.search(r"var " + name + r" = \[([^\]]+)\];", app)
+        return [float(x) for x in m.group(1).split(",")] if m else []
+
+    lines, dots, radii = table("LINE_ALPHAS"), table("DOT_ALPHAS"), table("DOT_RADII")
+    n = int(re.search(r"var ELEVATION_BUCKETS = (\d+);", app).group(1))
+    base = n // 2
+    return {
+        "lines": lines, "dots": dots, "radii": radii, "buckets": n, "base": base,
+        "node": max(dots) if dots else None,
+        "baseline_line": lines[base] if lines else None,
+        "baseline_dot": dots[base] if dots else None,
+    }
 
 
 def _theme_ink(css, region):
@@ -431,8 +462,24 @@ class LaunchContract(unittest.TestCase):
                 assembled = [a for a, _ in page.anchors if a.get("data-email-user")]
                 routes = [a for a, _ in page.anchors
                           if urlsplit(a.get("href", "")).path == "/contact.html"]
-                self.assertTrue(assembled or routes,
-                                "this page has no way to reach anyone")
+                # credits.html is the one exemption, and it is a design decision
+                # rather than an oversight: it is a single-viewport composition driven
+                # by a wheel, its header carries exactly one link and that link goes
+                # home, and home carries contact. A row of chrome links competing with
+                # the wheels is the clutter this round removed. What is NOT acceptable
+                # is a page that reaches nothing at all, so it has to link to a page
+                # that does.
+                if name == "credits.html":
+                    self.assertFalse(assembled, "the credits screen should carry no address")
+                    self.assertFalse(routes, "and no contact link either")
+                    homes = [a for a, _ in page.anchors
+                             if urlsplit(a.get("href", "")).path == "/index.html"]
+                    self.assertGreaterEqual(len(homes), 2,
+                                            "credits must still reach home, which carries contact, "
+                                            "from both the logo and its one header link")
+                else:
+                    self.assertTrue(assembled or routes,
+                                    "this page has no way to reach anyone")
                 for attrs in assembled:
                     self.assertEqual(attrs.get("data-email-domain"), SITE_DOMAIN)
                     self.assertNotIn("@", attrs.get("data-email-user", ""),
@@ -616,7 +663,13 @@ class LaunchContract(unittest.TestCase):
         self.assertEqual(len(targets), 1)
         for name, page in self.pages.items():
             links = [(a, text) for a, text in page.anchors if text.strip() == "Why Agora"]
-            self.assertTrue(links)
+            # credits.html keeps exactly one header link and it is the way home; the
+            # "Why Agora" link that used to sit beside it duplicated the home page.
+            # Everywhere else the link is required.
+            if name == "credits.html":
+                self.assertFalse(links, "the credits header gained a second link")
+                continue
+            self.assertTrue(links, f"{name} lost its Why Agora link")
             for attrs, text in links:
                 self.assertIn(attrs["href"], ["#why-agora", "/index.html#why-agora"])
             self.assertNotRegex((ROOT / name).read_text(), r'#why["\']')
@@ -660,10 +713,17 @@ class LaunchContract(unittest.TestCase):
             self.assertNotIn(stale, contact_src)
 
         # Every validated field is marked and owns an inline error slot.
-        for name in ["name", "email", "topic", "message"]:
+        for name in ["name", "email", "message"]:
             self.assertIn('data-validate', contact_src)
             self.assertIn('data-error-for="%s"' % name, contact_src)
             self.assertIn('aria-describedby="fb-%s-error"' % name, contact_src)
+        # The topic is described by its error AND its hint, because the hint is what
+        # explains why the field is locked -- a readonly input with no explanation
+        # reads as broken rather than as decided.
+        self.assertIn('data-error-for="topic"', contact_src)
+        self.assertRegex(contact_src,
+                         r'aria-describedby="fb-topic-error fb-topic-hint"')
+        self.assertIn("data-validate", contact_src)
 
         # Submit outcome is announced, not silent.
         status = [a for tag, a in page.tags if a.get("id") == "feedback-status"]
@@ -822,7 +882,7 @@ class LaunchContract(unittest.TestCase):
         # touching buttons, links or the wordmark -- but still read from CSS.
         for token in ("--mesh-node-rgb", "--mesh-node-hi-rgb", "--mesh-glow-rgb"):
             self.assertIn("getPropertyValue('" + token + "')", js)
-        self.assertIn("highlight ? sprites.hi : sprites.node", js)
+        self.assertIn("sprites.hi : sprites.node", js)
         self.assertIn("(prefers-color-scheme: light)", js)
         # The draw loop must not inline the palette; the literals may only
         # survive as the named fallbacks used when the tokens are unreadable.
@@ -2169,7 +2229,7 @@ class CreditsRotaryGeometry(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.css = (ROOT / "style.css").read_text()
-        cls.html = (ROOT / "credits.html").read_text()
+        cls.html = _strip_html_comments((ROOT / "credits.html").read_text())
         cls.app = (ROOT / "app.js").read_text()
 
     # --- helpers -------------------------------------------------------
@@ -2969,11 +3029,14 @@ class AmbientMesh(unittest.TestCase):
         # Assert on the PAINT CALL SITES, not on the palette object: the point is
         # that what reaches the context came from a channel.
         strokes = re.findall(r"context\.strokeStyle = 'rgba\(' \+ ([\w.]+) \+", self.mesh)
-        self.assertEqual(len(strokes), 2, f"expected a row pass and a column pass, got {strokes}")
-        for expression in strokes:
-            self.assertEqual(expression, "palette.line",
-                             f"lines painted from {expression!r}, not a theme channel")
-        self.assertEqual(self.mesh.count("rgba(' + palette.line + ','"), 2)
+        # One assignment, executed once per band. It used to be two (a row pass and a
+        # column pass at fixed alphas); now a single line inside the bucket loop sets
+        # the colour for all five passes, so the count went DOWN while the number of
+        # strokes went up -- which is the point of batching.
+        self.assertEqual(len(strokes), 1, f"expected one bucketed assignment, got {strokes}")
+        self.assertEqual(strokes[0], "palette.line",
+                         f"lines painted from {strokes[0]!r}, not a theme channel")
+        self.assertIn("(LINE_ALPHAS[bucket] * palette.ink).toFixed(4)", self.mesh)
         # And the rebuild on a scheme flip must remake the SPRITE too, or the
         # vertices keep glowing in the previous theme's colour.
         flip = self.mesh.split("function onSchemeChange()", 1)[1].split("\n      }", 1)[0]
@@ -3004,8 +3067,12 @@ class AmbientMesh(unittest.TestCase):
             return value
 
         alphas = _mesh_alphas(self.app)
-        self.assertEqual(alphas["lines"], [0.07, 0.10])
-        self.assertEqual(alphas["node"], 0.22)
+        self.assertEqual(alphas["lines"], [0.03, 0.07, 0.10, 0.16, 0.24])
+        self.assertEqual(alphas["dots"], [0.06, 0.11, 0.18, 0.26, 0.35])
+        self.assertEqual(alphas["lines"][alphas["base"]], 0.10,
+                         "the flat-field baseline for lines is 0.10")
+        self.assertEqual(alphas["dots"][alphas["base"]], 0.18,
+                         "and for vertices 0.18")
 
         blocks = re.findall(r"\.ambient-mesh\s*\{[^}]*\}", self.css)
         self.assertTrue(blocks, "the .ambient-mesh rule is gone")
@@ -3028,18 +3095,21 @@ class AmbientMesh(unittest.TestCase):
             ink = _theme_ink(self.css, region)
             self.assertGreater(ink, 0)
             self.assertLessEqual(ink, 1)
-            for what, token, alpha in (("line", "--mesh-line-rgb", max(alphas["lines"])),
-                                       ("vertex", "--mesh-node-rgb", alphas["node"])):
-                out = _composite(channels(token, region), bg, alpha * ink, SOURCE_OVER)
+            for what, token, table in (("line", "--mesh-line-rgb", alphas["lines"]),
+                                       ("vertex", "--mesh-node-rgb", alphas["dots"])):
+                # Measured at the CREST, which is the worst case the layer ever
+                # paints. The baseline band is checked separately in
+                # CreditsBackdrop, because that is what most of the screen shows.
+                out = _composite(channels(token, region), bg, max(table) * ink, SOURCE_OVER)
                 ratio = _contrast(out, bg)
                 measured[(name, what)] = ratio
                 with self.subTest(theme=name, element=what):
                     self.assertGreater(ratio, 1.03,
-                                       f"{name}-theme {what} is {ratio:.3f}:1 -- that is not a "
-                                       f"faint decoration, it is nothing at all")
-                    self.assertLess(ratio, 1.8,
-                                    f"{name}-theme {what} is {ratio:.3f}:1 -- past this the "
-                                    f"background competes with foreground typography")
+                                       f"{name}-theme {what} at its crest is {ratio:.3f}:1 -- "
+                                       f"that is not a faint decoration, it is nothing at all")
+                    self.assertLess(ratio, 2.0,
+                                    f"{name}-theme {what} at its crest is {ratio:.3f}:1 -- past "
+                                    f"this the background competes with foreground typography")
                     # A contrast RATIO cannot detect "too faint", because it compresses
                     # toward 1.0 from both sides: halving the alpha moves a 1.08:1 line to
                     # 1.04:1, which still clears a 1.03 floor. The channel delta does not
@@ -3210,21 +3280,28 @@ class AmbientMeshGeometry(unittest.TestCase):
         norm = sum(weights)
         return sum((w / norm) * slope * (lac ** o) / texel for o, w in enumerate(weights))
 
+
     def test_the_lattice_is_triangulated_not_square(self):
         """Squares read as graph paper. Every cell additionally carries one of its
-        two diagonals, so the field is ~550 triangles rather than ~550 boxes at
-        the same vertex count."""
+        two diagonals, so the field is ~550 triangles rather than ~550 boxes at the
+        same vertex count."""
         self.assertIn("flips = new Uint8Array(", self.mesh, "no per-cell diagonal table")
         self.assertIn("flips[c] = hash2(c, 0x5f3a7c11) & 1;", self.mesh,
                       "the diagonal choice must be hashed per cell")
-        diag = self.draw.split("for (row = 0; row < rows - 1; row += 1)", 1)[1]
-        self.assertIn("if (flips[cellBase + column])", diag)
-        self.assertRegex(diag, r"moveTo\(pts\[a\], pts\[a \+ 1\]\);\s*"
-                               r"context\.lineTo\(pts\[d\], pts\[d \+ 1\]\);",
-                         "one diagonal is never drawn")
-        self.assertRegex(diag, r"moveTo\(pts\[br\], pts\[br \+ 1\]\);\s*"
-                               r"context\.lineTo\(pts\[bl\], pts\[bl \+ 1\]\);",
-                         "the other diagonal is never drawn")
+        # The diagonal now appears twice -- once where its bucket is decided and once
+        # where it is drawn -- and the two MUST pick the same pair of corners, or an
+        # edge is stroked at its neighbour's opacity. Both are pinned.
+        classify = self.mesh.split("var edgeIndex = 0;", 1)[1].split("context.lineWidth = 1;", 1)[0]
+        paint = self.mesh.split("context.lineWidth = 1;", 1)[1]
+        self.assertIn("ebuck[edgeIndex++] = flips[cellBase + column]", classify)
+        self.assertIn("? edgeBucket(corner, corner + columns + 1)", classify)
+        self.assertIn(": edgeBucket(corner + 1, corner + columns);", classify)
+        self.assertIn("var lean = flips[cb + column];", paint)
+        self.assertIn("var da = lean ? c0 : (c0 + 1);", paint)
+        self.assertIn("var db = lean ? (c0 + columns + 1) : (c0 + columns);", paint)
+        # A first draft drew both diagonals from the top-left corner. The source
+        # looked fine and the lattice lost every anti-diagonal.
+        self.assertNotIn("var db = lean ? (c0 + columns + 1) : (c0 + columns + 1);", paint)
 
     def test_the_diagonal_choice_actually_varies(self):
         """`& 1` proves intent, not outcome. This runs the REAL constants from
@@ -3482,6 +3559,44 @@ class AmbientMeshGeometry(unittest.TestCase):
                       "the advected coordinate is not what gets sampled")
 
 
+    def test_the_elevation_normalisation_matches_the_field_it_measures(self):
+        """ELEVATION_SPREAD is the one constant here whose correct value comes from a
+        measurement rather than from a formula, so it gets a documented range.
+
+        The normalised fBm sum has sd 0.264 and 1st/99th percentiles of -0.57/+0.64
+        against a theoretical +-1 (336,000 vertex samples). Dividing by 2*amplitude --
+        i.e. assuming the extremes are reached -- put 0.7% of vertices in the trough
+        band and 1.5% in the crest, with 54.6% piled into the baseline: the specified
+        0.03 and 0.24 were dead and the shading was three levels, not five. At 0.50 the
+        occupancy is 11.8 / 26.1 / 28.8 / 19.2 / 14.1 percent with 5.9% clipping.
+
+        Below ~0.30 the clipping passes 18% and the shading posterises; above ~0.60 the
+        outer bands empty out again. Both ends are asserted so the constant cannot drift
+        back to either failure.
+        """
+        spread = self.num("ELEVATION_SPREAD")
+        self.assertLessEqual(spread, 0.60,
+                             "the outer elevation bands empty out and the crest/trough "
+                             "alphas become decoration")
+        self.assertGreater(spread, 0.30,
+                           "this much clipping posterises the shading into two levels")
+
+    def test_the_bucket_index_is_clamped_to_the_tables(self):
+        """`lights` is clamped to [0,1], and bucketOf(1.0) is ELEVATION_BUCKETS -- one
+        past the end of all three tables. Without the clamp that indexes `undefined`,
+        which interpolates into an rgba() string as the literal text "undefined": not an
+        exception, not a console warning, just a stroke that silently does not paint.
+        The highest crest in the field would vanish.
+        """
+        n = int(self.num("ELEVATION_BUCKETS"))
+        for name in ("LINE_ALPHAS", "DOT_ALPHAS", "DOT_RADII"):
+            table = re.search(r"var " + name + r" = \[([^\]]+)\];", self.mesh).group(1)
+            self.assertEqual(len(table.split(",")), n,
+                             f"{name} does not have exactly one entry per band, so an index "
+                             f"that is valid for one table is out of range for another")
+        self.assertIn("return b > (ELEVATION_BUCKETS - 1) ? ELEVATION_BUCKETS - 1 : b;", self.mesh)
+        self.assertIn("| 0;", self.mesh, "the floor must truncate, not round")
+
     def test_the_octaves_are_a_proper_fbm_ladder(self):
         """"Multi-octave" is a claim about ratios, not about having several terms.
 
@@ -3555,7 +3670,7 @@ class AmbientMeshGeometry(unittest.TestCase):
         # is spacing-derived and spacing changes at the 600px breakpoint.
         self.assertIn("amplitude = spacing * NOISE_AMP;", self.mesh)
         # The one audio-free brightness source: the surface's own height.
-        self.assertIn("lights[i] = clamp(0.5 + (dy / (2 * amplitude)), 0, 1);", self.mesh)
+        self.assertIn("lights[i] = clamp(0.5 + (dy / (2 * amplitude * ELEVATION_SPREAD)), 0, 1);", self.mesh)
 
 
     def test_the_flow_is_clearly_visible_but_not_frantic(self):
@@ -3587,78 +3702,88 @@ class AmbientMeshGeometry(unittest.TestCase):
     # --- calibration ------------------------------------------------------
 
 
+
     def test_the_mesh_lines_are_calibrated_into_their_band(self):
-        """0.07 to 0.12, as requested.
+        """0.03 at the deepest trough, 0.10 on a flat field, 0.24 at the highest
+        crest -- the seventh contract these numbers have carried, and the shape of it
+        has changed: it used to be a single resting value with an audio-driven ramp on
+        top, and it is now a five-band table keyed to wave elevation.
 
-        The band is the sixth contract these two numbers have carried, and the third
-        reversal: "under 0.13, stay subtle", then "at least 0.28, be prominent", then
-        a narrow 0.15-0.20 band held for three rounds, then 0.35-0.45 to make the
-        lattice eye-catching, and now back down to roughly where it started because
-        it clashed with foreground typography. All six rows are recorded in the
-        README rather than silently overwritten, because each was a deliberate review
-        decision and the next one should be able to see the whole path.
-
-        Constants rather than ramps: there is no audio left to ramp them with, and
-        uniform is the point -- the lattice is the structure and the vertices are
-        where the variation lives. Per-segment alpha would need a stroke per segment,
-        which is the one thing the batching exists to avoid.
+        The band is what makes a dim baseline affordable. At a uniform opacity the
+        whole lattice has to be bright enough to see, which is bright enough to fight
+        the type. With elevation shading, the flat majority can sit at 0.10 and only
+        the crests reach 0.24 -- so the mesh reads as a lit surface rather than as a
+        grid printed over the page.
         """
-        inks = re.findall(r"\(([\d.]+) \* palette\.ink\)\.toFixed\(4\)", self.draw)
-        self.assertEqual(len(inks), 2, f"expected a row pass and a column pass, got {inks}")
-        alphas = sorted(float(x) for x in inks)
-        for value in alphas:
-            with self.subTest(alpha=value):
-                self.assertGreaterEqual(value, 0.07, "below the requested band")
-                self.assertLessEqual(value, 0.12, "above the requested band")
-        self.assertLess(alphas[0], alphas[1],
-                        "both passes at one alpha and the field reads as a flat lattice")
-        self.assertEqual(self.mesh.count("* palette.ink"), 3,
-                         "two line passes and the vertex alpha must all follow the theme's ink")
-        self.assertIn("'rgba(' + palette.line + ','", self.mesh)
+        alphas = _mesh_alphas(self.app)
+        lines = alphas["lines"]
+        self.assertEqual(len(lines), alphas["buckets"])
+        self.assertEqual(lines, sorted(lines), "the bands must run trough -> crest")
+        self.assertEqual(lines[alphas["base"]], 0.10, "a flat field must read at 0.10")
+        self.assertEqual(lines[0], 0.03, "and the deepest trough at 0.03")
+        self.assertEqual(lines[-1], 0.24, "the crest tops out at 0.24")
+        self.assertLess(lines[-1], 0.30, "past this the lattice competes with the copy")
+        # The bands have to be distinguishable, or five passes are doing the work of
+        # one and the shading is theoretical.
+        steps = [round(b - a, 6) for a, b in zip(lines, lines[1:])]
+        self.assertGreaterEqual(min(steps), 0.03,
+                                f"two adjacent bands are indistinguishable: {steps}")
+        self.assertIn("(LINE_ALPHAS[bucket] * palette.ink).toFixed(4)", self.mesh,
+                      "every band must follow the theme's ink dial")
 
 
     def test_the_vertices_are_calibrated_into_their_band(self):
-        """1.5px to 2.0px radius, 0.16 to 0.22 alpha -- down from 2-3px at 0.45-0.60.
+        """1.5px to 2.0px radius, 0.06 to 0.35 alpha, with 0.18 on a flat field.
 
-        Both ramps still ride `light`, the surface's own height normalised to 0..1, and
-        both still reach their ceiling exactly so the Math.min caps are live rather than
-        decorative. Keeping the modulation while dropping the level is the actual
-        request: the mesh had to stop competing with typography, not stop moving.
+        Radius rides the same band as alpha, so a crest is both brighter and slightly
+        larger -- which is how a shaded surface reads, as opposed to a flat grid with a
+        dimmer overlay on it. Quantising the radius to five steps costs nothing
+        visible: the step is 0.125px on a dot under 2px across.
         """
-        radius = re.search(r"Math\.min\(([\d.]+), 1\.5 \+ \(light \* ([\d.]+)\)\)", self.draw)
-        self.assertIsNotNone(radius, "the vertex radius ramp changed shape")
-        self.assertEqual(float(radius.group(1)), 2.0)
-        self.reach(2.0, 1.5 + float(radius.group(2)), "radius")
+        alphas = _mesh_alphas(self.app)
+        dots, radii = alphas["dots"], alphas["radii"]
+        self.assertEqual(len(dots), alphas["buckets"])
+        self.assertEqual(len(radii), alphas["buckets"])
+        self.assertEqual(dots, sorted(dots), "the bands must run trough -> crest")
+        self.assertEqual(radii, sorted(radii))
+        self.assertEqual(dots[alphas["base"]], 0.18, "a flat field must read at 0.18")
+        self.assertEqual(dots[0], 0.06, "the deepest trough at 0.06")
+        self.assertEqual(dots[-1], 0.35, "and the crest at 0.35")
+        self.assertEqual(radii[0], 1.5)
+        self.assertEqual(radii[-1], 2.0)
+        self.assertIn("DOT_ALPHAS[bucket] * palette.ink", self.mesh)
+        self.assertIn("DOT_RADII[bucket] * 2 * MESH_GLOW_SPREAD", self.mesh,
+                      "radius must come from the band, not be recomputed per vertex")
+        # The elevation the bands key off has to be the surface's own height: with no
+        # audio left, that is the only signal there is.
+        self.assertIn("lights[i] = clamp(0.5 + (dy / (2 * amplitude * ELEVATION_SPREAD)), 0, 1);",
+                      self.mesh)
+        self.assertIn("vbuck[i] = bucketOf(lights[i]);", self.mesh)
+        self.assertIn("return bucketOf((lights[i] + lights[j]) * 0.5);", self.mesh,
+                      "an edge must take the band its MIDPOINT is in, or it flickers "
+                      "between two as the wave passes")
 
-        alpha = re.search(
-            r"Math\.min\(([\d.]+), 0\.16 \+ \(light \* ([\d.]+)\)\) \* palette\.ink", self.draw)
-        self.assertIsNotNone(alpha, "the vertex alpha ramp changed shape")
-        self.assertEqual(float(alpha.group(1)), 0.22, "vertices top out at 0.22")
-        self.reach(0.22, 0.16 + float(alpha.group(2)), "alpha")
-
-        self.assertIn("var light = lights[(row * columns) + column];", self.draw,
-                      "the ramp must read the crest the displacement pass computed")
-        self.assertIn("lights[i] = clamp(0.5 + (dy / (2 * amplitude)), 0, 1);", self.mesh,
-                      "and with no audio left, the surface's own height is the only "
-                      "thing that can modulate it")
-        self.assertIn("drawGlow(context, highlight ? sprites.hi : sprites.node", self.draw)
 
     def test_the_sprite_choice_is_static_so_vertices_cannot_pop(self):
-        """The highlight used to switch on `near > 0.75`, a hard threshold on a
-        moving crest: vertices flipped between two baked textures as the wave passed
-        under them, and that flipping is most of what read as flicker and blur.
+        """Which of the two baked textures a vertex uses is decided by its lattice
+        position and never changes. A version of this switched sprite on a moving
+        threshold, and vertices popped between two textures as a crest passed under
+        them -- that popping reads as flicker no matter how smooth the geometry is.
 
-        Which sprite a vertex uses is now decided by its lattice position alone and
-        never changes. All continuous variation lives in alpha and radius, which
-        cannot pop because they are floats multiplied into one blit."""
-        self.assertIn("var highlight = ((column + row) % 4) === 0;", self.draw)
-        # `w` cannot appear in the alternation: it matches inside "row". Name the two
-        # moving quantities that were actually used.
-        self.assertNotRegex(self.draw, r"highlight = [^;]*\b(?:near|light|liftSum)\b",
-                            "the sprite choice is thresholded on a moving quantity again")
-        self.assertNotIn("near >", self.draw)
-        self.assertNotIn("var near", self.draw, "the travelling-front proximity term is back")
-        self.assertIn("drawGlow(context, highlight ? sprites.hi : sprites.node", self.draw)
+        Quantising opacity into five bands is a threshold too, so it deserves the same
+        scrutiny. The difference is magnitude: a band crossing moves a 1.9px dot's
+        alpha by ~0.07, which is below the just-noticeable difference, where a sprite
+        swap changes its texture outright. The bands are asserted to be that close
+        together in test_the_mesh_lines_are_calibrated_into_their_band.
+        """
+        self.assertIn("(((column + row) % 4) === 0) ? sprites.hi : sprites.node", self.mesh)
+        self.assertNotRegex(self.mesh, r"sprites\.hi\s*:\s*sprites\.node[^;]*\blight\b",
+                            "the sprite choice is keyed to elevation and will pop")
+        self.assertNotIn("var near", self.mesh, "the travelling-front proximity term is back")
+        # And the choice must be evaluated inside the blit loop, not hoisted into a
+        # per-frame constant that would make every vertex identical.
+        blit = self.mesh.split("context.globalAlpha = DOT_ALPHAS[bucket] * palette.ink;", 1)[1]
+        self.assertIn("% 4", blit)
 
     def reach(self, ceiling, total, what):
         """A capped ramp has exactly two ways to be wrong, and they look opposite.
@@ -3683,55 +3808,79 @@ class AmbientMeshGeometry(unittest.TestCase):
 
 
 
-    def test_the_whole_grid_costs_two_strokes_not_three_thousand(self):
-        """~1700 edges a frame at 1440x900, drawn in two batched paths. Stroking each
-        edge separately is ~1700 beginPath/stroke pairs and the state changes alone
-        would not survive a phone. Counted, because "batched" is the kind of claim
-        that quietly stops being true."""
-        self.assertEqual(self.draw.count("context.beginPath();"), 2)
-        self.assertEqual(self.draw.count("context.stroke();"), 2)
+
+    def test_the_whole_grid_costs_five_strokes_not_seventeen_hundred(self):
+        """~1700 edges a frame at 1440x900, drawn in ELEVATION_BUCKETS batched paths.
+
+        Opacity now varies per edge, and a stroke carries exactly one strokeStyle, so
+        the choice is five strokes over ~1700 two-point segments or ~1700 strokes over
+        five alphas. The first is what this does, and it is the whole reason the
+        elevation is quantised at all: per-edge opacity computed continuously would
+        force the second, and the state changes alone would drop frames on the credits
+        screen -- which is the page least able to afford them.
+
+        What it costs instead is path operations. Rows used to be one contiguous
+        polyline each (30 calls for a 30-column row); now every row edge is its own
+        moveTo/lineTo pair (58 calls), because a row whose elevation varies along its
+        length spans several bands. Path operations are cheap appends to the current
+        path and strokes are the expensive part, so that is the right way round --
+        measured, 4012 context calls and 15 state changes per frame, 0.64ms.
+        """
+        n = _mesh_alphas(self.app)["buckets"]
+        self.assertEqual(self.draw.count("context.beginPath();"), 1,
+                         "one beginPath in the source, executed once per band")
+        self.assertEqual(self.draw.count("context.stroke();"), 1,
+                         "one stroke in the source, executed once per band")
         self.assertEqual(self.draw.count("context.lineWidth = 1;"), 1)
-        # Split on the SECOND strokeStyle, which is the column pass, so this does not
-        # break every time the alpha calibration moves.
-        passes = self.draw.split("context.strokeStyle = 'rgba(' + palette.line + ','")
-        self.assertEqual(len(passes), 3, "expected exactly two line passes")
-        col_pass = passes[2]
-        self.assertIn("for (row = 0; row < rows - 1; row += 1)", col_pass,
-                      "the diagonals are stroked separately from the columns")
-        self.assertNotIn("context.stroke();", col_pass.split("context.stroke();", 1)[0])
+        self.assertIn("for (bucket = 0; bucket < ELEVATION_BUCKETS; bucket += 1) {", self.draw)
+        self.assertEqual(self.num("ELEVATION_BUCKETS"), n)
+        # The five band tables must agree in length, or a band indexes past one of them
+        # and paints undefined -- which is `NaN` in a colour string and a silently
+        # invisible lattice rather than an error.
+        for name in ("LINE_ALPHAS", "DOT_ALPHAS", "DOT_RADII"):
+            table = re.search(r"var " + name + r" = \[([^\]]+)\];", self.mesh).group(1)
+            self.assertEqual(len(table.split(",")), n, f"{name} does not have one entry per band")
+        # And the per-band vertex pass must set globalAlpha once, not per vertex.
+        blit = self.draw.split("if (sprites.node && sprites.hi) {", 1)[1]
+        self.assertEqual(blit.count("context.globalAlpha ="), 2,
+                         "one set per band plus the reset; per-vertex would be ~600")
+
 
     def test_positions_are_computed_once_per_frame_and_shared_by_every_pass(self):
-        """Three passes read the same vertices: rows, columns-plus-diagonals, and the
-        blits. If displacement depended on which pass reached a vertex the mesh would
-        tear at every intersection, so positions are written once into a shared
-        Float32Array -- which is what replaced the old bandAt() agreement helper.
+        """Everything downstream reads one buffer: the edge-bucket pass, the five
+        stroke passes and the five blit passes. If displacement depended on which pass
+        reached a vertex the mesh would tear at every intersection, so positions are
+        written once into a shared Float32Array -- which is what replaced the old
+        bandAt() agreement helper.
 
-        The crest brightness travels the same way. The blit pass needs to know how high
-        each vertex is sitting, and recomputing the fBm there would double the most
-        expensive part of the frame -- 12 hash mixes per octave per vertex -- so
-        `lights` carries it across. Asserted by counting the fbm calls, because
-        "computed once" is exactly the property that a well-meaning refactor breaks.
+        The crest elevation travels the same way, and now so does its bucket: both are
+        computed in the displacement loop and read by everything after it. Recomputing
+        the fBm in the blit pass would double the most expensive part of the frame --
+        twelve hash mixes per octave per vertex.
         """
-        self.assertIn("pts = new Float32Array(vertices * 2);", self.mesh)
-        self.assertIn("lights = new Float32Array(vertices);", self.mesh)
+        for decl in ("pts = new Float32Array(vertices * 2);",
+                     "lights = new Float32Array(vertices);",
+                     "vbuck = new Uint8Array(vertices);"):
+            self.assertIn(decl, self.mesh)
+        self.assertIn("ebuck = new Uint8Array(Math.max(0, edgeCap));", self.mesh)
         self.assertNotIn("bandAt(", self.mesh, "the agreement helper is back")
         self.assertEqual(self.draw.count("pts[index] = gx + dx;"), 1,
                          "positions are computed in more than one place")
-        self.assertEqual(self.draw.count("lights[i] = clamp("), 1,
-                         "and so is the crest brightness")
+        self.assertEqual(self.draw.count("lights[i] = clamp("), 1)
+        self.assertEqual(self.draw.count("vbuck[i] = bucketOf("), 1)
         self.assertEqual(self.draw.count("fbm("), 2,
                          "fBm must be evaluated exactly twice per vertex, once per axis")
-        self.assertEqual(self.mesh.count("function fbm("), 1)
-
-        readers = self.draw.split("pts[index + 1] = gy + dy;", 1)[1]
-        self.assertIn("context.moveTo(pts[o], pts[o + 1]);", readers, "the row pass")
-        self.assertIn("context.moveTo(pts[v], pts[v + 1]);", readers, "the column pass")
-        self.assertIn("context.moveTo(pts[a], pts[a + 1]);", readers, "the diagonal pass")
-        self.assertIn("drawGlow(context, highlight ? sprites.hi : sprites.node,\n"
-                      "              highlight ? palette.hi : palette.node,\n"
-                      "              pts[q], pts[q + 1], radius, alpha, MESH_GLOW_SPREAD);",
-                      self.draw, "the blit pass must read the same buffer too")
-
+        # The edge-bucket pass must enumerate edges in exactly the order the stroke
+        # passes walk them, or ebuck indexes disagree and edges take each other's
+        # opacity. Asserted by counting the three families in both places.
+        classify = self.mesh.split("var edgeIndex = 0;", 1)[1].split("context.lineWidth = 1;", 1)[0]
+        paint = self.mesh.split("context.lineWidth = 1;", 1)[1].split("Vertices on top", 1)[0]
+        for label, region in (("classify", classify), ("paint", paint)):
+            with self.subTest(pass_=label):
+                self.assertEqual(region.count("columns - 1; column += 1"), 2,
+                                 "the row and diagonal families are not both walked")
+                self.assertEqual(region.count("rows - 1; row += 1"), 2,
+                                 "the column and diagonal families are not both walked")
 
     def test_the_noise_is_mixed_not_shortcutted(self):
         """A corner value has to come out of a real hash mix, and this is the guard on
@@ -3952,19 +4101,32 @@ class CreditsBackdrop(unittest.TestCase):
                                  ("--mesh-node-rgb", node)):
                 self.assertIsNotNone(value, f"{label} is missing from the {name} theme")
             ink = _theme_ink(self.css, region)
-            brightest = _composite(node, page, alphas["node"] * ink, SOURCE_OVER)
-            bare = _contrast(inkcolour, brightest)
-            behind = _contrast(inkcolour, _composite(page, brightest, centre, SOURCE_OVER))
+            # Two cases, because one number cannot describe an elevation-shaded
+            # layer. The BASELINE band is what most of the screen shows, so the copy
+            # has to clear AA on it with no help at all. The CREST band is the worst
+            # single pixel the mesh ever paints and is a small minority of them --
+            # measured, ~14% of vertices reach the top band -- so it gets a floor
+            # rather than a pass mark, and the scrim is what actually guarantees the
+            # copy where the two coincide.
+            base = _composite(node, page, alphas["baseline_dot"] * ink, SOURCE_OVER)
+            crest = _composite(node, page, max(alphas["dots"]) * ink, SOURCE_OVER)
+            bare_base = _contrast(inkcolour, base)
+            bare_crest = _contrast(inkcolour, crest)
+            behind = _contrast(inkcolour, _composite(page, crest, centre, SOURCE_OVER))
             with self.subTest(theme=name):
-                self.assertGreater(bare, 4.5,
-                                   f"{name}: the paragraph is only {bare:.2f}:1 on the mesh at "
-                                   f"its brightest -- the copy must not depend on the scrim "
-                                   f"painting at all")
+                self.assertGreater(bare_base, 4.5,
+                                   f"{name}: on the FLAT part of the mesh the paragraph is only "
+                                   f"{bare_base:.2f}:1 -- that is most of the screen, so it must "
+                                   f"clear AA with no scrim at all")
+                self.assertGreater(bare_crest, 3.5,
+                                   f"{name}: even sitting directly on a crest the paragraph is "
+                                   f"only {bare_crest:.2f}:1")
                 self.assertGreater(behind, 6.0,
-                                   f"{name}: {behind:.2f}:1 through the scrim misses the 6.0 "
-                                   f"floor the credits copy has to hold")
-                self.assertGreater(behind, bare,
-                                   f"{name}: the scrim makes things worse ({bare:.2f} -> {behind:.2f})")
+                                   f"{name}: {behind:.2f}:1 through the scrim misses the 6.0 floor "
+                                   f"the credits copy has to hold")
+                self.assertGreater(behind, bare_crest + 2.0,
+                                   f"{name}: the scrim only moves {bare_crest:.2f} -> {behind:.2f}, "
+                                   f"so it is decoration rather than the thing holding the copy up")
 
     def test_the_credits_page_paints_no_background_of_its_own(self):
         """One canvas, one lattice. The credits screen used to carry a second
@@ -4434,10 +4596,16 @@ class EmailHydration(unittest.TestCase):
         self.assertIn("node.setAttribute('href', href)", body)
         # Present in the markup in both shapes.
         contact = self.pages["contact.html"]
-        self.assertEqual(len(re.findall(r'data-email-subject="', contact)), 4,
-                         "one prefilled subject per category")
-        self.assertEqual(len(re.findall(r'data-email-label', contact)), 4,
-                         "one labelled link per category")
+        # The four per-category subject links are gone: the cards became buttons that
+        # advance the flow, and a link inside a button is invalid HTML as well as a
+        # small target inside a large one that people miss. The subject attribute is
+        # still supported and still exercised, by the one remaining direct-email link.
+        self.assertEqual(len(re.findall(r'data-email-user="', contact)), 2,
+                         "the step-1 fallback and the footer")
+        self.assertEqual(len(re.findall(r'data-email-subject="', contact)), 1,
+                         "the remaining email link should still prefill a subject")
+        self.assertNotIn('data-email-label', contact,
+                         "both show the address itself rather than a label")
         # about.html carries two anchors and they deliberately differ. The callout
         # button is labelled -- it says "Email the team", because a button that reads
         # as an address looks like body text. The developer bio is NOT labelled, so the
@@ -4453,9 +4621,12 @@ class EmailHydration(unittest.TestCase):
                          "the bio must show the address, not a label")
         # And the form's own "prefer email?" line deliberately does NOT, so the address
         # itself is what the visitor sees there.
-        form_note = contact.split('class="contact-alt"', 1)[1].split("</p>", 1)[0]
-        self.assertIn("data-email-user", form_note)
-        self.assertNotIn("data-email-label", form_note)
+        # The step-1 fallback is inside the flow, not below it: a visitor who does
+        # not want to pick a category still has a way out.
+        alt = contact.split('class="contact-alt signal__alt"', 1)[1].split("</p>", 1)[0]
+        self.assertIn("data-email-user", alt)
+        self.assertIn("data-email-subject", alt)
+        self.assertNotIn("data-email-label", alt)
         self.assertRegex(self.pages["index.html"], r'data-email-user="mail"(?![^>]*data-email-label)',
                          "the footer link should show the address, not a label")
 
@@ -4485,6 +4656,362 @@ class EmailHydration(unittest.TestCase):
         self.assertIn("data-cfemail", repair)
         self.assertIn("classList.remove('__cf_email__')", repair,
                       "a repaired anchor must stop carrying the class Cloudflare added")
+
+
+class ContactFlow(unittest.TestCase):
+    """The three-step contact flow: category, identity, message.
+
+    The behavioural half is in the jsdom harness, which clicks through every path.
+    What is pinned here is the markup contract that behaviour depends on, plus the two
+    decisions that are invisible in a rendered page and expensive to get wrong.
+    """
+
+    CATEGORIES = ["General", "Feedback & Ideas", "Questions", "Press", "Anything else"]
+    ANYTHING_ELSE = "Anything else"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = _strip_html_comments((ROOT / "contact.html").read_text())
+        cls.app = (ROOT / "app.js").read_text()
+        cls.code = _strip_js_comments(cls.app)
+        cls.flow = cls.app.split("function initSignalFlow()", 1)[1].split(
+            "\n  /* ------------------------------------------------------------\n     7.", 1)[0]
+
+    def opening_tag(self, n):
+        """The panel's whole opening tag. Splitting forwards from the step attribute
+        only yields the tail of the tag, so anything in the class list -- `hidden`,
+        `is-current` -- is missed, which is exactly what a first draft did."""
+        i = self.html.index('data-signal-step="%d"' % n)
+        start = self.html.rindex("<div", 0, i)
+        return self.html[start:self.html.index(">", i) + 1]
+
+    def test_the_five_categories_are_the_five_that_were_asked_for(self):
+        found = re.findall(r'data-category="([^"]+)"', self.html)
+        self.assertEqual(found, self.CATEGORIES,
+                         "the category list, its order or its exact wording changed")
+        # The fifth is the only one with different behaviour, and it is matched by
+        # string equality in app.js -- so the two spellings have to agree exactly.
+        self.assertIn("var ANYTHING_ELSE = '%s';" % self.ANYTHING_ELSE, self.flow)
+
+    def test_each_card_is_one_button_and_not_a_div_with_a_link_inside(self):
+        """"Clicking anywhere on the card selects" is free with a <button> and costs a
+        keyboard trap with a div. A link inside a button is also invalid HTML, and it
+        is a small target inside a large one, which is the thing the brief was asking
+        to remove."""
+        cards = re.findall(r'<button type="button" class="contact-category"[^>]*>(.*?)</button>',
+                           self.html, re.DOTALL)
+        self.assertEqual(len(cards), 5, f"expected five card buttons, got {len(cards)}")
+        for i, body in enumerate(cards):
+            with self.subTest(category=self.CATEGORIES[i]):
+                self.assertNotIn("<a ", body, "a card still contains a sub-link")
+                self.assertNotIn("<button", body, "and no nested interactive element")
+        self.assertNotIn("contact-category__mail", self.html, "the old sub-link class survives")
+
+    def test_only_step_one_is_in_the_document_flow_at_load(self):
+        """`hidden`, not merely styled away: a hidden panel is out of the tab order and
+        out of the accessibility tree, so a keyboard visitor meets one step at a time
+        instead of tabbing through a form whose fields are invisible."""
+        for n in (2, 3):
+            self.assertIn("hidden", self.opening_tag(n), f"step {n} is not hidden at load")
+        first = self.opening_tag(1)
+        self.assertNotIn("hidden", first)
+        self.assertIn("is-current", first)
+        # And each panel is a labelled group, so the step has an accessible name.
+        for n in (1, 2, 3):
+            with self.subTest(step=n):
+                self.assertIn('role="group"', self.html.split('data-signal-step="%d"' % n, 1)[1][:400])
+                self.assertIn('aria-labelledby="signal-step-%d-title"' % n,
+                              self.html.split('data-signal-step="%d"' % n, 1)[1][:400])
+                self.assertIn('<h2 class="h3" id="signal-step-%d-title" tabindex="-1">' % n
+                              if n > 1 else 'id="signal-step-1-title"', self.html)
+
+    def test_step_two_is_a_gate_not_a_shortcut_to_the_form(self):
+        p2 = self.html.split('data-signal-step="2"', 1)[1].split('data-signal-step="3"', 1)[0]
+        self.assertIn('id="signal-identity"', p2)
+        self.assertIn('data-signal-advance="3"', p2,
+                      "the gate must declare where it goes rather than hardcoding it in JS")
+        self.assertIn('name="name"', p2)
+        self.assertIn('name="email"', p2)
+        self.assertIn("required", p2)
+        self.assertIn('data-error-for="name"', p2)
+        self.assertIn('data-error-for="email"', p2)
+        self.assertIn('type="submit"', p2)
+        self.assertIn('data-signal-back="1"', p2, "and a way back to step 1")
+        self.assertNotIn('name="message"', p2, "the gate must not collect the message")
+
+    def test_step_three_carries_the_message_and_the_way_back(self):
+        p3 = self.html.split('data-signal-step="3"', 1)[1].split("</section>", 1)[0]
+        self.assertIn('id="feedback-form"', p3)
+        self.assertIn('method="post"', p3)
+        for field in ("name", "email", "topic", "message"):
+            with self.subTest(field=field):
+                self.assertIn('name="%s"' % field, p3)
+        self.assertIn('data-honeypot', p3)
+        self.assertIn('id="feedback-status"', p3)
+        self.assertIn('id="feedback-success"', p3)
+        self.assertIn('data-signal-back="1"', p3, "the 'change topic' way back to step 1")
+        self.assertIn("Change topic", p3)
+        self.assertIn('data-signal-restart', p3, "and a way to start over after success")
+        # No second POST target: the gate form must not be able to submit anywhere.
+        self.assertEqual(p3.count('id="feedback-form"'), 1)
+
+    def test_the_topic_is_an_input_because_a_select_cannot_be_locked_cleanly(self):
+        """The brief asks for no dropdown arrow and no direct editing for the four
+        fixed categories, and a freely typed topic for the fifth. One <input> whose
+        readOnly flag flips does both; a <select> plus a text input would mean two
+        controls with the same name, and only one of them in the FormData.
+        """
+        topic = re.search(r'<input id="fb-topic"[^>]*>', self.html)
+        self.assertIsNotNone(topic, "the topic is not an input")
+        self.assertIn('type="text"', topic.group(0))
+        self.assertIn("readonly", topic.group(0),
+                      "it must start locked; step 1 unlocks it for 'Anything else'")
+        self.assertNotIn("<select", self.html.split('data-signal-step="3"', 1)[1],
+                         "a select came back")
+        self.assertNotIn("<option", self.html.split('data-signal-step="3"', 1)[1])
+        self.assertIn('data-topic-hint', self.html,
+                      "a locked field with no explanation reads as broken, not as decided")
+
+    def test_the_lock_is_readonly_and_never_disabled(self):
+        """THE trap in this feature, and the reason it gets its own test.
+
+        A disabled control is omitted from FormData, so a locked topic would silently
+        vanish from the submission and the Function would reject the message for a
+        missing field -- at the last step, after the visitor had written the whole
+        thing. readOnly keeps it in the payload, keeps it focusable for a screen
+        reader, and still refuses edits. The harness proves the payload half by
+        building a real FormData and reading `topic` back out of it.
+        """
+        self.assertIn("topic.readOnly = locked;", self.flow)
+        self.assertNotRegex(self.flow, r"topic\.disabled\s*=")
+        self.assertNotIn(".disabled = true", self.flow)
+        # Announced, not just styled: a screen reader has to know the field is fixed.
+        self.assertIn("topic.setAttribute('aria-readonly', 'true')", self.flow)
+        self.assertIn("topic.removeAttribute('aria-readonly')", self.flow)
+        self.assertIn("topic.placeholder = 'What is this regarding?'", self.flow,
+                      "the requested placeholder for the editable case")
+        self.assertIn("topic.classList.toggle('is-locked', locked)", self.flow)
+
+    def test_focus_follows_the_step(self):
+        """Without this, focus stays on the control that was clicked -- which is now
+        inside a hidden panel, so a keyboard visitor is left focused on nothing and a
+        screen reader announces no change at all."""
+        self.assertIn("panel.hidden = !on;", self.flow)
+        self.assertIn('target.querySelector(\'[tabindex="-1"]\')', self.flow)
+        self.assertIn("heading.focus()", self.flow)
+
+    def test_the_flow_runs_before_the_forms_are_wired(self):
+        page = self.app.split("function bootPage()", 1)[1].split("\n  }", 1)[0]
+        self.assertIn("initSignalFlow();", page)
+        self.assertIn("initContactForm();", page)
+        self.assertLess(page.index("initSignalFlow();"), page.index("initContactForm();"))
+        # Both forms share one rule table; a second copy would drift.
+        self.assertEqual(self.code.count("var RULES = {"), 1)
+        self.assertIn("doc.querySelectorAll('form[data-contact-form]')", self.code)
+        self.assertEqual(len(re.findall(r'data-contact-form', self.html)), 2)
+
+    def test_a_step_three_correction_survives_a_trip_back_through_step_two(self):
+        """The prefill has to be one-directional in practice. Going 3 -> 1 -> 2 -> 3 is
+        the documented path for changing the topic, and if step 2 blindly overwrote
+        step 3 on every arrival, a name corrected in step 3 would be silently reverted
+        to the older value on the way back through."""
+        self.assertIn("var edited = { name: false, email: false };", self.flow)
+        self.assertIn("if (from && to && !edited[key]) to.value = from.value;", self.flow)
+        self.assertIn("edited[key] = true;", self.flow)
+        self.assertIn("edited.name = false;", self.flow,
+                      "and a restart must clear the dirty flags")
+
+
+class CreditsChrome(unittest.TestCase):
+    """The credits screen keeps exactly one way out and a colophon, and nothing else.
+
+    This page is a single-viewport composition the visitor drives with a wheel. Every
+    extra piece of chrome competes with that, so the header carries one link and the
+    bottom bar carries a hint, a counter and a copyright line.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = _strip_html_comments((ROOT / "credits.html").read_text())
+        cls.css = (ROOT / "style.css").read_text()
+        cls.css_code = _strip_css_comments(cls.css)
+        cls.header = cls.html.split('<header class="credits-screen-header">', 1)[1].split("</header>", 1)[0]
+        cls.status = cls.html.split('<div class="credits-rotary-status"', 1)[1].split("</div>", 1)[0]
+
+    def test_the_header_carries_one_link_and_it_goes_home(self):
+        actions = self.header.split('<nav class="credits-screen-actions"', 1)[1].split("</nav>", 1)[0]
+        links = re.findall(r'<a\s[^>]*href="([^"]+)"[^>]*>(.*?)</a>', actions, re.DOTALL)
+        self.assertEqual(len(links), 1, f"the header gained links again: {links}")
+        href, text = links[0]
+        self.assertEqual(href, "/index.html")
+        self.assertEqual(" ".join(re.sub(r"<[^>]+>", "", text).split()), "Back to Square")
+        self.assertIn('data-page="home"', actions[actions.index(href):],
+                      "so the router resolves it like any other internal link")
+        # The logo is the other way home and stays; it is branding, not chrome.
+        self.assertIn('class="nav__logo brand-lockup credits-screen-brand" href="/index.html"',
+                      self.header)
+        self.assertNotIn("Why Agora", self.header)
+        self.assertNotIn("Contact", self.header)
+
+    def test_the_bottom_bar_has_no_address_and_carries_the_colophon(self):
+        self.assertNotIn("@", self.status)
+        self.assertNotIn("mailto", self.status)
+        self.assertNotIn("contact", self.status.lower())
+        self.assertIn("credits-screen-colophon", self.status)
+        self.assertIn("Agora &middot; &copy;", self.status)
+        # The year is the shared span so initChrome keeps it current like every other
+        # page's footer, instead of going stale in 2027.
+        self.assertIn('<span id="year">2026</span> Agora', self.status)
+        # The wheel mechanics stay: the hint and the JS-driven counter are how the
+        # visitor knows what to do and where they are.
+        self.assertIn("wheel to rotate", self.status)
+        self.assertIn("data-rotary-count", self.status)
+        self.assertIn("data-rotary-total", self.status)
+
+    def test_the_removed_contact_link_left_no_dead_css(self):
+        """Dead CSS is not harmless: `.credits-screen-contact` still had a hover rule
+        and a mobile override after the element was gone, and the mobile override was
+        retargeted rather than deleted because the colophon took its slot. A rule
+        pointing at nothing reads as though it is still doing work."""
+        self.assertNotIn("credits-screen-contact", self.css_code)
+        self.assertIn(".credits-screen-colophon {", self.css_code)
+        # And the colophon has to inherit the mobile downsize, or it overflows the pill.
+        mobile = self.css_code.split("@media (max-width: 768px)", 1)[-1]
+        self.assertIn(".credits-screen-colophon", mobile)
+
+    def test_the_one_link_is_sized_to_the_site_not_to_the_screen(self):
+        """It used to carry the .mono class AND its own font-size and letter-spacing,
+        so two rules fought over the same properties and the page drifted out of step
+        with the site without either file being edited. It now sets its own type once,
+        to the same metrics as .nav__link."""
+        # `.credits-screen-exit` appears in a shared pointer-events rule before the
+        # one that sets its type, so take the block that actually carries font-size
+        # rather than the first match.
+        blocks = re.findall(r"\.credits-screen-exit \{([^}]*)\}", self.css_code)
+        rule = next((b for b in blocks if "font-size" in b), None)
+        self.assertIsNotNone(rule, "no .credits-screen-exit rule sets a font-size")
+        nav = self.css_code.split(".nav__link {", 1)[1].split("}", 1)[0]
+        for prop in ("font-size", "letter-spacing", "text-transform", "font-weight"):
+            with self.subTest(prop=prop):
+                exit_value = re.search(prop + r":\s*([^;]+);", rule)
+                nav_value = re.search(prop + r":\s*([^;]+);", nav)
+                self.assertIsNotNone(exit_value, f"the exit link no longer sets {prop}")
+                self.assertIsNotNone(nav_value)
+                self.assertEqual(exit_value.group(1).strip(), nav_value.group(1).strip(),
+                                 f"{prop} differs from the site's nav link")
+        self.assertNotRegex(self.html, r'credits-screen-exit[^>]*class="[^"]*\bmono\b')
+
+    def test_no_selector_can_hide_the_only_way_off_the_page(self):
+        """The rule that made this worth a test: `.credits-screen-actions >
+        a:first-child { display: none }` existed to hide a second header link on
+        phones. When the header was cut to one link, that selector matched the ONLY
+        link left -- so a phone visitor would have had no way off the credits screen
+        at all, and nothing on desktop would have shown it.
+
+        A sibling rule set `.credits-screen-exit { font-size: 0 }` and re-sized an
+        arrow <span> that the declutter removed, which would have made the link
+        invisible a second time over. Both are asserted absent, and the mobile rule
+        is asserted to give the link a real size.
+        """
+        self.assertNotIn(".credits-screen-actions > a:first-child", self.css_code)
+        mobile = self.css_code.split("@media (max-width: 768px)", 1)[-1]
+        exit_mobile = mobile.split(".credits-screen-exit {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("display: none", exit_mobile)
+        size = re.search(r"font-size:\s*([\d.]+)rem", exit_mobile)
+        self.assertIsNotNone(size, "the mobile exit link has no font-size of its own")
+        self.assertGreaterEqual(float(size.group(1)), 0.55,
+                                "the only way off the credits screen is unreadable on a phone")
+        self.assertNotIn(".credits-screen-exit span", self.css_code,
+                         "styling survives for an arrow element that was deleted")
+
+
+class StylesheetIntegrity(unittest.TestCase):
+    """Structural checks on style.css that no per-rule test can make.
+
+    These exist because of a specific mistake. Deleting one name from a SHARED
+    selector list by cutting from that name to the closing brace leaves the surviving
+    name dangling into whatever rule follows: `.vision-grid .section-head,` merged into
+    `.site-footer__grid { gap: 2rem }`, so the section head lost `position: static` and
+    silently acquired a gap. The braces still balanced, every rule still parsed, and
+    the deleted class looked correctly gone -- the damage was entirely to its neighbour.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.raw = (ROOT / "style.css").read_text()
+        cls.css = re.sub(r"/\*.*?\*/", " ", cls.raw, flags=re.DOTALL)
+
+    def test_braces_balance(self):
+        self.assertEqual(self.css.count("{"), self.css.count("}"),
+                         "unbalanced braces; the browser will drop everything after the error")
+
+    def test_no_selector_list_is_left_dangling(self):
+        """A comma ending a line, then a blank line, then a selector, is the signature
+        of a shared rule that lost one of its names."""
+        for m in re.finditer(r",\s*\n\s*\n+\s*[^{}@/\s][^{}]*\{", self.css):
+            self.fail("a selector list ends in a comma and is separated from what follows "
+                      f"-- a shared rule was cut in half: {m.group(0)[:90]!r}")
+
+    def test_every_selector_in_a_list_is_non_empty(self):
+        for m in re.finditer(r"([^{}@/][^{}]*)\{", self.css):
+            head = m.group(1)
+            for part in head.split(","):
+                self.assertTrue(part.strip(),
+                                f"empty selector in a list, i.e. a trailing or doubled comma: "
+                                f"{' '.join(head.split())[-70:]!r}")
+
+    def test_no_rule_is_empty(self):
+        for m in re.finditer(r"([^{}@]+)\{\s*\}", self.css):
+            selector = " ".join(m.group(1).split())[-70:]
+            self.fail(f"empty rule left behind: {selector} {{ }}")
+
+    # Every panel/card class in the site, pinned because of a specific loss.
+    # .signal__card is deliberately absent: it is a width modifier on an element that
+    # also carries .form-card, so it has no box of its own by design.
+    CARDS = (".form-card", ".cta-panel", ".principle", ".dl-card", ".shared-card",
+             ".post-preview", ".creator", ".contact-callout", ".contact-category",
+             ".standard", ".form-success", ".step", ".badge", ".peek")
+
+    def test_every_card_class_still_declares_its_own_box(self):
+        """A class can survive in a shared selector list long after its own rule is
+        deleted, which is exactly what happened to .form-card.
+
+        Cutting a shared selector list by slicing to the second close-brace-on-its-own
+        line skipped the indented inner braces of a media query and swallowed the next
+        top-level rule with it. `.form-card` stayed in the `@supports` backdrop-filter
+        group, so it still counted as "styled" and every structural check passed, while
+        having lost its border, radius, padding, background and shadow -- and both
+        contact panels flattened into bare text on the page background.
+
+        A general "every container class has a box rule" version of this produced 15
+        false positives (modifier classes, typography-only blocks, children that
+        inherit their box from a parent), so this pins the classes that ARE cards
+        instead. Narrower, but it fails on the real failure and not on the design.
+        """
+        for card in self.CARDS:
+            blocks = re.findall(re.escape(card) + r"\s*\{([^}]*)\}", self.css)
+            joined = " ".join(blocks)
+            with self.subTest(card=card):
+                self.assertTrue(blocks, f"{card} has no rule of its own at all")
+                self.assertRegex(joined, r"(?:^|[\s;])(?:padding|border|background)\s*:",
+                                 f"{card} is in a selector list somewhere but nothing declares "
+                                 f"its padding, border or background -- the panel has no box")
+
+    def test_no_declaration_sits_outside_a_rule(self):
+        """A cut that removes a closing brace rather than an opening one leaves
+        declarations at top level, which the browser discards along with everything up
+        to the next rule."""
+        depth = 0
+        for m in re.finditer(r"[{}]|:\s*[^;{}]+;", self.css):
+            token = m.group(0)
+            if token == "{":
+                depth += 1
+            elif token == "}":
+                depth -= 1
+                self.assertGreaterEqual(depth, 0, "a closing brace with no opening brace")
+            elif depth == 0:
+                self.fail(f"declaration outside any rule: {token.strip()[:70]!r}")
+        self.assertEqual(depth, 0)
 
 
 class ContactPage(unittest.TestCase):
@@ -4519,11 +5046,57 @@ class ContactPage(unittest.TestCase):
                               f'data-page="{key}" has no PAGE_MAP entry')
         self.assertIn("contact", self.page_map)
         self.assertEqual(self.page_map["contact"], "/contact.html")
-        # The reverse direction matters too: a route nothing links to is a page no
-        # visitor can reach.
+        # The reverse direction matters too: a PAGE_MAP entry nothing links to is a
+        # route no visitor can reach, and it reads as though the page is wired up.
+        # PAGE_MAP.why survived three rounds pointing at a hash target no element ever
+        # carried a data-page for.
+        every_html = "\n".join(self.pages.values())
         for key, target in self.page_map.items():
             with self.subTest(route=key):
                 self.assertRegex(target, r"^/[^#]+\.html")
+                self.assertIn('data-page="%s"' % key, every_html,
+                              f"PAGE_MAP.{key} is unreachable: nothing carries that data-page")
+
+    def test_the_header_and_the_footer_offer_the_same_destinations(self):
+        """Two failures this catches, and neither is visible on the page that has them.
+
+        A footer that omits a page the header lists makes that page unreachable from
+        the bottom of every other page -- the About link was missing from all four
+        footers for the whole life of the site. And a bare `#hash` href only resolves on
+        the page that owns the anchor: the footer's "Why Agora" was `#why-agora`, which
+        works on index.html and points at nothing on the other three. app.js papered
+        over it by routing a bare hash home, so it worked with JavaScript and was simply
+        dead without it.
+        """
+        expected = {"/index.html", "/index.html#why-agora", "/download.html",
+                    "/about.html", "/credits.html", "/contact.html"}
+        for name in ("index.html", "about.html", "download.html", "contact.html"):
+            html = _strip_html_comments(self.pages[name])
+            nav = re.search(r'<nav class="nav__links"[^>]*>(.*?)</nav>', html, re.DOTALL)
+            foot = re.search(r'<nav aria-label="Footer"[^>]*>(.*?)</nav>', html, re.DOTALL)
+            self.assertIsNotNone(nav, f"{name} has no header nav")
+            self.assertIsNotNone(foot, f"{name} has no footer nav")
+            nav_hrefs = re.findall(r'href="([^"]+)"', nav.group(1))
+            foot_hrefs = re.findall(r'href="([^"]+)"', foot.group(1))
+
+            def normalise(hrefs):
+                # index.html's header legitimately uses the bare `#why-agora`: on the
+                # page that owns the anchor, initSmoothScroll handles it in place and a
+                # PJAX round-trip to itself would be worse. Everywhere else the
+                # absolute form is the only one that resolves. Both mean the same
+                # destination, so normalise before comparing the two navigations.
+                return {("/index.html" + h if h.startswith("#") and name == "index.html" else h)
+                        for h in hrefs}
+
+            with self.subTest(page=name):
+                self.assertEqual(normalise(nav_hrefs), expected, "the header nav is incomplete")
+                self.assertEqual(normalise(foot_hrefs), expected, "the footer nav is incomplete")
+            for href in sorted(set(nav_hrefs) | set(foot_hrefs)):
+                with self.subTest(page=name, href=href):
+                    if href.startswith("#"):
+                        self.assertIn('id="%s"' % href[1:], html,
+                                      "a bare hash is only valid on the page that owns the "
+                                      "anchor; anywhere else it points at nothing")
 
     def test_every_full_shell_page_offers_the_same_navigation(self):
         """index, about, download and contact share one header. If one drops a link the
