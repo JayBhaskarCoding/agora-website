@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 CLEAN_ROUTES = {'/': '/index.html', '/about': '/about.html', '/download': '/download.html',
                 '/contact': '/contact.html', '/credits': '/credits.html',
-                '/shared-post': '/shared-post.html'}
+                '/shared-post': '/shared-post.html', '/privacy': '/privacy.html'}
 CAPTURES = {
     "/assets/home-feed.png": 3,
     "/assets/profile-screen.png": 1,
@@ -210,12 +210,14 @@ DYNAMIC_CTAS = Counter(
         "shared-post.html": 0,
         "credits.html": 0,
         "contact.html": 0,
+        "privacy.html": 0,
     }
 )
 # Pages carrying "Get the app" CTAs that navigate to the download page instead.
 PAGE_CTAS = Counter(
     {
         "index.html": 4,
+        "privacy.html": 2,
         "contact.html": 3,   # nav, mobile menu, and the closing panel        # nav CTA, mobile menu, hero, closing panel
         "about.html": 3,        # nav CTA, mobile menu, #get-app panel
         "download.html": 2,     # nav CTA, mobile menu
@@ -5073,7 +5075,7 @@ class ContactPage(unittest.TestCase):
         """
         expected = {"/", "/#why-agora", "/download",
                     "/about", "/credits", "/contact"}
-        for name in ("index.html", "about.html", "download.html", "contact.html"):
+        for name in ("index.html", "about.html", "download.html", "contact.html", "privacy.html"):
             html = _strip_html_comments(self.pages[name])
             nav = re.search(r'<nav class="nav__links"[^>]*>(.*?)</nav>', html, re.DOTALL)
             foot = re.search(r'<nav aria-label="Footer"[^>]*>(.*?)</nav>', html, re.DOTALL)
@@ -5093,7 +5095,7 @@ class ContactPage(unittest.TestCase):
 
             with self.subTest(page=name):
                 self.assertEqual(normalise(nav_hrefs), expected, "the header nav is incomplete")
-                self.assertEqual(normalise(foot_hrefs), expected, "the footer nav is incomplete")
+                self.assertEqual(normalise(foot_hrefs), expected | {"/privacy"}, "the footer nav is incomplete")
             for href in sorted(set(nav_hrefs) | set(foot_hrefs)):
                 with self.subTest(page=name, href=href):
                     if href.startswith("#"):
@@ -5107,7 +5109,7 @@ class ContactPage(unittest.TestCase):
         expected_keys = {"home", "download", "about", "credits", "contact"}
         expected_hrefs = {"/", "/download", "/about",
                           "/credits", "/contact"}
-        for name in ("index.html", "about.html", "download.html", "contact.html"):
+        for name in ("index.html", "about.html", "download.html", "contact.html", "privacy.html"):
             nav = re.search(r'<nav class="nav__links"[^>]*>(.*?)</nav>',
                             self.pages[name], re.DOTALL)
             self.assertIsNotNone(nav, f"{name} has no primary nav")
@@ -5140,7 +5142,7 @@ class ContactPage(unittest.TestCase):
         self.assertIn('href="/contact"', callout)
         self.assertIn('data-page="contact"', callout)
         self.assertIn("Have a question, idea, or press inquiry?", callout)
-        for name in ("index.html", "about.html", "download.html", "contact.html"):
+        for name in ("index.html", "about.html", "download.html", "contact.html", "privacy.html"):
             footer = self.pages[name].split('class="site-footer__contact"', 1)[1].split("</div>", 1)[0]
             with self.subTest(page=name, where="footer"):
                 self.assertIn('href="/contact"', footer,
@@ -5362,7 +5364,7 @@ function fetch(url, opts) {calls.push({url, opts}); return Promise.resolve({
   assert.deepEqual(replaced.state, {keep: true});
   for (const [legacy, clean] of [['/index.html','/'], ['/about.html','/about'],
       ['/download.html','/download'], ['/contact.html','/contact'],
-      ['/credits.html','/credits'], ['/shared-post.html','/shared-post']]) {
+      ['/credits.html','/credits'], ['/shared-post.html','/shared-post'], ['/privacy.html','/privacy']]) {
     window.location.href = 'https://agora.in.net' + legacy + '?x=1#top';
     normalizeInitialUrl();
     assert.equal(replaced.url, clean + '?x=1#top');
@@ -5391,9 +5393,76 @@ function fetch(url, opts) {calls.push({url, opts}); return Promise.resolve({
   await routeTo(new URL('https://agora.in.net/download.html?ref=cta#install'), true);
   assert.equal(pushed, 'https://agora.in.net/download?ref=cta#install');
   assert.equal(routerState.currentPath, '/download');
-  assert.deepEqual(calls.map(x => x.url), ['https://agora.in.net/download?ref=cta#install',
-    'https://agora.in.net/download.html?ref=cta']);
+  calls = [];
+  await routeTo(new URL('https://agora.in.net/privacy.html?ref=footer#retention'), true);
+  assert.equal(pushed, 'https://agora.in.net/privacy?ref=footer#retention');
+  assert.equal(routerState.currentPath, '/privacy');
+  assert.deepEqual(calls.map(x => x.url), ['https://agora.in.net/privacy?ref=footer#retention',
+    'https://agora.in.net/privacy.html?ref=footer']);
+
 })().catch(e => {console.error(e); process.exitCode = 1;});
 '''
         result = subprocess.run(['node', '-e', script], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class PrivacyPolicy(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.html = (ROOT / 'privacy.html').read_text()
+        cls.page = Page(ROOT / 'privacy.html')
+
+    def test_identity_effective_date_and_shared_shell(self):
+        for token in ('<title>Privacy Policy — Agora</title>', 'October 24, 2026',
+                      'datetime="2026-10-24"', 'net.agora.app', 'https://agora.in.net',
+                      'A New Town Square For Free Speech', 'class="site-header"',
+                      'class="site-footer"', 'href="/style.css"', 'src="/app.js"',
+                      'rel="canonical" href="https://agora.in.net/privacy"'):
+            self.assertIn(token, self.html)
+        self.assertNotIn('data-contact-form', self.html)
+        self.assertEqual(self.html.count('<h1'), 1)
+
+    def test_architecture_and_retention_disclosures(self):
+        for token in ('Supabase Authentication', 'One-Tap OAuth', 'Google Identity Services',
+                      '@handle', 'Supabase Storage', 'post_id', 'reporter_id', 'reports',
+                      'Spam', 'Harassment', 'Hate speech', 'Misinformation', 'registered email',
+                      '30 days', 'permanently purged', 'daily cleanup job', 'pg_cron',
+                      'Agora Mail', 'Cloudflare Workers', 'Resend', 'Google Fonts',
+                      'session storage', '13 and older', 'full account and personal data deletion',
+                      'precise or background GPS', 'contacts, microphone, SMS, or call logs'):
+            self.assertIn(token, self.html)
+        users = [a.get('data-email-user') for a, _ in self.page.anchors]
+        self.assertIn('noreply', users)
+        self.assertIn('mail', users)
+        self.assertNotIn('mailto:', self.html)
+        self.assertNotIn('@agora.in.net', self.html)
+        self.assertIn('href="/contact"', self.html)
+
+    def test_contents_links_resolve_on_this_page(self):
+        ids = re.findall(r'\bid="([^"]+)"', self.html)
+        self.assertEqual(len(ids), len(set(ids)), 'duplicate ids break section navigation')
+        contents = re.search(r'<nav class="privacy-contents".*?</nav>', self.html, re.S)[0]
+        targets = re.findall(r'href="#([^"]+)"', contents)
+        self.assertEqual(len(targets), 10)
+        for target in targets:
+            self.assertIn(target, ids)
+            self.assertIn('<section id="' + target + '" aria-labelledby=', self.html)
+
+    def test_visible_footer_entry_on_every_page(self):
+        for path in ROOT.glob('*.html'):
+            with self.subTest(page=path.name):
+                footers = re.findall(r'<footer\b[^>]*>.*?</footer>', path.read_text(), re.S)
+                self.assertTrue(any(re.search(r'<a[^>]+href="/privacy"[^>]*>Privacy Policy</a>',
+                                              f) for f in footers))
+        css = (ROOT / 'style.css').read_text()
+        self.assertRegex(css, r'\.credits-screen-colophon a\s*\{[^}]*pointer-events:\s*auto')
+
+    def test_legacy_aliases_redirect_before_clean_rewrites(self):
+        rules = [line.split() for line in (ROOT / '_redirects').read_text().splitlines()
+                 if line.strip() and not line.lstrip().startswith('#')]
+        for clean, file in CLEAN_ROUTES.items():
+            self.assertIn([file, clean, '301'], rules)
+            if clean != '/':
+                self.assertLess(rules.index([file, clean, '301']),
+                                rules.index([clean, file, '200']))
+        self.assertEqual(list(ROOT.glob('*.html.html')), [])
