@@ -10,6 +10,9 @@ import unittest
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
+CLEAN_ROUTES = {'/': '/index.html', '/about': '/about.html', '/download': '/download.html',
+                '/contact': '/contact.html', '/credits': '/credits.html',
+                '/shared-post': '/shared-post.html'}
 CAPTURES = {
     "/assets/home-feed.png": 3,
     "/assets/profile-screen.png": 1,
@@ -197,7 +200,7 @@ RELEASE_DOWNLOAD = f"{RELEASES_PAGE}/download/{PREFERRED_APK}"
 RELEASE_API = "https://api.github.com/repos/JayBhaskarCoding/agora-android/releases/latest"
 RELEASE_PROXY = "/api/latest-release"
 DYNAMIC_ATTR = "dynamic-download-btn"
-DOWNLOAD_PAGE = "/download.html"
+DOWNLOAD_PAGE = "/download"
 # Pages carrying the one direct-download button.
 DYNAMIC_CTAS = Counter(
     {
@@ -269,7 +272,7 @@ class LaunchContract(unittest.TestCase):
 
         The "Download APK" button on download.html is the only element carrying
         GitHub's permanent release redirect and the dynamic marker. All other
-        "Get the app" CTAs are ordinary internal links to /download.html, so
+        "Get the app" CTAs are ordinary internal links to /download, so
         they must NOT carry the marker -- or app.js would rewrite them back into
         a direct download -- and SHOULD carry data-page so the router resolves
         them like any other internal link (and PJAX swaps them in place).
@@ -461,7 +464,7 @@ class LaunchContract(unittest.TestCase):
 
                 assembled = [a for a, _ in page.anchors if a.get("data-email-user")]
                 routes = [a for a, _ in page.anchors
-                          if urlsplit(a.get("href", "")).path == "/contact.html"]
+                          if urlsplit(a.get("href", "")).path == "/contact"]
                 # credits.html is the one exemption, and it is a design decision
                 # rather than an oversight: it is a single-viewport composition driven
                 # by a wheel, its header carries exactly one link and that link goes
@@ -473,7 +476,7 @@ class LaunchContract(unittest.TestCase):
                     self.assertFalse(assembled, "the credits screen should carry no address")
                     self.assertFalse(routes, "and no contact link either")
                     homes = [a for a, _ in page.anchors
-                             if urlsplit(a.get("href", "")).path == "/index.html"]
+                             if urlsplit(a.get("href", "")).path == "/"]
                     self.assertGreaterEqual(len(homes), 2,
                                             "credits must still reach home, which carries contact, "
                                             "from both the logo and its one header link")
@@ -512,7 +515,7 @@ class LaunchContract(unittest.TestCase):
                                 path in CAPTURES
                                 or path in PENDING_ASSETS
                                 or path == "/assets/developer.png"
-                                or (ROOT / path.lstrip("/")).is_file()
+                                or (ROOT / CLEAN_ROUTES.get(path, path).lstrip("/")).is_file()
                             )
 
     def test_credits_contributors(self):
@@ -671,7 +674,7 @@ class LaunchContract(unittest.TestCase):
                 continue
             self.assertTrue(links, f"{name} lost its Why Agora link")
             for attrs, text in links:
-                self.assertIn(attrs["href"], ["#why-agora", "/index.html#why-agora"])
+                self.assertIn(attrs["href"], ["#why-agora", "/#why-agora"])
             self.assertNotRegex((ROOT / name).read_text(), r'#why["\']')
         rule = re.search(r"#why-agora \{([^}]+)\}", self.css)[1]
         self.assertIn("scroll-margin-top: 5rem", rule)
@@ -680,7 +683,7 @@ class LaunchContract(unittest.TestCase):
     def test_feedback_form_is_wired(self):
         """The contact form must actually deliver: validated, announced, sent.
 
-        It lives on /contact.html now, not /about.html. Asserted on both halves --
+        It lives on /contact now, not /about. Asserted on both halves --
         present exactly once on the page that owns it, and genuinely gone from the
         one that used to -- because a moved form that was COPIED rather than moved
         leaves two live forms with the same ids, and duplicate ids mean the
@@ -702,7 +705,7 @@ class LaunchContract(unittest.TestCase):
                                  f"the aria-describedby wiring")
                 self.assertNotIn('id="%s"' % field, about)
         # about.html keeps the invitation, just not the form.
-        self.assertIn('href="/contact.html"', about)
+        self.assertIn('href="/contact"', about)
         self.assertIn("Have a question, idea, or press inquiry?", about)
 
         form = [a for tag, a in page.tags if a.get("id") == "feedback-form"]
@@ -1352,7 +1355,7 @@ class SharedPostRouting(unittest.TestCase):
         self.assertEqual(pattern.search(f"/post/{self.POST_UUID}").group(1),
                          self.POST_UUID, "the captured segment IS the post id")
         # Must not false-positive on the rest of the site.
-        for path in (self.LANDING, "/index.html", "/download.html", "/credits.html",
+        for path in (self.LANDING, "/", "/download", "/credits",
                      "/support/a8f3c2", "/app/a8f3c2", "/help/a8f3c2",
                      "/post/", "/post-preview/x"):
             with self.subTest(path=path):
@@ -1460,7 +1463,7 @@ class SharedPostRouting(unittest.TestCase):
     def test_app_intent_falls_back_to_the_download_page(self):
         builder = self.section("function buildAppIntentUrl", "function initSharedPost")
         for fragment in ("'intent://'", "scheme=https", "package=",
-                         "S.browser_fallback_url=", "/download.html", ";end"):
+                         "S.browser_fallback_url=", "/download", ";end"):
             self.assertIn(fragment, builder, f"intent URL lost {fragment}")
         self.assertIn("encodeURIComponent(postId)", builder)
         self.assertIn("encodeURIComponent(fallback)", builder)
@@ -4843,12 +4846,12 @@ class CreditsChrome(unittest.TestCase):
         links = re.findall(r'<a\s[^>]*href="([^"]+)"[^>]*>(.*?)</a>', actions, re.DOTALL)
         self.assertEqual(len(links), 1, f"the header gained links again: {links}")
         href, text = links[0]
-        self.assertEqual(href, "/index.html")
+        self.assertEqual(href, "/")
         self.assertEqual(" ".join(re.sub(r"<[^>]+>", "", text).split()), "Back to Square")
         self.assertIn('data-page="home"', actions[actions.index(href):],
                       "so the router resolves it like any other internal link")
         # The logo is the other way home and stays; it is branding, not chrome.
-        self.assertIn('class="nav__logo brand-lockup credits-screen-brand" href="/index.html"',
+        self.assertIn('class="nav__logo brand-lockup credits-screen-brand" href="/"',
                       self.header)
         self.assertNotIn("Why Agora", self.header)
         self.assertNotIn("Contact", self.header)
@@ -5045,7 +5048,7 @@ class ContactPage(unittest.TestCase):
                 self.assertIn(key, self.page_map,
                               f'data-page="{key}" has no PAGE_MAP entry')
         self.assertIn("contact", self.page_map)
-        self.assertEqual(self.page_map["contact"], "/contact.html")
+        self.assertEqual(self.page_map["contact"], "/contact")
         # The reverse direction matters too: a PAGE_MAP entry nothing links to is a
         # route no visitor can reach, and it reads as though the page is wired up.
         # PAGE_MAP.why survived three rounds pointing at a hash target no element ever
@@ -5053,7 +5056,7 @@ class ContactPage(unittest.TestCase):
         every_html = "\n".join(self.pages.values())
         for key, target in self.page_map.items():
             with self.subTest(route=key):
-                self.assertRegex(target, r"^/[^#]+\.html")
+                self.assertIn(target, CLEAN_ROUTES)
                 self.assertIn('data-page="%s"' % key, every_html,
                               f"PAGE_MAP.{key} is unreachable: nothing carries that data-page")
 
@@ -5068,8 +5071,8 @@ class ContactPage(unittest.TestCase):
         over it by routing a bare hash home, so it worked with JavaScript and was simply
         dead without it.
         """
-        expected = {"/index.html", "/index.html#why-agora", "/download.html",
-                    "/about.html", "/credits.html", "/contact.html"}
+        expected = {"/", "/#why-agora", "/download",
+                    "/about", "/credits", "/contact"}
         for name in ("index.html", "about.html", "download.html", "contact.html"):
             html = _strip_html_comments(self.pages[name])
             nav = re.search(r'<nav class="nav__links"[^>]*>(.*?)</nav>', html, re.DOTALL)
@@ -5085,7 +5088,7 @@ class ContactPage(unittest.TestCase):
                 # PJAX round-trip to itself would be worse. Everywhere else the
                 # absolute form is the only one that resolves. Both mean the same
                 # destination, so normalise before comparing the two navigations.
-                return {("/index.html" + h if h.startswith("#") and name == "index.html" else h)
+                return {("/" + h if h.startswith("#") and name == "index.html" else h)
                         for h in hrefs}
 
             with self.subTest(page=name):
@@ -5102,8 +5105,8 @@ class ContactPage(unittest.TestCase):
         """index, about, download and contact share one header. If one drops a link the
         site is not navigable from that page, and the page still looks finished."""
         expected_keys = {"home", "download", "about", "credits", "contact"}
-        expected_hrefs = {"/index.html", "/download.html", "/about.html",
-                          "/credits.html", "/contact.html"}
+        expected_hrefs = {"/", "/download", "/about",
+                          "/credits", "/contact"}
         for name in ("index.html", "about.html", "download.html", "contact.html"):
             nav = re.search(r'<nav class="nav__links"[^>]*>(.*?)</nav>',
                             self.pages[name], re.DOTALL)
@@ -5113,34 +5116,34 @@ class ContactPage(unittest.TestCase):
             menu = re.search(r'<nav id="mobile-menu"[^>]*>(.*?)</nav>',
                              self.pages[name], re.DOTALL)
             self.assertIsNotNone(menu, f"{name} has no mobile menu")
-            self.assertEqual(set(re.findall(r'href="(/[\w.-]+\.html)"', menu.group(1))),
+            self.assertEqual(set(re.findall(r'href="(/[^"#]*)"', menu.group(1))),
                              expected_hrefs, f"{name}'s mobile menu is incomplete")
 
     def test_the_contact_page_carries_its_own_active_key(self):
         """initChrome derives the active key from the filename, so the value has to be
         exactly `contact` or the nav never highlights on this page."""
-        self.assertIn('href="/contact.html" data-page="contact" data-nav-key="contact"',
+        self.assertIn('href="/contact" data-page="contact" data-nav-key="contact"',
                       self.pages["contact.html"])
         self.assertIn("path.replace(/\.html$/, '')", self.code)
 
     def test_every_contact_entry_point_reaches_the_page_not_a_hash(self):
-        """The callout and the footers must navigate to /contact.html. A link to
+        """The callout and the footers must navigate to /contact. A link to
         `#contact` on a page whose contact section is now an invitation rather than a
         form scrolls the visitor to a card that tells them to go somewhere else."""
         for name, html in self.pages.items():
             with self.subTest(page=name):
                 self.assertNotIn('href="#contact"', html)
         # Scoped to the callout's own section: about.html has four other
-        # /contact.html links, so a whole-file assertIn would keep passing with the
+        # /contact links, so a whole-file assertIn would keep passing with the
         # callout's link repointed at a hash. That is exactly how this survived.
         callout = self.pages["about.html"].split('id="contact"', 1)[1].split("</section>", 1)[0]
-        self.assertIn('href="/contact.html"', callout)
+        self.assertIn('href="/contact"', callout)
         self.assertIn('data-page="contact"', callout)
         self.assertIn("Have a question, idea, or press inquiry?", callout)
         for name in ("index.html", "about.html", "download.html", "contact.html"):
             footer = self.pages[name].split('class="site-footer__contact"', 1)[1].split("</div>", 1)[0]
             with self.subTest(page=name, where="footer"):
-                self.assertIn('href="/contact.html"', footer,
+                self.assertIn('href="/contact"', footer,
                               "the footer contact block does not reach the contact page")
 
     def test_the_form_exists_once_site_wide(self):
@@ -5287,3 +5290,110 @@ class CreditsAudioRemoval(unittest.TestCase):
             with self.subTest(decl=decl):
                 self.assertIn(decl, self.css, f"{decl} is gone")
 
+
+
+class CleanPageRoutes(unittest.TestCase):
+    """Public URLs are routes; .html names are storage and server fallback only."""
+
+    def test_html_page_links_are_clean_and_assets_are_unchanged(self):
+        for path in ROOT.glob('*.html'):
+            page = Page(path)
+            for attrs, _ in page.anchors:
+                href = attrs.get('href', '')
+                parsed = urlsplit(href)
+                if href.startswith('/') and not href.startswith('//'):
+                    self.assertFalse(parsed.path.endswith('.html'), (path.name, href))
+                    if parsed.path in CLEAN_ROUTES:
+                        self.assertTrue((ROOT / CLEAN_ROUTES[parsed.path].lstrip('/')).is_file())
+            self.assertIn('href="/style.css"', path.read_text())
+            self.assertIn('src="/app.js"', path.read_text())
+
+    def test_explicit_rewrites_precede_the_catch_all(self):
+        rules = [line.split() for line in (ROOT / '_redirects').read_text().splitlines()
+                 if line.strip() and not line.lstrip().startswith('#')]
+        catch = next(i for i, rule in enumerate(rules) if rule[0] == '/*')
+        for clean, file in CLEAN_ROUTES.items():
+            if clean == '/':
+                continue
+            self.assertIn([clean, file, '200'], rules[:catch])
+            self.assertTrue((ROOT / file.lstrip('/')).is_file())
+        for alias in ('/post/:id', '/p/:id'):
+            self.assertIn([alias, '/shared-post.html', '200'], rules[:catch])
+
+    def test_boot_normalizes_before_initializing_the_page(self):
+        app = (ROOT / 'app.js').read_text()
+        boot = app.split('function boot() {', 1)[1]
+        self.assertLess(boot.index('normalizeInitialUrl();'), boot.index('initAmbientExperience();'))
+        self.assertIn("window.location.origin + '/download'", app)
+
+    def test_router_behavior_in_javascript(self):
+        """Run actual router helpers, without needing a browser or a JS dependency.
+
+        The mock server deliberately only serves .html. A clean-route 404 must retry
+        once, while a 500 or an enriched share route must never get the static retry.
+        """
+        import subprocess
+        app = (ROOT / 'app.js').read_text()
+        helpers = app[app.index('  var PAGE_FILES = {'):app.index('  function syncPageLinks()')]
+        internal = app[app.index('  function getInternalPageUrl('):app.index('  function scrollToRouteHash(')]
+        route = app[app.index('  function routeTo('):app.index('  function handleRouterClick(')]
+        script = r'''
+const assert = require('node:assert/strict');
+let replaced, pushed, calls = [], status = 404;
+const window = {location: {href: 'https://agora.in.net/contact.html?ref=a#message',
+  origin: 'https://agora.in.net'}, history: {state: {keep: true},
+  replaceState(state, title, url) { replaced = {state, url}; },
+  pushState(state, title, url) { pushed = url; }}};
+const doc = {documentElement: {classList: {add(){}, remove(){}}}};
+const routerState = {currentPath: '/', navigating: false};
+function getHashTarget() { return null; }
+function scrollToRouteHash() {}
+function readPageShell() {return {};}
+function updateDocumentShell() {}
+function bootPage() {}
+const DOMParser = class { parseFromString() {return {};}};
+function fetch(url, opts) {calls.push({url, opts}); return Promise.resolve({
+  status: url.includes('.html') ? 200 : status,
+  ok: url.includes('.html') || status === 200, text: () => Promise.resolve('<main></main>')});}
+''' + helpers + internal + route + r'''
+(async () => {
+  normalizeInitialUrl();
+  assert.equal(replaced.url, '/contact?ref=a#message');
+  assert.deepEqual(replaced.state, {keep: true});
+  for (const [legacy, clean] of [['/index.html','/'], ['/about.html','/about'],
+      ['/download.html','/download'], ['/contact.html','/contact'],
+      ['/credits.html','/credits'], ['/shared-post.html','/shared-post']]) {
+    window.location.href = 'https://agora.in.net' + legacy + '?x=1#top';
+    normalizeInitialUrl();
+    assert.equal(replaced.url, clean + '?x=1#top');
+    assert.equal(canonicalPath(new URL('https://agora.in.net' + clean)), clean);
+  }
+  assert.equal(canonicalPath(new URL('https://agora.in.net/post/uuid')), '/post/uuid');
+  assert.equal(canonicalPath(new URL('https://agora.in.net/assets/mockup.png')), '/assets/mockup.png');
+  const link = href => ({getAttribute: () => href, hasAttribute: () => false});
+  assert.equal(getInternalPageUrl(link('/about.html?x=1#bio')).pathname, '/about');
+  assert.equal(getInternalPageUrl(link('/about')).pathname, '/about');
+  for (const path of ['/assets/a.png','/api/contact','/post/uuid','/p/uuid','/unknown'])
+    assert.equal(getInternalPageUrl(link(path)), null);
+  window.location.href = 'https://agora.in.net/';
+  const opts = {headers: {'X-Requested-With': 'PJAX'}, signal: 'same-signal'};
+  await fetchPage(new URL('https://agora.in.net/about?q=1#bio'), opts);
+  assert.deepEqual(calls.map(x => x.url), ['https://agora.in.net/about?q=1#bio',
+    'https://agora.in.net/about.html?q=1']);
+  assert.equal(calls[1].opts, opts);
+  calls = []; status = 500;
+  await fetchPage(new URL('https://agora.in.net/about'), opts);
+  assert.equal(calls.length, 1);
+  calls = []; status = 404;
+  await fetchPage(new URL('https://agora.in.net/post/uuid'), opts);
+  assert.equal(calls.length, 1);
+  calls = [];
+  await routeTo(new URL('https://agora.in.net/download.html?ref=cta#install'), true);
+  assert.equal(pushed, 'https://agora.in.net/download?ref=cta#install');
+  assert.equal(routerState.currentPath, '/download');
+  assert.deepEqual(calls.map(x => x.url), ['https://agora.in.net/download?ref=cta#install',
+    'https://agora.in.net/download.html?ref=cta']);
+})().catch(e => {console.error(e); process.exitCode = 1;});
+'''
+        result = subprocess.run(['node', '-e', script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

@@ -8,5 +8,11 @@
 # ?post= / ?post_id= / ?id= as a fallback. Do not "restore" the query here.
 /post/:id          /shared-post.html          200
 /p/:id             /shared-post.html          200
+# Clean page routes; keep these ahead of the catch-all.
+/about             /about.html              200
+/download          /download.html           200
+/contact           /contact.html            200
+/credits           /credits.html            200
+/shared-post       /shared-post.html        200
 # SPA-style fallback for anything else (real files always win over this rule).
 /*                 /index.html                  200

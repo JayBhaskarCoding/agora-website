@@ -6,6 +6,36 @@ moderation of harm.
 
 Pure **vanilla HTML / CSS / JS** — no frameworks, no build step. Serve the repository root locally to resolve root-absolute asset URLs.
 
+## Clean URLs and local static-server support
+
+Public page URLs are `/`, `/about`, `/download`, `/contact`, `/credits`, and
+`/shared-post`. The files remain `index.html`, `about.html`, `download.html`,
+`contact.html`, `credits.html`, and `shared-post.html` on disk. Navigation, download
+CTAs and the Android intent's browser fallback all use the clean paths. CSS,
+JavaScript and `/assets/` references are unchanged.
+
+`_redirects` explicitly rewrites the five extensionless page paths to their files
+with status **200**, ahead of the catch-all. The enriched `/post/:id` and `/p/:id`
+rules remain unchanged. Direct clean visits and refreshes therefore serve the right
+page on Cloudflare Pages rather than the home-page fallback.
+
+At boot, known `.html` aliases are replaced in the address bar with
+`history.replaceState`, preserving existing state, query parameters and fragments.
+PJAX normalizes both legacy and clean links before pushing history. Unknown routes,
+assets, API requests and enriched share URLs are not treated as static page aliases.
+
+On a basic local server such as `python3 -m http.server 5173`, start at `/` or a real
+`.html` file. A PJAX request for `/contact` that returns **404** is retried as
+`/contact.html`, with the same query and abort signal; history still records
+`/contact`, never the fallback filename. Other HTTP errors are not silently retried.
+A direct clean-path refresh on such a server still needs rewrite support: the browser
+cannot run the fallback helper before the server has delivered the page.
+
+The test suite checks route-to-file resolution, clean HTML links and CTAs, rewrite
+ordering, legacy URL normalization, query/hash preservation, and runs the actual
+JavaScript routing helpers against a mock static server to verify 404 fallback and
+clean history updates.
+
 ## Pages
 
 | File               | Purpose                                                                 |
@@ -42,8 +72,8 @@ Useful local URLs:
 
 - `http://localhost:5173/`
 - `http://localhost:5173/shared-post.html?post=a8f3c2`  ← shared-link flow
-- `http://localhost:5173/download.html`
-- `http://localhost:5173/about.html`
+- `http://localhost:5173/download`
+- `http://localhost:5173/about`
 
 `python3 -m http.server` does not process `_redirects`, so locally a pretty
 `/post/<id>` URL 404s and the shared-link flow must be driven with the
@@ -403,7 +433,7 @@ gets. Collapsing them is wrong in both directions:
 exactly the devices it was built for.
 
 The row is authored `hidden` and only JS reveals it, so its stub
-`href="/download.html"` is never seen — unlike the old card row, which was
+`href="/download"` is never seen — unlike the old card row, which was
 authored visible-capable and needed that href as a pre-JS fallback.
 `test_every_id_init_shared_post_looks_up_exists_on_the_page` binds each
 `getElementById` in `initSharedPost` to an id the page actually authors, because
@@ -539,7 +569,7 @@ exists for.
 **Exactly one element on the whole site downloads the APK**: the *Download APK*
 button on `download.html`. Every other *Get the app* CTA — the header button, the
 mobile-menu button, the home hero, the home closing panel, the About panel and
-the shared-post card — is ordinary navigation to `/download.html`, so the install
+the shared-post card — is ordinary navigation to `/download`, so the install
 decision happens on the one page that carries the version, size and requirements
 next to it. Those links are PJAX-routed like any other internal link.
 
@@ -593,14 +623,14 @@ turn them back into a direct download:
 
 ```html
 <a class="btn btn--primary btn--get-app btn--lg"
-   href="/download.html" data-page="download">
+   href="/download" data-page="download">
   Get the app
 </a>
 ```
 
 `test_download_ctas` and `test_only_the_download_page_exposes_the_asset` enforce
 both halves: exactly one element site-wide may carry the release href or the
-marker, and every other CTA must resolve to `/download.html`.
+marker, and every other CTA must resolve to `/download`.
 
 ### What the API lookup adds
 
@@ -654,7 +684,7 @@ Local dev note: `python3 -m http.server` has no Functions runtime, so
 ## Asset paths
 
 All CSS/JS/image/page links are **root-absolute** (`/style.css`, `/app.js`,
-`/assets/…`, `/download.html`). This is deliberate: shared links arrive with
+`/assets/…`, `/download`). This is deliberate: shared links arrive with
 query strings and sometimes nested paths (`/post/abc123`), and relative
 paths would resolve against that path, break, and get swallowed by the
 `_redirects` catch-all. Because of this, serve the site from the **domain
@@ -1595,7 +1625,7 @@ Two cases needed specific handling:
 An explicit stop sets `audio.userMuted`, which every later gesture checks, so muting survives
 navigation and any amount of scrolling.
 
-### `/contact.html`, and the three-step flow
+### `/contact`, and the three-step flow
 
 The form used to sit in the middle of `about.html`, between the creator biography and
 the closing call-to-action, which made that page do two unrelated jobs. It has its own
@@ -1659,7 +1689,7 @@ half-copy of the validation that then drifts.
 
 `credits.html` is a single-viewport composition the visitor drives with a wheel, so
 every extra piece of chrome competes with it. The header now carries exactly one link —
-**Back to Square**, to `/index.html` — where it used to carry "Why Agora" (duplicating
+**Back to Square**, to `/` — where it used to carry "Why Agora" (duplicating
 the home page), "Contact" (duplicating every other page's footer) and the exit. The
 bottom bar's contact address is replaced by a colophon, `Agora · © <year> Agora`, with
 the year in the shared `#year` span so `initChrome` keeps it current like every other
@@ -1695,7 +1725,7 @@ Fixed:
   on all four full-shell pages, so About was unreachable from the bottom of every other
   page. All four now carry identical six-link header and footer navs, asserted as a set.
 * **The footer's "Why Agora" was a bare `#why-agora`** while the header's was
-  `/index.html#why-agora`. Same destination, two hrefs, and the bare one only resolves on
+  `/#why-agora`. Same destination, two hrefs, and the bare one only resolves on
   the page that owns the anchor — `app.js` papered over it by routing a bare hash home, so
   it worked with JavaScript and was dead without it. Now absolute, and the test allows a
   bare hash *only* on a page that contains that anchor id, which is the one place
@@ -1831,7 +1861,7 @@ node --check app.js  # JavaScript syntax validation
 
 ## Navigation and shared links
 
-- “Why Agora” targets `/index.html#why-agora` (a local fragment on home).
+- “Why Agora” targets `/#why-agora` (a local fragment on home).
   Its 5rem scroll margin keeps the fixed header clear of the section.
   Smooth scrolling honors reduced-motion preferences.
 - `shared-post.html` is an external deep-link entrypoint, not a marketing page.

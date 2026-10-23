@@ -116,11 +116,11 @@
   // correctly no matter what path or query string the visitor
   // arrived on — e.g. a shared link like /shared-post.html?post=…
   var PAGE_MAP = {
-    home: '/index.html',
-    download: '/download.html',
-    about: '/about.html',
-    credits: '/credits.html',
-    contact: '/contact.html'
+    home: '/',
+    download: '/download',
+    about: '/about',
+    credits: '/credits',
+    contact: '/contact'
   };
 
   var routerState = {
@@ -141,10 +141,41 @@
     }
   }
 
+  // Explicit mapping: assets and enriched /post/:id or /p/:id routes must never
+  // be treated as static page aliases.
+  var PAGE_FILES = {
+    '/': '/index.html', '/about': '/about.html', '/download': '/download.html',
+    '/contact': '/contact.html', '/credits': '/credits.html',
+    '/shared-post': '/shared-post.html'
+  };
+
   function canonicalPath(url) {
-    var path = url.pathname || '/index.html';
-    if (path === '/' || path === '') return '/index.html';
-    return path;
+    var path = url.pathname || '/';
+    if (path === '/index.html') return '/';
+    var clean = path.replace(/\.html$/, '').replace(/\/$/, '') || '/';
+    return Object.prototype.hasOwnProperty.call(PAGE_FILES, clean) ? clean : path;
+  }
+
+  function normalizeInitialUrl() {
+    var url = new URL(window.location.href);
+    var clean = canonicalPath(url);
+    if (clean !== url.pathname) {
+      window.history.replaceState(window.history.state, '', clean + url.search + url.hash);
+    }
+  }
+
+  function fetchPage(url, options) {
+    return fetch(url.href, options).then(function (response) {
+      // Python's static server knows the file, not the clean route. Retry only a
+      // real 404 and only for a known static page; history still uses url, never
+      // this implementation-detail URL. Preserve the query, omit the fragment.
+      var file = PAGE_FILES[canonicalPath(url)];
+      if (response.status === 404 && file && file !== url.pathname) {
+        var fallback = new URL(file + url.search, url.origin);
+        return fetch(fallback.href, options);
+      }
+      return response;
+    });
   }
 
   function syncPageLinks() {
@@ -170,13 +201,14 @@
       // A hash-only Why Agora link on a secondary page should still land on
       // the home section; on the home page initSmoothScroll owns it instead.
       url = /^#/.test(href) && !getHashTarget(href)
-        ? new URL('/index.html' + href, window.location.href)
+        ? new URL('/' + href, window.location.href)
         : new URL(href, window.location.href);
     } catch (error) {
       return null;
     }
     if (url.origin !== window.location.origin || !/^https?:$/.test(url.protocol)) return null;
-    if (!/(^|\/)([^/]+\.html?)$/i.test(url.pathname) && url.pathname !== '/') return null;
+    url.pathname = canonicalPath(url);
+    if (!Object.prototype.hasOwnProperty.call(PAGE_FILES, url.pathname)) return null;
     if (/\.apk$/i.test(url.pathname)) return null;
     return url;
   }
@@ -221,6 +253,8 @@
   }
 
   function routeTo(url, pushHistory) {
+    url = new URL(url.href);
+    url.pathname = canonicalPath(url);
     var targetPath = canonicalPath(url);
     var currentUrl = new URL(window.location.href);
     // Compare against the hydrated DOM route, not only location.pathname:
@@ -237,7 +271,7 @@
     routerState.abortController = typeof AbortController === 'function' ? new AbortController() : null;
     doc.documentElement.classList.add('is-pjax-loading');
 
-    return fetch(url.href, {
+    return fetchPage(url, {
       headers: { 'X-Requested-With': 'PJAX' },
       signal: routerState.abortController ? routerState.abortController.signal : undefined
     }).then(function (response) {
@@ -965,7 +999,7 @@
        syntax would take it raw: resolvePostId's charset permits '=', which is
        a delimiter inside an intent URI. For a UUID the encoding is a no-op, so
        the emitted string is byte-identical either way. */
-    var fallback = window.location.origin + '/download.html';
+    var fallback = window.location.origin + '/download';
     return 'intent://' + CANONICAL_HOST + '/post/' + encodeURIComponent(postId) +
       '#Intent;scheme=https;package=' + ANDROID_PACKAGE +
       ';S.browser_fallback_url=' + encodeURIComponent(fallback) + ';end;';
@@ -3052,6 +3086,7 @@
   }
 
   function boot() {
+    normalizeInitialUrl();
     /* Ambient audio/cursor/mesh are initialized once; everything below is safe to
        rerun after the router swaps a page shell.
 
