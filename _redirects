@@ -1,12 +1,7 @@
-# Legacy file URLs redirect before page rewrites. Queries are preserved.
-/index.html        /                        301
-/about.html        /about                   301
-/download.html     /download                301
-/contact.html      /contact                 301
-/credits.html      /credits                 301
-/shared-post.html  /shared-post             301
-/privacy.html      /privacy                 301
-# Netlify / Cloudflare-Pages style redirects.
+# Cloudflare Pages internal rewrites only.
+# Never redirect .html destinations back to their source paths: those reverse
+# rules can re-enter these rewrites. Pages handles native HTML normalization.
+# Do not add trailing-slash redirects here.
 # Pretty share links -> the shared-post landing page.
 #
 # These are 200 rewrites: the edge serves shared-post.html's bytes while the
