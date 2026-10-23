@@ -92,23 +92,6 @@
     context.globalAlpha = 1;
   }
 
-  /* ---- the wheel's spin, published to the background mesh ----------------
-     Scrolling has to ripple the mesh even with the music muted or paused, and
-     the canvas lives in a different section from the rotary physics -- so the
-     angular velocity is published here rather than passed down a call chain
-     that does not exist. `at` is the timestamp of the last write: the rotary's
-     frame loop STOPS once the wheel settles, which would otherwise freeze the
-     last ripple on screen forever. readSpin() decays by age instead, so the
-     mesh returns to calm on its own as the wheel locks onto a contributor. */
-  var wheelSpin = { velocity: 0, at: -1e9 };
-  var SPIN_DECAY_MS = 260;      // e-folding time for a ripple dying away
-  var SPIN_REFERENCE = 420;     // deg/s that counts as a full-strength ripple
-
-  function readSpin(now) {
-    var age = Math.max(0, now - wheelSpin.at);
-    return wheelSpin.velocity * Math.exp(-age / SPIN_DECAY_MS);
-  }
-
   /* One place that asks the audio facade for its band metrics, so the mesh
      and the wheels all degrade identically when the
      facade is absent, older than getBands(), or throws. */
@@ -133,55 +116,6 @@
     var h = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263);
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return (h ^ (h >>> 16)) >>> 0;
-  }
-
-  /* ---- scroll shockwaves ----------------------------------------------------
-     Continuous scrolling ripples the mesh through the spin velocity above, but
-     a committed contributor is a discrete impact and deserves a discrete ring.
-     The rings live here, at module scope, because the rotary physics and the
-     canvas are separate sections with no call chain between them -- the same
-     reason wheelSpin lives here. The mesh ages them out; nothing else reads
-     them. Capped so a long fling cannot grow the list without bound. */
-  var MESH_PULSE_MAX = 6;
-  var MESH_PULSE_SPEED = 900;    // px/s the ring expands at
-  var MESH_PULSE_LIFE = 1100;    // ms before a ring is dropped
-  var MESH_PULSE_LIFT = 20;      // px of displacement at full strength
-  var meshPulses = [];
-  var NO_PULSES = [];            // shared empty result: no allocation when idle
-
-  function pushMeshPulse(strength) {
-    if (meshPulses.length >= MESH_PULSE_MAX) meshPulses.shift();
-    meshPulses.push({
-      at: window.performance && window.performance.now
-        ? window.performance.now()
-        : Date.now(),
-      x: window.innerWidth * 0.5,
-      y: window.innerHeight * 0.5,
-      strength: clamp(strength, 0, 1)
-    });
-  }
-
-  function activePulses(now) {
-    if (!meshPulses.length) return NO_PULSES;
-    var out = [];
-    for (var i = meshPulses.length - 1; i >= 0; i -= 1) {
-      var age = now - meshPulses[i].at;
-      if (age > MESH_PULSE_LIFE) {
-        meshPulses.splice(i, 1);   // drop on read: there is no reaper loop
-        continue;
-      }
-      var t = age / MESH_PULSE_LIFE;
-      out.push({
-        x: meshPulses[i].x,
-        y: meshPulses[i].y,
-        radius: (age / 1000) * MESH_PULSE_SPEED,
-        // The band widens as it expands, so the ring smears out rather than
-        // staying a hard circle shrinking to nothing.
-        sigma2: 2 * Math.pow(90 + (t * 190), 2),
-        strength: meshPulses[i].strength * (1 - t) * MESH_PULSE_LIFT
-      });
-    }
-    return out.length ? out : NO_PULSES;
   }
 
   /* ------------------------------------------------------------
@@ -1525,6 +1459,28 @@
        -- the vertices move, so the triangles would flip constantly -- and
        re-running Bowyer-Watson on ~900 moving points is not something a phone
        survives. Visually the two are indistinguishable at this opacity.     */
+    /* ---- the one background mesh, for the whole site ----------------------
+       A jittered grid triangulated into a low-poly field. Its motion has two
+       parts that are deliberately kept apart:
+
+         * a FLOW FIELD -- three octaves of plane waves with constant
+           wavelengths, constant speeds and constant amplitudes. It runs at the
+           same strength whether the music is playing, paused, or absent, so the
+           background is never static and never changes character when audio
+           starts.
+         * RIPPLES -- discrete droplets dropped where the audio says something
+           happened. They expand as concentric rings and fade out toward the
+           screen edges. They are events, not a level: a piano keystroke makes
+           one droplet, not a screen-wide distortion.
+
+       The topology (which diagonal each cell splits along, and how far each
+       vertex sits off the lattice) is hashed from (row, column) once per resize,
+       so it is identical every frame. A triangulation recomputed per frame would
+       boil, and Bowyer-Watson on ~600 moving points is not survivable on a phone.
+
+       There used to be two canvases here -- a square dot matrix site-wide and a
+       sine wave mesh on the credits screen alone. They doubled the frame cost and
+       read as moire where they crossed. This is the only one.               */
     function initAmbientMesh() {
       var canvas = doc.createElement('canvas');
       var context = canvas.getContext('2d');
@@ -1547,37 +1503,111 @@
       var MESH_GLOW_BLOOM = 0.42;   // minimal glow: a soft edge, not a halo
       var MESH_GLOW_SPREAD = 1.9;   // sprite covers radius * 2 * this
 
-      /* Keeping the lattice from tearing -- a SPATIAL-FREQUENCY budget, not an
-         amplitude one, and the difference is the whole reason the waves can be
-         as large as they are.
+      var TAU = 6.283185307179586;
 
-         Two neighbouring vertices cross only when their displacements DIFFER by
-         more than the gap between them. A smooth swell cannot do that however
-         large it gets: the Gaussian front has a standard deviation around 230px,
-         four cells wide, so adjacent vertices ride it almost identically and the
-         field is free to heave by a third of a cell. Capping the front's
-         amplitude the way an earlier draft did bought no safety at all and threw
-         away most of the motion.
+      /* ---- the flow field --------------------------------------------------
+         Three plane waves, each drifting in +x, each tilted differently in y.
 
-         What CAN tear the lattice are the sharp terms. The per-vertex jitter's
-         wavelength is exactly one cell, so it spends 2*JITTER of the budget
-         unconditionally. The travelling sine's wavelength shrinks as the dominant
-         pitch rises: a sine of amplitude A and wavenumber k moves one neighbour
-         past the next by at most A*k*spacing, so it is safe while
-         A <= (TEAR_LIMIT - 2*JITTER) / k. k is known per frame, which means the
-         ceiling is computed from the wavelength the audio actually asked for
-         rather than guessed at -- a bright passage gets finer ripples AND a lower
-         amplitude ceiling, which is what a real membrane does.
+         EVERY ONE OF THESE NUMBERS IS A CONSTANT, and that is the fix. The
+         previous version derived its wavenumber from the dominant pitch and then
+         computed the travelling phase as `time * kx * SPEED`. When kx changed, the
+         phase changed by `time * dk * SPEED` -- 239 radians after a minute open,
+         so the entire field teleported, and the longer the page stayed up the
+         worse it got. Phases are now INTEGRATED (`phase += k * speed * dt`),
+         which is continuous by construction even if the speed did vary, and it
+         does not. Audio drives brightness and drops droplets; it never touches
+         the baseline motion, which is what makes the flow identical with the
+         music on, off, or paused.
 
-         Both bounds are verified by running the mesh and measuring the signed
-         area of all ~550 triangles, in silence and at full scale; see
-         test_the_displacement_budget_holds_the_lattice_together. */
-      var JITTER = 0.12;        // per-vertex, fixed at resize
-      var TEAR_LIMIT = 0.45;    // how far a vertex may move past its neighbour
+         The wavelengths are incommensurate (1400/620/300) so the composite never
+         visibly repeats, and the tilts give the field curl: identical x-only
+         terms would read as the whole screen sliding, whereas tilted terms read
+         as a liquid moving through the lattice. */
+      var FLOW_LAMBDA_1 = 1400, FLOW_SPEED_1 = 165;   // broad slow swell
+      var FLOW_LAMBDA_2 = 620, FLOW_SPEED_2 = 205;    // mid, counter-tilted
+      var FLOW_LAMBDA_3 = 300, FLOW_SPEED_3 = 150;    // fine surface detail
+      var FLOW_DY_1 = 0.150, FLOW_DY_2 = 0.065, FLOW_DY_3 = 0.024;  // of a cell
+      var FLOW_DX_1 = 0.080, FLOW_DX_2 = 0.040, FLOW_DX_3 = 0.016;
+      var FLOW_TILT_Y1 = 0.32, FLOW_TILT_Y2 = -0.45, FLOW_TILT_Y3 = 0.18;
+      var FLOW_TILT_X1 = 0.55, FLOW_TILT_X2 = 0.38, FLOW_TILT_X3 = 0.72;
+      // dx and dy share an octave's phase but are offset, so a vertex does not
+      // simply translate along one diagonal: the offset is what makes the path it
+      // traces a loop rather than a line.
+      var FLOW_PHASE_OFFSET = 1.7;
 
-      var WAVE_SPEED = 210;     // px/s phase speed of the travelling sine
-      var FRONT_SPEED = 260;    // px/s: the localized crest sweeping in +x
-      var FRONT_PAD = 420;      // px of off-screen lead-in and lead-out
+      var K1 = TAU / FLOW_LAMBDA_1;
+      var K2 = TAU / FLOW_LAMBDA_2;
+      var K3 = TAU / FLOW_LAMBDA_3;
+
+      /* ---- droplets --------------------------------------------------------
+         A ripple is a ring that expands from where the sound was, carries two or
+         three concentric crests inside a Gaussian envelope, and fades both with
+         age and as it approaches the screen edge.
+
+         RIPPLE_LAMBDA is the one number here with a hard constraint on it. A
+         ring of amplitude A and wavenumber k moves one vertex past its neighbour
+         by A*k*spacing, so a shorter -- sharper, prettier -- ripple is exactly
+         what inverts triangles. 520px against a 54px cell keeps it inside the
+         budget below with room for the flow field as well. */
+      var RIPPLE_MAX = 4;             // concurrent droplets before eviction
+      var RIPPLE_SPEED = 340;         // px/s the ring expands at
+      var RIPPLE_LAMBDA = 520;        // px between concentric crests
+      var RIPPLE_SIGMA = 145;         // px: envelope width at the centre
+      var RIPPLE_SPREAD = 0.18;       // envelope widens by this fraction of radius
+      var RIPPLE_AMP = 0.19;          // of a cell, at full strength
+      var RIPPLE_LIFE = 3200;         // ms hard cap; the edge fade usually ends it first
+      var RIPPLE_ATTACK = 110;        // ms to reach full amplitude: no one-frame pop
+      var RIPPLE_EDGE_START = 0.45;   // fraction of the half-diagonal where fading begins
+      var RIPPLE_RADIAL = 0.18;       // inward pull, so a ring reads as expanding
+      var K_RIPPLE = TAU / RIPPLE_LAMBDA;
+
+      /* ---- the trigger -----------------------------------------------------
+         A droplet is an EVENT, so it needs three things an envelope follower does
+         not: a threshold so the noise floor cannot drop one, a refractory period
+         so one keystroke -- which lasts several frames -- does not become several
+         droplets, and a bounded rate so a busy passage stays readable.
+
+         Triggering off the facade's `onset` was the wrong instrument: it is
+         clamped hard at 1.0 for continuous brightness, so above the clip point a
+         fortissimo is indistinguishable from a forte, and it then DECAYS through
+         the threshold over ~200ms, re-firing the refractory gate into a
+         machine-gun of identical rings. Novelty is computed here instead, from
+         the smoothed bands, and mapped through a soft knee that never saturates. */
+      var RIPPLE_THRESHOLD = 0.035;
+      var RIPPLE_REFRACTORY = 160;    // ms; ~6 droplets/s is the readable maximum
+      var RIPPLE_MIN_STRENGTH = 0.34; // the quietest qualifying note is still visible
+      var RIPPLE_KNEE = 0.11;         // x/(x+knee): monotonic, asymptotic, never clips
+      var ENVELOPE_TAU_RISE = 0.30;   // s: slow, so a keystroke stands above it
+      var ENVELOPE_TAU_FALL = 0.09;   // s: fast, so a stop does not leave it deaf
+      var ORIGIN_TAU = 0.22;          // s: the droplet source glides, never jumps
+
+      /* ---- the lattice's integrity budget ----------------------------------
+         A vertex may move, but if two neighbours close the gap between them the
+         triangles they share invert -- the wireframe equivalent of the mesh
+         tearing, invisible in a diff and only mildly visible on screen, which is
+         exactly the combination that ships.
+
+         The budget is on the GRADIENT of the displacement field, not on its
+         magnitude, and that distinction is what allows waves this large. A smooth
+         swell cannot tear the lattice however far it carries a vertex, because
+         adjacent vertices ride it identically; only a sharp term can. So:
+
+           * jitter spends 2*JITTER unconditionally -- its wavelength IS one cell;
+           * each plane wave spends amplitude * wavenumber, per axis, times
+             (1 + |tilt|) to cover the off-axis component;
+           * a ring spends amplitude * (wavenumber + 1/sigma), the second term
+             being the envelope's own slope.
+
+         test_the_displacement_budget_holds_the_lattice_together recomputes that
+         sum from these constants, and the harness measures the signed area of
+         every triangle every frame to prove the bound is not just conservative. */
+      var JITTER = 0.075;
+      var TEAR_LIMIT = 0.5;
+
+      // A frame gap must never become a position jump. A backgrounded tab hands
+      // back a several-second timestamp; integrating an unclamped dt would fling
+      // the whole field across the screen on return.
+      var MAX_FRAME_DT = 0.05;
 
       function readPalette() {
         try {
@@ -1612,16 +1642,66 @@
         };
       }
 
+      function smoothstep(lo, hi, x) {
+        var t = clamp((x - lo) / (hi - lo), 0, 1);
+        return t * t * (3 - (2 * t));
+      }
+
+      /* Frame-rate independent exponential approach. Every follower in here uses
+         it rather than a bare coefficient, because `x += (target - x) * 0.06`
+         converges twice as fast at 120Hz as at 60Hz -- the motion would feel
+         different on a phone's 60Hz panel and a laptop's 120Hz one. */
+      function approach(current, target, tau, dt) {
+        return current + ((target - current) * (1 - Math.exp(-dt / tau)));
+      }
+
       var width = 0;
       var height = 0;
-      var spacing = 62;
+      var spacing = 54;
       var columns = 0;
       var rows = 0;
       var pixelRatio = 1;
       var pts = null;        // per-frame vertex positions, rows*columns*2
+      var lights = null;     // per-vertex droplet crest, 0..1, for the blit pass
       var jitterX = null;    // per-vertex, fixed at resize
       var jitterY = null;
       var flips = null;      // per-cell: which diagonal that cell splits along
+      var maxReach = 800;    // half the diagonal: how far a ring travels before it is gone
+      var rippleAmp = 8;     // RIPPLE_AMP * spacing, in px
+
+      /* Per-frame state that MUST persist across calls. The flow phases are
+         integrated, the droplet envelope is a follower, and the droplet source
+         glides -- all three break, visibly, if they are re-created per frame. */
+      var phase1 = 0;
+      var phase2 = 2.1;
+      var phase3 = 4.2;
+      var lastTimestamp = 0;
+      /* The mesh's own clock, advanced by the CLAMPED dt. Every time-dependent
+         quantity in here reads this rather than the rAF timestamp, for one reason:
+         a frame gap must never become a position jump.
+
+         Droplets were the last thing still aged off the raw timestamp, and it
+         showed. Returning to a backgrounded tab hands back a several-second delta,
+         so a ring that was 300px into its expansion arrived at 3000px -- or was
+         culled outright -- in a single frame. Measured, that was a 13px jump across
+         the whole field. On this clock a 9-second gap advances the animation by
+         50ms, so a ring resumes where it left off. */
+      var clock = 0;
+      var envelope = 0;
+      var lastRippleAt = -1e9;
+      var originX = 0;
+      var originY = 0;
+      var ripples = [];
+
+      // Derived per-frame ring values, in fixed reused arrays. A busy passage
+      // must not allocate: at 60fps even a handful of throwaway objects a frame is
+      // enough to make a phone's GC visible as a stutter.
+      var ringX = new Float64Array(RIPPLE_MAX);
+      var ringY = new Float64Array(RIPPLE_MAX);
+      var ringR = new Float64Array(RIPPLE_MAX);
+      var ringS2 = new Float64Array(RIPPLE_MAX);
+      var ringA = new Float64Array(RIPPLE_MAX);
+      var ringB = new Float64Array(RIPPLE_MAX);
 
       function resize() {
         width = window.innerWidth;
@@ -1629,8 +1709,7 @@
         // A triangulated field reads denser than the square grid it replaced --
         // three edges per cell instead of two -- so the cell is coarser than the
         // old matrix's 30/36px while carrying MORE structure. At 54px a 1440x900
-        // viewport gets ~600 vertices, ~550 triangles and ~1700 edges, which is
-        // the "richly filled" end of readable without ~2600 blits a frame.
+        // viewport gets ~600 vertices, ~550 triangles and ~1700 edges.
         spacing = width < 600 ? 38 : 54;
         pixelRatio = Math.min(window.devicePixelRatio || 1, 1.75);
         canvas.width = Math.floor(width * pixelRatio);
@@ -1647,14 +1726,22 @@
         var vertices = rows * columns;
         var cells = (rows - 1) * (columns - 1);
         pts = new Float32Array(vertices * 2);
+        lights = new Float32Array(vertices);
         jitterX = new Float32Array(vertices);
         jitterY = new Float32Array(vertices);
         flips = new Uint8Array(Math.max(0, cells));
 
+        maxReach = 0.5 * Math.sqrt((width * width) + (height * height));
+        rippleAmp = spacing * RIPPLE_AMP;
+        if (!originX && !originY) { originX = width * 0.5; originY = height * 0.5; }
+
         /* Deterministic jitter from a hash of (row, column). Not Math.random():
-           the topology has to survive from frame to frame, and a jitter
-           recomputed per frame would make the whole mesh boil. The high and low
-           halves of the hash drive x and y, so the two axes are uncorrelated. */
+           the topology has to survive from frame to frame, and a jitter recomputed
+           per frame would make the whole mesh boil. It is also deliberately GENTLE
+           -- 0.08 of a cell -- because jitter is the one term whose wavelength is
+           a single cell, so it is the most expensive thing in the tear budget and
+           the first place an "organic" tweak turns into a shredding lattice. The
+           random diagonal lean carries most of the organic character anyway. */
         for (var i = 0; i < vertices; i += 1) {
           var h = hash2(i % columns, (i - (i % columns)) / columns);
           jitterX[i] = (((h & 0xffff) / 0xffff) - 0.5) * 2 * JITTER * spacing;
@@ -1667,64 +1754,100 @@
         }
       }
 
+      function dropRipple(strength) {
+        if (ripples.length >= RIPPLE_MAX) ripples.shift();
+        ripples.push({ at: clock, age: 0, x: originX, y: originY, strength: strength });
+      }
+
+      /* Compact the live rings and derive their per-frame values in one pass.
+         Dropped on read rather than by a timer: there is nothing else running that
+         could reap them, and a ring that expired while the tab was backgrounded
+         must not be drawn at full size on the way back. */
+      function prepareRipples(dt) {
+        var keep = 0;
+        for (var i = 0; i < ripples.length; i += 1) {
+          var r = ripples[i];
+          r.age += dt * 1000;          // advanced by the clamped dt, not by wall clock
+          if (r.age > RIPPLE_LIFE) continue;
+          var age = r.age;
+          var t = age / RIPPLE_LIFE;
+          var radius = (age / 1000) * RIPPLE_SPEED;
+          // Fades with age AND as it reaches the edge, so a ring dies on its way
+          // out instead of being cut off by the screen boundary.
+          var edge = 1 - smoothstep(RIPPLE_EDGE_START, 1, radius / maxReach);
+          /* And it fades IN. A droplet born at full amplitude displaces the
+             vertices under it by its whole 10px in a single frame, which is a pop,
+             not an impact -- measured, that was a 6.3px step, twenty times the
+             flow field's own peak velocity and the single largest discontinuity in
+             the frame. 110ms is well inside the ~200ms the eye needs to read an
+             event as sudden, so it still lands like a droplet. */
+          var attack = smoothstep(0, RIPPLE_ATTACK, age);
+          var amp = rippleAmp * r.strength * Math.pow(1 - t, 1.25) * edge * attack;
+          if (amp < 0.05) continue;              // spent; stop paying for it
+          var sigma = RIPPLE_SIGMA + (radius * RIPPLE_SPREAD);
+          ripples[keep] = r;
+          ringX[keep] = r.x;
+          ringY[keep] = r.y;
+          ringR[keep] = radius;
+          ringS2[keep] = 2 * sigma * sigma;
+          ringA[keep] = amp;
+          ringB[keep] = radius + (sigma * 2.6);  // support radius, for rejection
+          keep += 1;
+        }
+        ripples.length = keep;
+        return keep;
+      }
+
       function draw(timestamp) {
         // A PJAX swap may have detached us between frames; stop rather than keep
         // painting an invisible canvas for the rest of the session.
         if (!canvas.isConnected) return;
 
-        var time = timestamp / 1000;
+        if (!lastTimestamp) lastTimestamp = timestamp;
+        var dt = clamp((timestamp - lastTimestamp) / 1000, 0, MAX_FRAME_DT);
+        lastTimestamp = timestamp;
+        clock += dt * 1000;
+
+        // Integrated, not `time * speed`. See the flow-field comment above.
+        phase1 += K1 * FLOW_SPEED_1 * dt;
+        phase2 += K2 * FLOW_SPEED_2 * dt;
+        phase3 += K3 * FLOW_SPEED_3 * dt;
+
         var b = readBands();
-
-        /* Scroll coupling is exclusive to the credits screen. Nothing else
-           publishes a spin, so readSpin() would already return ~0 -- but the
-           body class is checked explicitly anyway, because a PJAX swap away from
-           credits leaves the last velocity in the slot and it must not keep
-           rippling a page that has no wheels on it. */
-        var credits = doc.body.classList.contains('credits-rotary-page');
-        var spin = credits ? readSpin(timestamp) : 0;
-        var spinWave = clamp(Math.abs(spin) / SPIN_REFERENCE, 0, 1);
-        var spinDir = spin < 0 ? -1 : 1;
-
         context.clearRect(0, 0, width, height);
 
-        /* ---- the left-to-right wave field ---------------------------------
-           Every travelling term here is phased (k*x - w*t). A crest satisfies
-           x = (phase + w*t)/k, so it moves in +x as time grows. The opposite
-           sign is the mistake to avoid: it looks identical frame to frame and
-           sweeps right to left.
+        /* ---- is there something to drop a droplet for? ---------------------
+           Novelty is how far the instantaneous energy sits above its own recent
+           average, which is what separates "a note struck" from "the track is
+           loud". Mid carries a piano keystroke; bass catches a low note or a
+           swell that barely moves mid, which is the "volume shifts" half of the
+           brief. The follower rises slowly and falls quickly, so a crescendo
+           keeps registering as a train of droplets while a stop does not leave
+           the detector deaf to the next phrase. */
+        var energy = (b.mid * 0.55) + (b.bass * 0.30) + (b.treble * 0.15);
+        var novelty = energy - envelope;
+        envelope = approach(envelope, energy, novelty > 0 ? ENVELOPE_TAU_RISE : ENVELOPE_TAU_FALL, dt);
 
-           Two components, because one is not enough to read as propagation. A
-           continuous sine gives the whole field a direction of travel, and a
-           localized Gaussian front sweeping the width gives the eye a crest to
-           follow -- that is what makes the motion legible as a wave crossing
-           the screen rather than as surface shimmer.                        */
-        var kx = 0.0062 + (b.pitch * 0.019);   // pitch shifts the wavelength
-        var travel = time * (kx * WAVE_SPEED);
-        var period = width + (FRONT_PAD * 2);
-        var front = ((time * FRONT_SPEED) % period) - FRONT_PAD;
-        var frontSigma = Math.max(120, width * 0.16);
-        var frontSigma2 = 2 * frontSigma * frontSigma;
+        // The droplet source glides toward where the sound is -- spectral
+        // centroid across the width, dominant pitch down the height -- instead of
+        // jumping there. A teleporting source is as chaotic as a teleporting field.
+        originX = approach(originX, width * (0.14 + (0.72 * b.centroid)), ORIGIN_TAU, dt);
+        originY = approach(originY, height * (0.20 + (0.60 * (1 - b.pitch))), ORIGIN_TAU, dt);
 
-        /* Amplitudes, split by how sharp each term is.
+        if (novelty > RIPPLE_THRESHOLD && (clock - lastRippleAt) >= RIPPLE_REFRACTORY) {
+          lastRippleAt = clock;
+          dropRipple(RIPPLE_MIN_STRENGTH + ((1 - RIPPLE_MIN_STRENGTH)
+            * (novelty / (novelty + RIPPLE_KNEE))));
+        }
 
-           The smooth ones are generous precisely because smoothness is what keeps
-           them safe. The front is the term the eye follows: a localized crest
-           crossing the whole width every ~9s, which is what makes the motion read
-           as a wave travelling through the field rather than as the field
-           shimmering in place. It is present at full strength with the music OFF,
-           because the site boots muted and a background that only moves once you
-           press play is a background that looks broken. */
-        var driftAmp = spacing * 0.10;
-        var frontAmp = spacing * (0.20 + (b.bass * 0.18) + (b.onset * 0.24));
-        var spinAmp = spacing * 0.22 * spinWave;
+        var ringCount = prepareRipples(dt);
 
-        // The sharp one, capped against its own wavenumber for the reason above.
-        var sineAmp = Math.min((TEAR_LIMIT - (2 * JITTER)) / kx,
-          spacing * ((0.30 * b.bass) + (0.18 * b.treble)));
-
-        // Shockwave rings the credits wheels push on a committed contributor.
-        var pulses = activePulses(timestamp);
-        var pulseCount = pulses.length;
+        var a1 = spacing * FLOW_DY_1;
+        var a2 = spacing * FLOW_DY_2;
+        var a3 = spacing * FLOW_DY_3;
+        var c1 = spacing * FLOW_DX_1;
+        var c2 = spacing * FLOW_DX_2;
+        var c3 = spacing * FLOW_DX_3;
 
         var row;
         var column;
@@ -1735,48 +1858,43 @@
             var gx = ((column - 1) * spacing) + jitterX[i];
             var gy = ((row - 1) * spacing) + jitterY[i];
 
-            var wave = Math.sin((gx * kx) - travel + (gy * 0.0022));
-            var fd = gx - front;
-            var packet = Math.exp(-(fd * fd) / frontSigma2);
+            var f1 = (K1 * (gx + (FLOW_TILT_Y1 * gy))) - phase1;
+            var s1 = Math.sin(f1);
+            var dy = (s1 * a1)
+              + (Math.sin((K2 * (gx + (FLOW_TILT_Y2 * gy))) - phase2) * a2)
+              + (Math.sin((K3 * (gx + (FLOW_TILT_Y3 * gy))) - phase3) * a3);
+            var dx = (Math.cos((K1 * ((FLOW_TILT_X1 * gx) + gy)) - phase1 - FLOW_PHASE_OFFSET) * c1)
+              + (Math.cos((K2 * ((FLOW_TILT_X2 * gx) - gy)) - phase2 - FLOW_PHASE_OFFSET) * c2)
+              + (Math.cos((K3 * ((FLOW_TILT_X3 * gx) + gy)) - phase3 - FLOW_PHASE_OFFSET) * c3);
 
-            // Idle drift keeps the background alive with the music off; every
-            // audio term below is MULTIPLIED by its band, so silence cancels it
-            // exactly rather than leaving a wobble that ignores the mute button.
-            /* Every phase here is (spatial term) - (time term), the +x
-               convention. The idle drift used to be written the other way round
-               -- sin(time*0.23 + column*0.17) -- which is a crest satisfying
-               column = (C - 0.23*t)/0.17, so it walked LEFT. It was also the
-               loudest term in silence, which is the site's default state, so the
-               one wave every visitor saw with the music off travelled backwards.
-               Measuring the trough's drift over 620 frames is what found it; no
-               amount of reading the source did. */
-            var dy = (Math.sin((column * 0.17) + (row * 0.41) - (time * 0.23)) * driftAmp)
-              + (wave * sineAmp)
-              - (packet * frontAmp);
-            var dx = (Math.cos((column * 0.37) - (time * 0.19)) * driftAmp * 0.5)
-              + (wave * sineAmp * 0.45);
-
-            for (var p = 0; p < pulseCount; p += 1) {
-              var pulse = pulses[p];
-              var pdx = gx - pulse.x;
-              var pdy = gy - pulse.y;
-              var pd = Math.sqrt((pdx * pdx) + (pdy * pdy));
-              var ring = pd - pulse.radius;
-              var lift = Math.exp(-(ring * ring) / pulse.sigma2) * pulse.strength;
+            var liftPeak = 0;
+            for (var p = 0; p < ringCount; p += 1) {
+              var rx = gx - ringX[p];
+              var ry = gy - ringY[p];
+              var d2 = (rx * rx) + (ry * ry);
+              var support = ringB[p];
+              /* Rejected on squared distance before any trigonometry. Outside the
+                 envelope's support the contribution is under 2%, and most vertices
+                 are outside most rings -- this is what keeps four concurrent
+                 droplets from costing four times the frame. */
+              if (d2 > (support * support)) continue;
+              var rd = Math.sqrt(d2);
+              var ring = rd - ringR[p];
+              // A cosine inside the envelope, so two or three concentric crests
+              // trail the leading edge. One Gaussian bump alone reads as a blob
+              // that grows; this reads as water.
+              var lift = Math.exp(-(ring * ring) / ringS2[p])
+                * Math.cos(K_RIPPLE * ring) * ringA[p];
               dy -= lift;
-              if (pd > 0.001) dx += (pdx / pd) * lift * 0.35;
+              if (rd > 0.001) dx -= (rx / rd) * lift * RIPPLE_RADIAL;
+              var magnitude = (lift < 0 ? -lift : lift);
+              if (magnitude > liftPeak) liftPeak = magnitude;
             }
 
-            if (spinWave > 0.001) {
-              // Radial from the middle of the screen, and the direction follows
-              // the sign of the spin so scrolling up and down travel oppositely.
-              var sx = gx - (width * 0.5);
-              var sy = gy - (height * 0.5);
-              var sd = Math.sqrt((sx * sx) + (sy * sy));
-              var sPhase = (sd * 0.012) - (time * 3.1 * spinDir);
-              dy += Math.sin(sPhase) * spinAmp;
-              dx += Math.cos(sPhase) * spinAmp * 0.4;
-            }
+            // The blit pass needs to know how hard a droplet is passing under this
+            // vertex, and recomputing the ring there would double the expensive
+            // part of the frame. Carried through a buffer instead, like positions.
+            lights[i] = clamp(liftPeak / rippleAmp, 0, 1);
 
             pts[index] = gx + dx;
             pts[index + 1] = gy + dy;
@@ -1788,12 +1906,8 @@
            Three edge families per cell: its top, its left, and one diagonal.
            Rows and columns are contiguous polylines; the diagonals are not, so
            they go in as individual segments but share the column pass's single
-           beginPath/stroke.
-
-           Two stroke calls for the whole grid. A stroke per edge would be ~3400
-           of them a frame, and the state changes alone would not survive a
-           phone -- the same reason the vertices are blitted from one sprite
-           instead of being given individual shadowBlur values.            */
+           beginPath/stroke. Two stroke calls for ~1700 edges -- a stroke per edge
+           would be ~1700 state changes a frame and would not survive a phone. */
         var rowAlpha = Math.min(0.18, 0.15 + (b.treble * 0.02) + (b.onset * 0.01));
         var colAlpha = Math.min(0.2, 0.16 + (b.treble * 0.025) + (b.onset * 0.015));
         context.lineWidth = 1;
@@ -1840,25 +1954,31 @@
         context.stroke();
 
         /* Vertices on top of the wireframe. 1.5px to 2.2px, 0.25 to 0.30 alpha.
-           With the whole field capped that low, the visible contrast has to come
-           from somewhere else -- so a vertex's alpha and radius ride the
-           travelling crest. The wave is legible as a bright band sweeping left
-           to right without any element of it exceeding its ceiling. */
+           With the whole field capped that low the contrast has to come from
+           somewhere else, so a vertex's alpha and radius ride BOTH the flow's
+           broadest octave and any droplet crest passing under it.
+
+           The sprite choice, by contrast, is STATIC -- one vertex in four gets the
+           brighter texture. It used to also switch when a crest was near, which is
+           a hard threshold: vertices popped between two textures as the wave
+           passed, and that popping is most of what read as flicker. All the
+           continuous variation now lives in alpha and radius, which cannot pop. */
         for (row = 0; row < rows; row += 1) {
           for (column = 0; column < columns; column += 1) {
             var q = ((row * columns) + column) * 2;
-            var x = pts[q];
-            var fx = x - front;
-            var near = Math.exp(-(fx * fx) / frontSigma2);
-            var w = 0.5 + (0.5 * Math.sin((x * kx) - travel));
-            var radius = Math.min(2.2, 1.5 + (w * 0.35) + (b.bass * 0.2) + (near * 0.15));
+            var vx = pts[q];
+            var vy = pts[q + 1];
+            var w = 0.5 + (0.5 * Math.sin((K1 * (vx + (FLOW_TILT_Y1 * vy))) - phase1));
+            var light = lights[(row * columns) + column];
+
+            var radius = Math.min(2.2, 1.5 + (w * 0.30) + (b.bass * 0.18) + (light * 0.22));
             var alpha = Math.min(0.3,
-              0.25 + (w * 0.02) + (near * 0.03) + (b.onset * 0.02) + (b.treble * 0.01));
-            var highlight = ((column + row) % 4) === 0 || near > 0.75;
+              0.25 + (w * 0.016) + (light * 0.020) + (b.onset * 0.008) + (b.treble * 0.006));
+            var highlight = ((column + row) % 4) === 0;
 
             drawGlow(context, highlight ? sprites.hi : sprites.node,
               highlight ? palette.hi : palette.node,
-              x, pts[q + 1], radius, alpha, MESH_GLOW_SPREAD);
+              vx, vy, radius, alpha, MESH_GLOW_SPREAD);
           }
         }
 
@@ -2160,13 +2280,6 @@
       state.transition += 1;
       var transitionId = state.transition;
 
-      /* A committed contributor is a physical impact, so it drives a shockwave
-         ring into the background mesh. Strength tracks how hard the wheel was
-         moving on arrival: a fling lands louder than a gentle snap. Called only
-         on the animated path, so the initial showMember(0, false) at boot does
-         not detonate a ring on a screen nobody has touched. */
-      pushMeshPulse(0.55 + (Math.abs(state.rotationVelocity) / MAX_ANGULAR_VELOCITY));
-
       allContents.forEach(function (content) { content.classList.remove('is-arriving'); });
 
       var arriving = [topSegments[state.memberIndex], bottomSegments[state.memberIndex]]
@@ -2291,14 +2404,14 @@
       );
       state.rotation += state.rotationVelocity * dt;
 
-      /* Publish the spin so both canvases can ripple from it. Scrolling has to
-         move the mesh with the music muted or paused, and the canvases are not
-         reachable from here through any call chain -- so the velocity goes via a
-         module-level slot. readSpin() decays it by AGE, which matters because
-         this loop stops the moment the wheel settles and would otherwise leave
-         the last ripple frozen on screen forever. */
-      wheelSpin.velocity = state.rotationVelocity;
-      wheelSpin.at = timestamp;
+      /* This loop publishes nothing to the background canvas, and that is
+         deliberate. Scrolling used to inject its angular velocity into the mesh
+         through a module-level slot; the credits screen is the heaviest page on
+         the site -- two large rotating discs, masks and rim gradients composited
+         over a full-viewport canvas -- and adding a per-vertex radial wave field
+         driven by gesture on top of that is what made it stutter. The mesh is now
+         identical on every page and completely independent of scroll input, so
+         this loop's only job is the wheel. */
 
       /* Lock exactly onto the target once it is close and slow, so the spring
          does not asymptote forever and idle a hair off-sector.

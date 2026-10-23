@@ -364,24 +364,37 @@ body {
   width: 100vw;
   height: 100vh;
   pointer-events: none;
-  opacity: 0.95;
-  mix-blend-mode: screen;
 }
 
-/* Screen blending brightens, which is exactly right on the dark theme's
-   near-black background (a 0.20-alpha line lifts it by 18-48 levels) and exactly
-   wrong on off-white: screen can only push a channel UP, and 247/255 has nowhere
-   to go. Measured, the mesh as written renders at 1.003:1 against --bg in light
-   theme -- invisible -- which quietly undid the deepened --mesh-* values above
-   and their "enough ink to read as a line" comment. Multiply takes the same
-   colours the other way and lands at 1.40:1 for lines and 1.68:1 for vertices,
-   a faint-by-design presence that matches the dark theme's rather than vanishing
-   next to it. */
-@media (prefers-color-scheme: light) {
-  .ambient-mesh {
-    mix-blend-mode: multiply;
-  }
-}
+/* Deliberately NO mix-blend-mode and NO element opacity, and that is a
+   performance decision rather than an aesthetic one.
+
+   A full-viewport `mix-blend-mode` makes the compositor read back and blend the
+   entire backdrop group on every single frame, and it defeats GPU layer caching --
+   on the credits screen, which already composites two large rotating discs with
+   masks and rim gradients over this canvas, it was the most expensive thing the
+   background was doing. `opacity: 0.95` then multiplied the whole layer again for
+   a 5% dim nobody could see.
+
+   Dropping both is close to free visually, because the two blend modes in use were
+   both nearly the identity against these backgrounds. Measured against --bg in
+   each theme, at the real 0.20 line / 0.30 vertex alphas:
+
+     dark   line    screen 1.213:1  ->  normal 1.214:1   (max channel delta 2.4/255)
+     dark   vertex  screen 1.486:1  ->  normal 1.497:1   (max channel delta 3.6/255)
+     light  line  multiply 1.374:1  ->  normal 1.394:1   (max channel delta 1.9/255)
+     light  vertex multiply 1.631:1 ->  normal 1.668:1   (max channel delta 2.9/255)
+
+   Screen on near-black and multiply on off-white are both within a few levels of
+   plain alpha compositing -- which is exactly why `screen` could hide the light
+   theme's mesh at 1.003:1 for so long: it was doing almost nothing in either
+   theme. Contrast is very slightly BETTER without it in both, and the numbers the
+   test computes now match what is on screen instead of being optimistic by the
+   element's 0.95.
+
+   test_the_mesh_is_visible_in_both_themes_without_a_blend_mode recomputes all four
+   of those ratios from the tokens on disk, so re-adding a blend mode -- or
+   deepening the palette without checking it still reads -- fails there. */
 
 main,
 .site-footer,

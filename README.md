@@ -921,26 +921,25 @@ pixels, doubled the frame cost, and where the two lattices crossed they read as
 moiré rather than as depth. `.ambient-mesh` is the single replacement; the credits
 layer, its initialiser and its teardown closure are deleted rather than disabled.
 
-It is a **jittered grid subdivided into triangles** — not a square lattice, and
-not a true Delaunay. The topology (how far each vertex sits off the lattice, and
-which diagonal each cell splits along) is hashed from `(row, column)` once per
-resize, so it is identical every frame. A triangulation recomputed per frame would
-boil, because the vertices move and the triangles would flip constantly; and
-re-running Bowyer–Watson on ~600 moving points is not something a phone survives.
-At this opacity the two are indistinguishable. Only one of them holds a frame rate.
+It is a **jittered grid subdivided into triangles** — not a square lattice, and not
+a true Delaunay. The topology (how far each vertex sits off the lattice, and which
+diagonal each cell splits along) is hashed from `(row, column)` once per resize, so
+it is identical every frame. A triangulation recomputed per frame would boil,
+because the vertices move and the triangles would flip constantly; and re-running
+Bowyer–Watson on ~600 moving points is not something a phone survives. At this
+opacity the two are indistinguishable. Only one of them holds a frame rate.
 
-The diagonals are chosen by hash rather than alternating, because a checkerboard
-of diagonals is as monotonous as no diagonals at all. `test_the_diagonal_choice_actually_varies`
-runs the real constants from `hash2()` over a 40×40 field and fails if they
-collapse to one orientation — the specific shape `Math.imul` losing its low bits
-takes, since the products then exceed 2^53 and only the high bits survive. That
-looks perfectly fine in the source and perfectly uniform on screen.
+The diagonals are chosen by hash rather than alternating, because a checkerboard of
+diagonals is as monotonous as no diagonals at all. `test_the_diagonal_choice_actually_varies`
+runs the real constants from `hash2()` over a 40×40 field and fails if they collapse
+to one orientation — the specific shape `Math.imul` losing its low bits takes, since
+the products then exceed 2^53 and only the high bits survive. That looks fine in the
+source and perfectly uniform on screen.
 
-Cell size is `54px` on desktop and `38px` under 600px: ~600 vertices, ~550
-triangles and ~1700 edges at 1440×900. Coarser than the old matrix's 30/36px, but
-carrying considerably more structure per vertex.
+Cell size is `54px` on desktop and `38px` under 600px: ~600 vertices, ~550 triangles
+and ~1700 edges at 1440×900, drawn in **two** `stroke()` calls.
 
-Calibrated four times. All four rows are recorded because the numbers are
+Calibrated five times. All five rows are recorded because the numbers are
 load-bearing and the direction of travel is not guessable from the end state — the
 middle row was a deliberate over-correction that a second review then pulled back.
 
@@ -949,94 +948,150 @@ middle row was a deliberate over-correction that a second review then pulled bac
 | original | 0.7-1.25px @ 0.045-0.13 | ≤ 0.13 | 0.12 cell |
 | "too faint" review | 2-4.5px @ 0.75-0.95 | 0.28-0.45 | 0.26 cell |
 | one mesh, first pass | 1.5-2.2px @ 0.25-0.35 | 0.15-0.20 | 0.26 cell |
-| **current** | **1.5-2.2px @ 0.25-0.30** | **0.15-0.20** | **up to 0.75 cell** |
+| unified, frequency-budgeted | 1.5-2.2px @ 0.25-0.30 | 0.15-0.20 | up to 0.75 cell |
+| **current** | **1.5-2.2px @ 0.25-0.30** | **0.15-0.20** | **flow 0.24 cell + droplets** |
 
-Hold the current row. Every one of those numbers is a `Math.min` ceiling rather
-than a target, so however hard the track hits, a vertex or a line cannot leave its
-band and start competing with the copy. `test_the_mesh_lines_are_calibrated_into_their_band`
+Hold the current row. Every one of those numbers is a `Math.min` ceiling rather than
+a target, so however hard the track hits, a vertex or a line cannot leave its band
+and start competing with the copy. `test_the_mesh_lines_are_calibrated_into_their_band`
 and `test_the_vertices_are_calibrated_into_their_band` fail if they do — and both
 also check the ramp can *reach* its ceiling. A `Math.min` that never binds is
-decoration, and a calibration comment describing a range the code does not produce
-is worse than no comment.
+decoration, and a calibration comment describing a range the code does not produce is
+worse than no comment. Measured on the real code path: silence gives 0.2500-0.2822
+alpha and 1.50-2.14px; a full-scale spectrum gives 0.2500-0.2847 and 1.50-2.02px.
 
-Because the whole field is capped that low, the contrast has to come from
-somewhere else: a vertex's alpha and radius **ride the travelling crest**, so the
-wave reads as a bright band sweeping left to right without any single element
-exceeding its ceiling. Measured under load, silence gives 0.2500-0.2995 alpha and
-1.50-2.00px; a full-scale spectrum gives 0.28-0.30 and 1.70-2.17px. Neither
-leaves the band.
+Because the whole field is capped that low, the contrast has to come from somewhere
+else: a vertex's alpha and radius ride **the flow's broadest octave and any droplet
+crest passing under it**, so brightness travels with the motion instead of being a
+separate overlay drifting across it.
 
 Two things keep the backdrop from costing legibility:
 
 **A scrim behind each detail block.** `.rotary-segment__content::before` paints a
 radial gradient of the theme's own `--bg-rgb` at `z-index: -1`, with
-`inset: -24% -18%` so it extends *past* the text box instead of stopping at its
-edge, where the glow would otherwise be most visible. This is the chosen answer to
-"the background is now loud": dim the pixels behind the copy specifically, rather
-than dimming the whole canvas or vignetting the screen edges. The scrim and the
-mesh are **one budget, not two independent choices** — `test_the_scrim_outweighs_the_mesh_at_its_brightest`
-computes the contribution paragraph's contrast against the brightest thing the mesh
-ever paints, in both themes, with and without the scrim. Raising the mesh's alpha
-ceiling lowers that number long before any mesh test notices.
+`inset: -24% -18%` so it extends *past* the text box instead of stopping at its edge.
+The scrim and the mesh are **one budget, not two independent choices** —
+`test_the_scrim_outweighs_the_mesh_at_its_brightest` computes the contribution
+paragraph's contrast against the brightest thing the mesh ever paints, in both
+themes, with and without the scrim. Raising the mesh's alpha ceiling lowers that
+number long before any mesh test notices.
 
 **A pre-rendered glow sprite.** An earlier review asked for `shadowBlur` 8-12 on
-every dot and mesh node. At ~600 vertices and 60fps that is 36,000 of the most
-expensive calls a 2D context has, per second. `makeGlowSprite()` bakes the same
-radial falloff into an off-screen canvas once per colour and `drawGlow()` blits it
-with `drawImage` — the same picture for a fraction of the cost, and the reason no
-`shadowBlur` assignment appears anywhere in `app.js`. `bloom` is a parameter and
-the mesh uses `0.42` of the original spread: a soft edge, not a halo. Both sprites
-are rebuilt when the OS flips scheme, because the glow is baked together with the
-palette — and the rebuild has to pass the *same* bloom as the init call, a drift
-that happened once and is now pinned.
+every dot. At ~600 vertices and 60fps that is 36,000 of the most expensive calls a 2D
+context has, per second. `makeGlowSprite()` bakes the same radial falloff into an
+off-screen canvas once per colour and `drawGlow()` blits it — the same picture for a
+fraction of the cost, and the reason no `shadowBlur` assignment appears anywhere in
+`app.js`.
 
-### Waves travel left to right, and the lattice must not tear
+Which sprite a vertex uses is **static**: one vertex in four gets the brighter
+texture, decided by its lattice position and never changed. It used to also switch
+when a moving crest was near, which is a hard threshold — vertices popped between two
+baked textures as the wave passed under them, and that popping was most of what read
+as flicker and blur. All continuous variation now lives in alpha and radius, which
+cannot pop because they are floats multiplied into a single blit.
 
-Every travelling term is phased `(spatial) - (time)`. A crest of `sin(k·x - ω·t)`
-sits at `x = (φ + ω·t)/k`, so it moves in **+x** as time grows. The opposite sign
-looks identical frame to frame and sweeps the other way, which is why each term is
-pinned individually by `test_every_travelling_term_is_phased_left_to_right` rather
-than trusted as a group.
+### Smooth motion, and the bug that made it teleport
 
-That test exists because the bug was live twice. The layer this replaced used
-`+ time * 6.2`. And after the first rewrite the *idle drift* was still
-`sin(time * 0.23 + column * 0.17)` — a crest at `column = (φ - 0.23·t)/0.17`, so
-it walked **left**, and it was the loudest term in silence, which is the site's
-default state. The one wave every visitor saw with the music off travelled
-backwards. Reading the source did not find it. Measuring the trough's drift over
-620 frames did: **+166 px/s in silence, +140 with moderate music, +198 at full
-scale**, all three positive.
+The motion has two parts that are deliberately kept apart, because they have
+opposite failure modes.
 
-Two components, because one is not enough to read as propagation. A continuous
-sine gives the whole field a direction of travel; a localised Gaussian front
-sweeping the width every ~9s gives the eye a crest to *follow*. The front is at
-full strength with the music off — a background that only moves once you press
-play looks broken rather than calm.
+**A flow field** — three octaves of plane waves at 1400/620/290px, drifting in +x at
+165/205/150 px/s, each tilted differently in y. Every one of those numbers is a
+constant. Nothing in the flow is derived from audio, so it runs identically whether
+the music is playing, paused, or absent — which is the requirement, and also what
+makes it smooth.
 
-**Displacement is budgeted by spatial frequency, not by amplitude.** Two
-neighbouring vertices cross only when their displacements *differ* by more than the
-gap between them. A smooth swell cannot do that however large it gets: the front's
-Gaussian has a standard deviation around 230px, four cells wide, so adjacent
-vertices ride it almost identically and the field is free to heave by three
-quarters of a cell. Capping the front's amplitude buys no safety at all and throws
-away most of the motion — which is what an earlier draft of this did.
+**Droplets** — discrete expanding rings dropped where the audio says something
+happened. They are events, not a level: a piano keystroke makes one droplet, not a
+screen-wide distortion.
 
-What *can* tear the lattice are the sharp terms:
+#### The phase was being multiplied out of the clock
 
-* the per-vertex jitter, whose wavelength is exactly one cell, so it spends
-  `2 × JITTER = 0.24` of a `TEAR_LIMIT = 0.45` budget unconditionally;
-* the travelling sine, whose wavelength shrinks as the dominant pitch rises. A sine
-  of amplitude `A` and wavenumber `k` moves one neighbour past the next by at most
-  `A·k·spacing`, so it is safe while `A ≤ (TEAR_LIMIT - 2·JITTER) / k`. `k` is
-  known per frame, so the ceiling is computed from the wavelength the audio
-  actually asked for rather than guessed at — a bright passage gets finer ripples
-  *and* a lower amplitude ceiling, which is what a real membrane does.
+A travelling wave can be written two ways, and one of them is a landmine:
 
-Verified by running the mesh and measuring the signed area of every triangle on
-every frame: **0 inversions out of 49,590 sampled cells**, minimum area 60% of a
-nominal cell at full-scale audio — while peak wave amplitude went from 15px to
-40px. Both numbers moved the right way at once, which is the whole point of
-budgeting frequency instead of magnitude.
+```js
+phase = time * k * speed;   // correct ONLY while k and speed never change
+phase += k * speed * dt;    // continuous by construction, whatever k does
+```
+
+The previous version used the first form with `k` derived from the dominant pitch.
+So every pitch change moved the phase by `time * Δk * speed` — **239 radians after a
+minute open**, which is the entire field teleporting, and worse the longer the page
+stayed up. That was the "chaotic teleporting": not randomness, a phase
+discontinuity that grew with page age.
+
+Two more discontinuities turned up once the first was fixed, both found by measuring
+frame-to-frame vertex motion rather than by reading:
+
+* **A droplet born at full amplitude** displaced the vertices under it by its whole
+  depth in one frame — a 6.3px step, twenty times the flow's own peak velocity. It
+  now fades in over `RIPPLE_ATTACK = 110ms`, well inside the ~200ms the eye needs to
+  read an event as sudden, so it still lands like an impact.
+* **Droplets were aged off the raw rAF timestamp.** Returning to a backgrounded tab
+  hands back a several-second delta, so a ring 300px into its expansion arrived at
+  3000px — or was culled outright — in a single frame. That measured as a 13px jump
+  across the whole field.
+
+So there is now one clamped clock and everything reads it:
+
+```js
+var dt = clamp((timestamp - lastTimestamp) / 1000, 0, MAX_FRAME_DT);   // 0.05s
+clock += dt * 1000;
+phase1 += K1 * FLOW_SPEED_1 * dt;
+r.age += dt * 1000;
+```
+
+`approach()` does the same for the two followers (the droplet detector's envelope and
+the droplet's origin), converting a time constant into a per-frame fraction with an
+exponential. A bare `x += (target - x) * 0.06` converges twice as fast at 120Hz as at
+60Hz, so the motion would feel different on a phone's 60Hz panel and a laptop's
+120Hz one — the same class of bug as the phase, in a less obvious place.
+
+Measured: peak per-vertex motion between consecutive frames is **1.83px** over 500
+frames, **0.62px** through a hard pitch sweep, and **2.37px** returning from a
+9-second background tab. Cross-correlating a lattice row against itself 480ms later
+puts the drift at **+222 px/s, left to right** (correlation 0.942 shifted against
+0.716 unshifted). In total silence the field still moves 0.32px a frame and travels
+a mean of 11.7px over 3.2 seconds — flowing, not vibrating in place.
+
+#### Jitter is gentle because it is the expensive kind
+
+Per-vertex jitter is 0.075 of a cell, down from 0.12. Jitter is the one term whose
+wavelength *is* one cell, so it spends the tear budget unconditionally, before a
+single wave has moved. The random **diagonal lean** carries most of the organic
+character for none of that budget, because a diagonal is a topology choice rather
+than a displacement.
+
+#### Displacement is budgeted by gradient, not by amplitude
+
+Two neighbouring vertices cross only when their displacements *differ* by more than
+the gap between them. A smooth swell cannot do that however large it gets — the
+broadest octave is 1400px against a 54px cell, so adjacent vertices ride it
+identically and the field is free to heave by a quarter of a cell. Capping amplitude
+instead buys no safety and throws away the motion, which is what an earlier draft did.
+
+The budget sums each term's contribution to the displacement gradient:
+
+* jitter spends `2 × JITTER` unconditionally;
+* a plane wave spends `amplitude × wavenumber` per axis;
+* a ring spends `amplitude × (wavenumber + 1/σ)`, the second part being the
+  envelope's own slope.
+
+The four flow partials go in as a Frobenius norm, which bounds the operator norm, and
+an operator norm under 1 is what makes `x ↦ x + u(x)` injective — i.e. what stops
+neighbours crossing. Currently **0.473 against a `TEAR_LIMIT` of 0.5**, recomputed
+from the constants on disk by `test_the_tear_budget_covers_every_term` so any amplitude
+bump fails there.
+
+That constraint is why `RIPPLE_LAMBDA` is 520px and not something prettier. A ring of
+amplitude `A` and wavenumber `k` moves one vertex past its neighbour by `A·k·spacing`,
+so a sharper ripple is exactly what inverts triangles. 520px gives two or three
+visible concentric crests inside the envelope and stays inside the budget.
+
+The bound is deliberately conservative — it assumes every partial hits its maximum at
+the same vertex with aligned signs, which the phases almost never arrange. Measured,
+the lattice uses about a third of it: **0 inversions in 325,090 sampled cells**,
+minimum signed area 65% of a nominal cell, with the droplet at full strength.
 
 ### What drives the background and the wheels
 
@@ -1060,12 +1115,12 @@ consumers ask (an 8ms cache):
 
 | metric | source | drives |
 | --- | --- | --- |
-| `bass` | 20-200Hz | the front's height, the sine's amplitude, vertex size; the wheels' radial pulse |
-| `mid` | 200-3200Hz | `onset`'s source, and 0.35 of `getEnergy()` — no direct mesh term |
-| `treble` | 3200-12000Hz | the sine's amplitude and both line alphas; the rim ticks and tags glint |
-| `onset` | frame-over-frame RISE in `mid` | the front's height and vertex alpha; the dashed ring and spokes flare |
-| `pitch` | dominant bin in mid+treble, log-scaled | the sine's wavenumber — and therefore its tear ceiling |
-| `centroid` | spectral centroid, log-scaled | reported on the facade; nothing consumes it yet |
+| `bass` | 20-200Hz | vertex size; 0.30 of the droplet trigger's energy; the wheels' radial pulse |
+| `mid` | 200-3200Hz | 0.55 of the droplet trigger's energy — a keystroke lives here |
+| `treble` | 3200-12000Hz | both line alphas, a little vertex alpha; the rim ticks and tags glint |
+| `onset` | frame-over-frame RISE in `mid` | vertex alpha; the dashed ring and spokes flare |
+| `pitch` | dominant bin in mid+treble, log-scaled | the droplet's ORIGIN height — not its shape |
+| `centroid` | spectral centroid, log-scaled | the droplet's ORIGIN across the width |
 
 Band edges are declared in **Hz** and converted using the context's real
 `sampleRate` and `fftSize`. Hardcoding bin indices is how a "bass" band silently
@@ -1086,10 +1141,12 @@ Two details that are easy to lose:
 
 `pitch` and `centroid` are reported 0..1 on a **log** scale because pitch
 perception is logarithmic: a linear map would spend most of its range on the top
-octave and a climbing melody would look pinned near 1. As the melody moves the sine's
-wavelength moves with it, so the field changes *character* rather than just
-getting louder in place — and because that same wavenumber sets the amplitude
-ceiling, the change is self-limiting.
+octave and a climbing melody would look pinned near 1. **No band modulates the flow field**, and that is a rule rather than an oversight:
+modulating an amplitude makes the field change character with the music, and
+modulating a *wavenumber* changes its phase — which is the teleport above. Audio has
+exactly two jobs here. It brightens vertices and lines, and it says when and where to
+drop a droplet. `test_the_flow_field_is_independent_of_the_audio` asserts that all six
+amplitude bindings and all three phase integrators are literals.
 
 ### The wheels breathe; the copy does not
 
@@ -1130,92 +1187,120 @@ setting a custom property invalidates style for the whole subtree, and with the
 music off all three sit at 0, so an unquantified write would cost a style
 recalculation of both wheels every frame forever to set the same numbers again.
 
-### Scrolling ripples the mesh — on this page only
+### Droplets, and the removal of scroll coupling
 
-The wheel's angular velocity drives the mesh even muted or paused. The physics
-loop publishes it and the mesh reads it back — **on this page only**:
+#### A droplet is an event, so it needs an event detector
 
-```js
-var wheelSpin = { velocity: 0, at: -1e9 };
-var SPIN_DECAY_MS = 260;    // e-folding time for a ripple dying away
-var SPIN_REFERENCE = 420;   // deg/s that counts as a full-strength ripple
+The obvious instrument is the facade's `onset`, and it is the wrong one. `onset` is
+`clamp(rise * ONSET_GAIN, 0, 1)` held by a decay envelope — clamped hard at 1.0
+*because* it drives continuous brightness, where saturation is harmless. Used as a
+trigger it produces exactly the two symptoms the review described:
 
-function readSpin(now) {
-  var age = Math.max(0, now - wheelSpin.at);
-  return wheelSpin.velocity * Math.exp(-age / SPIN_DECAY_MS);
-}
-```
+* **Clipping.** Above the clip point a fortissimo is indistinguishable from a forte,
+  so every loud note drops an identical ring.
+* **Erratic.** The held envelope then *decays* back through the threshold over
+  ~200ms, re-firing the gate — one keystroke becomes a machine-gun burst of rings.
 
-There is no call chain between the rotary physics and the mesh — they are
-separate sections — so the velocity goes through a module-level slot. The decay
-by **age** is the part that matters: the physics loop stops as soon as the wheel
-settles, so without it the last ripple would freeze on screen forever. With it,
-the mesh returns to calm on its own as the wheel locks onto a contributor, and the
-ripple's direction follows the sign of the spin, so scrolling up and down travel
-opposite ways. Measured, the ripple halves every ~160 frames-ms, which is the
-`260ms` e-folding time doing exactly what it says.
-
-**The exclusivity is now load-bearing in a way it was not before.** The canvas used
-to be page-scoped, so nothing outside credits could see the slot. It is global now
-and outlives the page, so `draw()` gates the read on
-`body.classList.contains('credits-rotary-page')` as well: a PJAX swap away from
-credits leaves the last velocity sitting in the slot, and without the gate a
-visitor would arrive on the home page with the credits wheel still rippling it.
-Every other page is strictly audio-reactive. Proved by running two simulations of
-`index.html` that differ only in whether a wheel event was dispatched — the
-lattices come out **bit-for-bit identical**.
-
-**A committed contributor is a different kind of event.** Continuous scrolling
-ripples the field through the spin velocity above, but a contributor *arriving* is
-a discrete impact, so it gets a discrete expanding ring instead of a slightly
-stronger wobble:
+So the mesh runs its own novelty detector over the smoothed bands:
 
 ```js
-var MESH_PULSE_MAX = 6;      // a long fling cannot grow the list without bound
-var MESH_PULSE_SPEED = 900;  // px/s the ring expands at
-var MESH_PULSE_LIFE = 1100;  // ms before a ring is dropped
+var energy  = (b.mid * 0.55) + (b.bass * 0.30) + (b.treble * 0.15);
+var novelty = energy - envelope;
+envelope = approach(envelope, energy, novelty > 0 ? ENVELOPE_TAU_RISE : ENVELOPE_TAU_FALL, dt);
 ```
 
-`showMember()` pushes one, on its animated path only — `showMember(0, false)` runs
-at boot, and detonating a ring on a screen nobody has touched yet would be a lie
-about what the visitor did. Strength tracks how hard the wheel was moving on
-arrival, so a fling lands louder than a gentle snap. There is no reaper timer,
-deliberately: the rotary's frame loop stops when the wheel settles, so rings are
-dropped on read inside the *mesh's* loop, which by definition is still running.
+Novelty is how far the instantaneous energy sits above its own recent average, which
+is what separates "a note struck" from "the track is loud". `mid` carries a piano
+keystroke; `bass` catches a low note or a swell that barely moves mid — the "volume
+shifts" half of the brief. The follower rises slowly (0.30s) and falls quickly
+(0.09s), so a crescendo keeps registering as a train of droplets while a single strike
+registers once.
 
-The ring is separated from the spin ripple by running **three** simulations rather
-than two, because both are triggered by scrolling and "it moved" proves nothing
-about which one moved it: a fling that commits, a nudge too small to reach the snap
-threshold, and no wheel at all. In the late window, after the spin's e-folding has
-all but expired, the committing fling still displaces the field 3.5px while the
-non-committing nudge displaces it 0.05px — and the disturbance's centroid radius
-grows 520px → 703px, so it expands outward rather than fading in place.
+Strength goes through a **soft knee** rather than a clamp:
 
-The wheel physics themselves were already exponential: the settle is a critically
-damped spring (`SPRING_DAMPING = 2 * Math.sqrt(SPRING_STIFFNESS)`), which is the
-exact boundary at which the error decays exponentially with no overshoot — fast
-while the gap is large, easing itself into the sector as it closes.
+```js
+strength = RIPPLE_MIN_STRENGTH + (1 - RIPPLE_MIN_STRENGTH) * (novelty / (novelty + RIPPLE_KNEE));
+```
+
+`x/(x+knee)` is monotonic over the whole range and asymptotic to 1, so dynamics
+survive — a louder note really does make a bigger ring, and nothing saturates.
+`RIPPLE_MIN_STRENGTH = 0.34` keeps the quietest qualifying note visible.
+
+Three gates keep it clean: `RIPPLE_THRESHOLD = 0.035` so the noise floor cannot drop
+one, `RIPPLE_REFRACTORY = 160ms` so one keystroke — which lasts several frames —
+becomes one droplet, and `RIPPLE_MAX = 4` with eviction so a busy passage cannot grow
+the list. 160ms is ~6 droplets a second, which is the readable maximum; below ~100ms a
+single keystroke splits, above ~260ms a fast piano passage drops most of its notes.
+
+**The droplet lands where the sound is** — spectral centroid across the width,
+dominant pitch down the height — and that origin is itself smoothed by `approach()`,
+so successive droplets glide from one place to the next. A teleporting source is as
+chaotic as a teleporting field.
+
+The ring is `exp(-(r-R)²/2σ²) · cos(k·(r-R))`: a cosine inside a Gaussian envelope, so
+two or three concentric crests trail the leading edge instead of one blob that grows.
+σ widens as the ring travels (`145 + 0.18R`), which is what dispersion looks like, and
+the amplitude fades with age *and* with `smoothstep` against the half-diagonal, so a
+ring dies on its way out rather than being cut off by the screen boundary.
+
+Measured against a simulated keystroke, isolating one droplet by differencing two
+otherwise-identical runs: expands at **350 px/s** against a declared 340, **three
+concentric sign changes** in the radial profile, amplitude decaying 7.54px → 0.13px
+from r=60 to r=780 where the edge is 849px, and a tail that reaches exactly 0.00 with
+no re-triggering.
+
+#### Scrolling no longer touches the canvas
+
+The credits screen is the heaviest page on the site — two large rotating discs with
+masks, rim gradients and conic sweeps, composited over a full-viewport canvas — and
+it was additionally running a per-vertex radial wave field driven by gesture, plus a
+shockwave ring every time a contributor committed. That is what made it stutter.
+
+The requirement was that scrolling must not *calculate or inject* physics forces into
+the background, and the strongest form of that is not a gate but the absence of a
+channel. So all of it is deleted rather than disabled: the module-level `wheelSpin`
+slot, `readSpin()` and its decay constant, the reference velocity, the physics loop's
+publish, the mesh's credits body-class check, the radial spin term, and the
+commit shockwave. `initAmbientMesh` now contains no reference to spin, the wheel,
+scrolling, `deltaY`, or the credits page — verified by grepping the function's
+non-comment lines, and by `test_scroll_cannot_reach_the_mesh_at_all`, which also
+asserts the rotary section assigns to no global at all so the coupling cannot come
+back in another shape.
+
+An unread slot is one read away from being a coupling again, which is why it is gone
+rather than unused.
+
+The wheel itself is untouched: it still integrates its velocity, still settles on a
+critically damped spring, and still commits contributors. Measured end to end,
+flinging the credits wheel eight times leaves the mesh lattice **bit-for-bit
+identical** to not touching it, while the counter trace goes `01 → 03 → 01`.
+
+Two compositor costs came out at the same time, and both are performance decisions
+rather than aesthetic ones:
+
+* **`mix-blend-mode` is gone.** A full-viewport blend mode makes the compositor read
+  back and blend the entire backdrop group *every frame* and defeats GPU layer
+  caching. Dropping it is close to free visually, because `screen` on near-black and
+  `multiply` on off-white are each within a few levels of plain alpha compositing.
+  Measured at the real alphas, the largest channel delta is 3.6/255 and contrast is
+  slightly **better** without it in both themes (dark line 1.213 → 1.214, dark vertex
+  1.486 → 1.497, light line 1.374 → 1.394, light vertex 1.631 → 1.668). That is also
+  why `screen` was able to hide the light theme's mesh at 1.003:1 for a whole release:
+  it was doing almost nothing in either theme.
+* **`opacity: 0.95` is gone** — a second compositing multiply over the whole viewport
+  for a dim nobody can see.
+
+The mesh still covers the viewport exactly as specified: `position: fixed; inset: 0;
+width: 100vw; height: 100vh; pointer-events: none; z-index: 0`. No positional or size
+declaration anywhere else in `style.css` changed, and `credits.html` is byte-identical.
 
 Colours come from four dedicated tokens — `--mesh-node-rgb`, `--mesh-node-hi-rgb`,
-`--mesh-glow-rgb`, `--mesh-line-rgb` — declared in `:root` and redefined *deeper*
-under `prefers-color-scheme: light`, since a bright violet reads as a stain on a
-light page. They are separate from the brand channels so the background can be
-retuned without touching buttons, links or the wordmark, and the mesh reads them
-back out of CSS rather than hardcoding a triple that would paint dark-theme neon
-onto a light page.
-
-Deepening them is only half of it, though. `.ambient-mesh` blends with
-`mix-blend-mode: screen`, which brightens — correct on near-black, where a
-0.20-alpha line lifts the background by 18-48 levels, and useless on off-white,
-where screen can only push a channel *up* and `247/255` has nowhere to go.
-Measured, the mesh as written rendered at **1.003:1** against `--bg` in light
-theme: invisible, silently undoing the deepened values and their own "enough ink
-to read as a line rather than a haze" comment. Light theme therefore overrides the
-blend to `multiply`, which lands the same colours at **1.40:1** for lines and
-**1.68:1** for vertices. `test_the_light_theme_can_actually_see_the_mesh`
-recomputes the blend instead of grepping for its name, so swapping `screen` for
-`overlay` or `lighten` fails there rather than shipping a layer nobody can see in
-one of the two themes.
+`--mesh-glow-rgb`, `--mesh-line-rgb` — declared in `:root` and redefined *deeper* under
+`prefers-color-scheme: light`, since a bright violet reads as a stain on a light page.
+`test_the_mesh_is_visible_in_both_themes_without_a_blend_mode` recomputes the
+compositing in both themes from the tokens on disk and holds the result inside
+1.15-1.9:1 against `--bg`: above the floor it is invisible, above the ceiling it is
+competing with content instead of sitting behind it.
 
 ### Scroll physics
 
@@ -1287,25 +1372,37 @@ at slightly different spacings they produced moiré.
 What is specific to the single layer that replaced them, as opposed to the
 analysis that drives it:
 
-* **One position buffer, three consumers.** The vertex loop fills a shared
-  `Float32Array` once per frame; the row pass, the column-and-diagonal pass and the
-  vertex pass all read it. Rows and columns are stroked separately over the same
-  lattice, so if displacement depended on which pass reached a vertex the mesh
-  would tear at every intersection. This used to be enforced by a `bandAt(row,
-  column)` helper that blended the row's band with the column's to make
-  displacement a pure function of `(row, column)`; sharing one buffer makes the
-  agreement structural instead.
+* **Two buffers, four consumers.** The vertex loop fills a shared `Float32Array` of
+  positions once per frame; the row pass, the column-and-diagonal pass and the blit
+  pass all read it. Rows and columns are stroked separately over the same lattice, so
+  if displacement depended on which pass reached a vertex the mesh would tear at every
+  intersection. This used to be enforced by a `bandAt(row, column)` helper that
+  blended the row's band with the column's to make displacement a pure function of
+  `(row, column)`; sharing one buffer makes the agreement structural instead. A second
+  buffer carries each vertex's droplet-crest brightness to the blit pass, because
+  recomputing the ring there would double the expensive part of the frame — a `sqrt`,
+  an `exp` and a `cos` per ring per vertex.
 * **Two `stroke()` calls for ~1700 edges.** Rows are one batch of contiguous
   polylines; columns and every diagonal share a second. The diagonals are not
   contiguous, so they go in as individual segments — but inside the column pass's
   single `beginPath`/`stroke`. A stroke per edge would be ~1700 state changes a
   frame, and that alone would not survive a phone.
-* **Silence still moves.** With the music off every band is zero and the idle drift
-  plus the sweeping front keep the field alive, so there is no separate idle path
-  to keep in sync. Every audio- and scroll-driven term is *multiplied* by its
-  driver, which is what makes silence cancel them exactly rather than leaving a
-  residual wobble that reads as the mesh ignoring the mute button. Stopping the
-  track decays the bands by `0.9` per frame rather than zeroing them.
+* **Silence still moves, and there is no idle path.** The flow field is not gated on
+  anything: with the music off it runs at exactly the same amplitude and speed it does
+  with the music on, because no flow constant is derived from a band. What silence
+  removes is droplets, which is correct — they are audio events. Every audio-driven
+  term that remains is *multiplied* by its driver, so silence cancels it exactly rather
+  than leaving a residual wobble that reads as the mesh ignoring the mute button.
+  Stopping the track decays the bands by `0.9` per frame rather than zeroing them.
+* **A droplet costs almost nothing when it is not near you.** Each ring is rejected on
+  squared distance before any trigonometry, so a vertex outside the envelope's support
+  skips the `sqrt`/`exp`/`cos` entirely. Most vertices are outside most rings; this is
+  what keeps four concurrent droplets from costing four times the frame. The derived
+  ring values live in fixed `Float64Array`s, so a busy passage allocates nothing.
+* **Measured cost: 0.21ms of JavaScript per frame** — 2,904 context calls, 600
+  vertices, ~1700 edges, up to four rings — which is **1.3% of a 16.7ms budget**. That
+  is the JS side only, measured in node with a stubbed 2D context; rasterisation and
+  compositing are the browser's, and removing `mix-blend-mode` was the lever there.
 * **It is global and session-scoped.** Built once in `initAmbientExperience()`, not
   in `bootPage()`, so a PJAX swap cannot stack a canvas per navigation — which is
   also why it needs no teardown closure. The draw loop still stops itself the
@@ -1340,20 +1437,21 @@ swallowed. A decorative layer has to cost the decoration, not the page.
 
 ### Verifying the screen
 
-There is no browser in CI and jsdom performs no layout, so the screen is proved
-four ways. The `/tmp` harnesses are not checked in — they need `jsdom`, which is
+There is no browser in CI and jsdom performs no layout, so the screen is proved four
+ways. The `/tmp` harnesses are not checked in — they need `jsdom`, which is
 deliberately not a dependency of a zero-build static site — so they are rebuilt per
 session; what matters is what they assert, and the numbers below are what they
 produced against the current code.
 
 ```bash
-npm test                    # 179 tests, incl. CreditsRotaryGeometry, AmbientMesh,
+npm test                    # 183 tests, incl. CreditsRotaryGeometry, AmbientMesh,
                             # AmbientMeshGeometry, AmbientMeshReactivity,
                             # CreditsScrollPhysics, CreditsBackdrop, CreditsAudioBands
-node /tmp/wh/measure.js     # lattice integrity + calibration, idle and full scale
-node /tmp/wh/direction.js   # which way the wave actually travels
-node /tmp/wh/credits.js     # end to end: one canvas, credits-only scroll coupling
-python3 /tmp/_mc5.py        # 69 mutations, all must be killed
+node /tmp/wh/smooth.js      # continuity, lattice integrity, calibration
+node /tmp/wh/ripple.js      # one droplet, isolated by differencing two runs
+node /tmp/wh/parity.js      # credits parity, scroll decoupling, silence, cost
+node /tmp/wh/direction.js   # which way the field actually travels
+python3 /tmp/_mc6.py        # 73 mutations, all must be killed
 ```
 
 `CreditsRotaryGeometry` does not eyeball anything: it reads `--segment-angle`,
@@ -1364,84 +1462,86 @@ across 14 viewports.
 
 **The mesh harnesses instrument a stub 2D context and read the geometry back out of
 the recorded draw calls**, which is the only way to test a canvas without a browser.
-The row pass is `rows` contiguous polylines of `columns` points in row-major order,
-so the lattice can be reconstructed from the path alone; the vertex pass is recorded
-from `drawImage` plus the `globalAlpha` in force at the time. From that:
+The row pass is `rows` contiguous polylines of `columns` points in row-major order, so
+the whole lattice can be reconstructed from the path alone; the blit pass is recovered
+from `drawImage` plus the `globalAlpha` in force at the time. What they measured:
 
-* `measure.js` — 49,590 cell quadrilaterals sampled across 90 frames in two audio
-  states, **0 with an inverted signed area**, minimum area 60% of a nominal cell.
-  Vertex alpha 0.2500-0.2995 idle and 0.28-0.30 at full scale; radius 1.50-2.00px
-  and 1.70-2.17px; lines 0.15-0.16 and 0.18-0.20. Every band respected under load.
-* `direction.js` — tracks the displacement trough on one lattice row over 620 frames
-  and regresses its position against time. **+166 px/s in silence, +140 with
-  moderate music, +198 at full scale.** This is the check that found the idle drift
-  still travelling left to right after the first rewrite, and it is the only check
-  that could: the bug is a sign, and a sign looks the same in every frame.
-* `credits.js` — boots the real `credits.html`, injects the discs' angle tokens, and
-  dispatches real `WheelEvent`s. Exactly one `canvas.ambient-mesh`; a fling moves the
-  lattice 20px and advances the contributor counter to `02`; the same fling on
-  `index.html` produces a **bit-identical** lattice; and a nudge too small to commit
-  diverges 0.05px in the late window against the committing fling's 3.5px, with the
-  disturbance's centroid radius growing 520px → 703px.
+| check | result |
+| --- | --- |
+| peak per-vertex motion between consecutive frames, 500 frames | **1.83px** |
+| …through a hard pitch sweep (the old teleport trigger) | **0.62px** |
+| …returning from a 9-second background tab | **2.37px** |
+| inverted triangles | **0 of 325,090 cells**, min signed area 65% of a cell |
+| drift direction, by cross-correlating a row 480ms apart | **+222 px/s, left to right** |
+| mean travel in total silence over 3.2s | **11.74px** at 0.32px/frame |
+| droplet expansion speed (declared 340) | **350 px/s** |
+| concentric crests in the radial profile | **3 sign changes** |
+| droplet amplitude, r=60 → r=780 (edge at 849) | **7.54px → 0.13px** |
+| re-triggering after one keystroke | **none**, tail reaches exactly 0.00 |
+| credits vs home lattice, same audio | **bit-identical**, 0.00e+0 over 72,000 vertices |
+| credits lattice, wheel flung 8× vs untouched | **bit-identical**, 0.00e+0 |
+| JavaScript cost per frame | **0.21ms = 1.3% of a 16.7ms budget** |
 
-Two harness details are load-bearing and non-obvious:
+Three harness details are load-bearing and non-obvious:
 
-* **`pump()` alone is not enough to watch anything move.** `computeBands()` caches
-  for 8ms of *real* time so three consumers asking in one tick do not triple the
-  work, so a synchronous pump recomputes the analysis exactly once no matter how
-  many frames it runs and every attack/release coefficient looks like it never
-  fired. Anything measuring change over time goes through `settle()`, which
-  interleaves wall-clock waits.
 * **One synthetic clock has to drive everything.** `performance.now()`, the rAF
-  timestamp and `setTimeout` are three separate clocks, and the app reads all three.
-  If they disagree, the wheel's 90ms snap delay lands on a different frame than the
-  spin decay expects. Worse: a real `setTimeout` never fires at all inside a
-  synchronous frame pump, which is how the first run of `credits.js` silently
-  measured a wheel that turned the mesh but never committed a contributor — every
-  scroll assertion passed and the shockwave ones failed for a reason that had
-  nothing to do with the shockwave.
-* **Measure row strokes, not all strokes.** A column polyline spans the whole
-  viewport height, so its `minY..maxY` is its own extent and buries any ripple; a
-  row's vertical extent *is* the displacement. (Path *length* is worse than useless
-  as a proxy: doubling a sine's amplitude lengthens it by only a few percent,
-  because the span dominates.)
+  timestamp and `setTimeout` are three separate clocks and the app reads all three. A
+  real `setTimeout` also never fires inside a synchronous frame pump — which is how an
+  earlier harness silently measured a wheel that turned but never committed a
+  contributor, and reported a passing scroll test about a rotary that had not run.
+* **Isolate an effect by differencing two runs, not by thresholding one.** A droplet
+  sits inside a field that is already moving, so "the lattice changed" proves nothing.
+  Running two simulations that differ only in one keystroke makes the divergence field
+  *purely* the droplet, which is how its speed, crest count and fade were measured
+  exactly. The same trick proves the scroll decoupling: bit-identical lattices, not
+  "small difference".
+* **Trace a counter, don't sample it at the end.** Eight hard flings advance the wheel
+  280°, which wraps all the way back to contributor `01`. Comparing final values said
+  "the wheel did not move" about a wheel that moved twice; the trace reads
+  `01 → 03 → 01`.
 
 Both suites are mutation-tested, and the report names the guard that saw each
 mutation — a mutation killed by an unrelated test is a mutation that is not really
-covered. The 69 in `_mc5.py` cover this round's surface specifically: both cell
-spacings and the edge overhang, the jitter and tear constants, the wavenumber cap,
-the diagonal table flattened to one orientation, `Math.imul` replaced by `*`,
-`Math.random` introduced into the mesh, each of the five travelling phases flipped
-in sign, the front's period, padding and width, every calibration floor and ceiling
-and both ramps made unable to reach theirs, `shadowBlur` restored, the sprite
-rebuild dropped on a scheme flip, the dpr cap, the detached-canvas guard, a second
-canvas attached, the mesh moved into `bootPage()`, the class renamed in one file
-only, `100vw` back to `100%`, `pointer-events` flipped, `z-index` raised, the
-credits gate wrapped around the canvas, the light-theme blend reverted or deleted,
-the light mesh colours un-inverted, an rgba literal inlined, scroll coupling
-enabled on every page, a second writer of the spin slot, the spin's direction or
-magnitude ignored, the physics loop stopped publishing, a ring at boot, a second
-detonation site, an unbounded ring buffer, rings that never expand or never expire
-or are read but never applied, `fetch` left unguarded, the ambient `try` removed,
-and the scrim thinned, lifted above the copy, or hardcoded instead of themed.
+covered. The 73 in `_mc6.py` cover this round's surface specifically: the phase
+multiplied back out of the clock, a wall-clock variable reintroduced, `dt` left
+unclamped, the first-frame guard dropped, droplets aged off the raw timestamp, the
+clamped clock frozen, the refractory measured on the wrong clock, the trigger moved
+back onto the clamped `onset` envelope, the threshold or refractory zeroed or
+lengthened, the soft knee replaced by a clipping clamp, bass dropped from the trigger,
+the follower made symmetric or written as a bare coefficient, the origin no longer
+smoothed, the concentric cosine collapsed to one blob, the ring stopped expanding, its
+wavelength sharpened or flattened past its limits, the birth pop restored, the edge and
+age fades removed, the envelope stopped widening, the buffer unbounded or never evicted
+or never compacted, the rejection test removed, the per-frame ring list allocated
+again, a second detonation site, jitter and the tear limit and three separate
+amplitudes blown past the budget, the octaves made commensurate or given one speed or
+one tilt sign, the flow reversed or frozen or agitated, a flow constant modulated by
+audio, the dx/dy phase offset zeroed, both cell spacings, every calibration floor and
+ceiling and both ramps made unable to reach theirs, the sprite choice thresholded on a
+moving quantity again, the crest brightness no longer read from its buffer, the ring
+evaluated twice per vertex, the spin slot and the mesh's credits awareness and the
+physics loop's publish each put back, a blend mode or element opacity re-added, the
+canvas un-sized or made interactive or lifted above the content, and the light-theme
+mesh colours un-inverted or deepened into competing with the copy.
 
-Four of those survived the first run and three were real gaps rather than bad
+Four of those survived the first run, and three were real gaps rather than bad
 mutations:
 
-* **`assertIn` on a statement also matches that statement commented out.** Removing
-  the spin publisher with a `// ` in front of it survived, because the test looked
-  for the substring. Now anchored to a line start with `re.MULTILINE`.
-* **A region-scoped count cannot see a duplicate outside the region.** Counting
-  `wheelSpin.velocity =` inside the rotary physics passed with a second writer added
-  to the ambient section. Now counted across the whole file.
-* **Boot resilience had no test at all**, because nothing had ever asserted that a
-  decorative layer failing is allowed to be only decorative.
-* The fourth was a bad anchor in the sweep itself (`rgba(' + palette.line` appears
-  in both stroke passes), which is the harness's bug and not the suite's.
-
-The light-theme invisibility was not found by mutation testing at all. It was found
-by computing the blend, because "the light theme deepens the mesh colours" was a
-true statement about the stylesheet and a false one about the screen.
+* **A fade with no assertion is a fade that can be deleted.** Removing the ring's
+  age-fade left only the edge fade, so a droplet would have held full amplitude for
+  over a second and then vanished — a pulse, not a ripple — and nothing noticed.
+* **A constant that only has to be non-zero needs a bound, not a presence check.**
+  Zeroing `FLOW_PHASE_OFFSET` locks dx to dy, so every vertex traces a straight line
+  instead of a loop and the field slides rigidly. That passes every smoothness check
+  while looking nothing like liquid.
+* **"Publishes nothing" needs a structural guard.** The prose assertion about the
+  physics loop not publishing survived adding `window.AgoraSpin = ...`; asserting that
+  the rotary section assigns to *no global at all* is what actually catches the shape a
+  replacement coupling would take.
+* The fourth was the visibility ceiling: a light-theme node channel deepened to
+  near-black measures 2.05:1 and was passing under a 3.0 ceiling, so the ceiling came
+  down to 1.9 — above the real 1.67 maximum with room to retune, below the point where
+  a background starts competing with content.
 
 
 ## Notes
