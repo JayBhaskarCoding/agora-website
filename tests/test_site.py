@@ -5360,12 +5360,16 @@ function fetch(url, opts) {calls.push({url, opts}); return Promise.resolve({
 ''' + helpers + internal + route + r'''
 (async () => {
   normalizeInitialUrl();
+  const firstReplacement = replaced;
+  normalizeInitialUrl();
+  assert.equal(replaced, firstReplacement);
   assert.equal(replaced.url, '/contact?ref=a#message');
   assert.deepEqual(replaced.state, {keep: true});
   for (const [legacy, clean] of [['/index.html','/'], ['/about.html','/about'],
       ['/download.html','/download'], ['/contact.html','/contact'],
       ['/credits.html','/credits'], ['/shared-post.html','/shared-post'], ['/privacy.html','/privacy']]) {
     window.location.href = 'https://agora.in.net' + legacy + '?x=1#top';
+    initialUrlNormalized = false; // independent boot for each legacy alias
     normalizeInitialUrl();
     assert.equal(replaced.url, clean + '?x=1#top');
     assert.equal(canonicalPath(new URL('https://agora.in.net' + clean)), clean);
@@ -5457,12 +5461,101 @@ class PrivacyPolicy(unittest.TestCase):
         css = (ROOT / 'style.css').read_text()
         self.assertRegex(css, r'\.credits-screen-colophon a\s*\{[^}]*pointer-events:\s*auto')
 
-    def test_legacy_aliases_redirect_before_clean_rewrites(self):
+    def test_rewrite_destinations_have_no_reverse_redirects(self):
         rules = [line.split() for line in (ROOT / '_redirects').read_text().splitlines()
                  if line.strip() and not line.lstrip().startswith('#')]
+        self.assertEqual(rules[-1], ['/*', '/index.html', '200'])
+        self.assertEqual(len({r[0] for r in rules}), len(rules))
+        for source, destination, status in rules:
+            self.assertEqual(status, '200', 'no external redirects may reverse a rewrite')
+            self.assertFalse(source.endswith('/'), 'no slash normalization rules')
+            self.assertTrue(destination.endswith('.html'))
+            self.assertNotIn(destination, {r[0] for r in rules},
+                             'a rewrite target must not explicitly re-enter the rule table')
         for clean, file in CLEAN_ROUTES.items():
-            self.assertIn([file, clean, '301'], rules)
             if clean != '/':
-                self.assertLess(rules.index([file, clean, '301']),
-                                rules.index([clean, file, '200']))
+                self.assertIn([clean, file, '200'], rules)
         self.assertEqual(list(ROOT.glob('*.html.html')), [])
+
+
+
+class RouterLoopRegression(unittest.TestCase):
+    def test_history_normalization_clicks_and_back_navigation(self):
+        import subprocess
+        app = (ROOT / 'app.js').read_text()
+        helpers = app[app.index('  var PAGE_FILES = {'):app.index('  function scrollToRouteHash(')]
+        navigation = app[app.index('  function routeTo('):app.index('  /* ------------------------------------------------------------\n     2. MOBILE MENU')]
+        script = r'''
+const assert = require('node:assert/strict');
+let pushes = 0, replaces = 0, fetches = 0, swaps = 0, scrolls = 0;
+const listeners = {click: [], popstate: []};
+const routerState = {currentPath: '', bound: false, navigating: false, abortController: null};
+const window = {location: {href: 'https://agora.in.net/index.html?ref=boot#top',
+  origin: 'https://agora.in.net', assign() {throw Error('unexpected full navigation');}},
+  history: {state: {keep: true},
+    replaceState(state, title, url) {replaces++; window.location.href = new URL(url, window.location.href).href;},
+    pushState(state, title, url) {pushes++; window.location.href = url;}},
+  addEventListener(type, callback) {listeners[type].push(callback);},
+  dispatchEvent() {throw Error('synthetic events are forbidden');}};
+function link(href, key) {return {target: '', href,
+  getAttribute(name) {return name === 'href' ? this.href : key;},
+  setAttribute(name, value) {this.href = value;}, hasAttribute() {return false;}};}
+const links = [link('/about.html', 'about'), link('/privacy.html', 'privacy')];
+const PAGE_MAP = {about: '/about', privacy: '/privacy'};
+const doc = {querySelectorAll() {return links;},
+  addEventListener(type, callback) {listeners[type].push(callback);},
+  documentElement: {classList: {add(){}, remove(){}}}};
+function isDynamicDownloadLink() {return false;}
+function getHashTarget() {return null;}
+function scrollToRouteHash() {scrolls++;}
+function readPageShell() {return {};}
+function updateDocumentShell() {swaps++;}
+function bootPage() {initRouting();}
+const DOMParser = class {parseFromString() {return {};}};
+function fetch() {fetches++; return Promise.resolve({status: 200, ok: true,
+  text: () => Promise.resolve('<main></main>')});}
+''' + helpers + navigation + r'''
+function click(anchor) {
+  const event = {button: 0, target: {closest() {return anchor;}},
+    preventDefault() {this.defaultPrevented = true;}};
+  handleRouterClick(event);
+  return event;
+}
+(async () => {
+  normalizeInitialUrl();
+  normalizeInitialUrl();
+  assert.equal(replaces, 1);
+  assert.equal(window.location.href, 'https://agora.in.net/?ref=boot#top');
+  initRouting(); initRouting(); syncPageLinks();
+  assert.equal(listeners.click.length, 1);
+  assert.equal(listeners.popstate.length, 1);
+  assert.deepEqual(links.map(l => l.href), ['/about', '/privacy']);
+  for (const href of ['/', '/index.html', '/?ref=other', '/#section']) {
+    assert.ok(!click(link(href)).defaultPrevented, 'same path is native navigation');
+    await routeTo(new URL(href, window.location.href), true);
+  }
+  assert.equal(fetches, 0); assert.equal(pushes, 0);
+  const dest = new URL('https://agora.in.net/about');
+  await Promise.all([routeTo(dest, true), routeTo(dest, true)]);
+  assert.equal(fetches, 1); assert.equal(pushes, 1); assert.equal(swaps, 1);
+  assert.equal(window.location.href, dest.href);
+  await routeTo(dest, true);
+  assert.equal(fetches, 1); assert.equal(pushes, 1);
+  assert.ok(!click(links[0]).defaultPrevented);
+  assert.ok(click(links[1]).defaultPrevented);
+  // Allow the clicked navigation to finish before testing Back.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(fetches, 2); assert.equal(pushes, 2);
+  normalizeInitialUrl(); assert.equal(replaces, 1);
+  assert.equal(listeners.click.length, 1); assert.equal(listeners.popstate.length, 1);
+  window.location.href = 'https://agora.in.net/about'; // browser Back moves URL first
+  listeners.popstate[0]();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(routerState.currentPath, '/about');
+  assert.equal(fetches, 3); assert.equal(swaps, 3);
+  assert.equal(pushes, 2, 'Back must never push another history entry');
+  assert.equal(replaces, 1, 'page boot after PJAX must not normalize again');
+})().catch(e => {console.error(e); process.exitCode = 1;});
+'''
+        result = subprocess.run(['node', '-e', script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

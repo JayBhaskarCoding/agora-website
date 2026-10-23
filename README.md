@@ -28,9 +28,19 @@ or provider contracts. The operator must ensure these deployed systems match the
 policy, especially permanent deletion of both database reports and notification emails.
 This policy is not a claim of an independent legal compliance audit.
 
-Known legacy `.html` URLs now have explicit 301 redirects to their clean routes ahead
-of the 200 rewrites. Client boot normalization remains as a fallback for static servers.
-No double-extension HTML filenames were found. No asset paths were changed.
+Routing uses **200 internal rewrites only**. Do not add reverse `.html` → clean
+301/302 rules: they can re-enter the clean → `.html` rewrites and create redirect
+loops. Cloudflare Pages handles native HTML normalization; client boot normalization
+is guarded to run once and uses only `replaceState`, preserving query/hash and state.
+There are no trailing-slash redirect rules. No double-extension HTML filenames were
+found, and no asset paths were changed.
+
+PJAX leaves same-path clicks (including fragment and query links) to the browser.
+Direct router calls for the displayed path never fetch or push another history
+entry. Duplicate in-flight navigation is ignored; Back/Forward uses the hydrated
+DOM route to decide when to fetch, without pushing history or dispatching synthetic
+navigation events. Executable regression tests cover these behaviors as well as
+idempotent link synchronization and one-time listener registration.
 
 ## Clean URLs and local static-server support
 

@@ -157,7 +157,11 @@
     return Object.prototype.hasOwnProperty.call(PAGE_FILES, clean) ? clean : path;
   }
 
+  var initialUrlNormalized = false;
+
   function normalizeInitialUrl() {
+    if (initialUrlNormalized) return;
+    initialUrlNormalized = true;
     var url = new URL(window.location.href);
     var clean = canonicalPath(url);
     if (clean !== url.pathname) {
@@ -263,10 +267,15 @@
     url.pathname = canonicalPath(url);
     var targetPath = canonicalPath(url);
     var currentUrl = new URL(window.location.href);
+    // User navigation to the address already displayed must not fetch or push.
+    // popstate is different: the URL has changed but the DOM may still be old.
+    if (pushHistory && targetPath === canonicalPath(currentUrl)) {
+      scrollToRouteHash(url.hash);
+      return Promise.resolve();
+    }
     // Compare against the hydrated DOM route, not only location.pathname:
     // popstate updates the address bar before this handler runs.
     if (targetPath === routerState.currentPath && url.search === currentUrl.search) {
-      if (pushHistory && url.hash !== currentUrl.hash) window.history.pushState({}, '', url.href);
       scrollToRouteHash(url.hash);
       return Promise.resolve();
     }
@@ -308,6 +317,9 @@
     if (!link) return;
     var url = getInternalPageUrl(link);
     if (!url) return;
+    // Leave same-page anchors and query links to native browser behavior.
+    // Never turn them into a PJAX swap or another history entry ourselves.
+    if (canonicalPath(url) === canonicalPath(new URL(window.location.href))) return;
     event.preventDefault();
     routeTo(url, true);
   }
