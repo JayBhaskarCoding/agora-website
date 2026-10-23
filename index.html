@@ -343,8 +343,15 @@
         <nav aria-label="Footer">
           <h4>Pages</h4>
           <a href="/index.html">The Square</a>
-          <a href="#why-agora">Why Agora</a>
+          <!-- Absolute, matching the header nav. A bare #why-agora only resolves on
+               index.html; on any other page it points at an anchor that page does not
+               have. app.js papers over it by routing a bare hash home, so it worked
+               with JavaScript and was simply dead without it -- and the same
+               destination having two different hrefs on one page is the kind of
+               inconsistency that later gets "fixed" in only one of the two places. -->
+          <a href="/index.html#why-agora">Why Agora</a>
           <a href="/download.html">Download</a>
+          <a href="/about.html">About</a>
           <a href="/credits.html">Credits</a>
           <a href="/contact.html">Contact</a>
         </nav>

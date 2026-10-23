@@ -40,10 +40,17 @@
 
     <h1 id="credits-title">CREDITS</h1>
 
+    <!-- One link, and it is the way out. This screen is a single-viewport
+         composition the visitor drives with a wheel; a row of chrome links
+         competing with that is clutter, and "Why Agora" duplicated the home page
+         while "Contact" duplicated the footer of every other page. Everything else
+         is one click away via home.
+
+         Styled to the site's own .nav__link scale rather than to a credits-only
+         size, so the header reads as part of the site instead of as a separate
+         application. -->
     <nav class="credits-screen-actions" aria-label="Credits navigation">
-      <a class="mono" href="/index.html#why-agora">Why Agora</a>
-      <a class="mono" href="/contact.html" data-page="contact">Contact</a>
-      <a class="credits-screen-exit mono" href="/index.html" aria-label="Back to Agora home">back to square <span aria-hidden="true">↗</span></a>
+      <a class="credits-screen-exit" href="/index.html" data-page="home">Back to Square</a>
     </nav>
   </header>
 
@@ -162,7 +169,11 @@
     <div class="credits-rotary-status" aria-live="polite">
       <span class="credits-rotary-status__hint mono">wheel to rotate</span>
       <span class="credits-rotary-status__count mono"><span data-rotary-count>01</span> / <span data-rotary-total>03</span></span>
-      <a class="credits-screen-contact mono" href="/contact.html" data-page="contact">contact</a>
+      <!-- A colophon, not a contact link. The address that used to sit here was the
+           one place on this screen a visitor could leave by accident mid-scroll, and
+           every other page already carries contact in its footer. The year is a span
+           with the shared id so initChrome keeps it current like everywhere else. -->
+      <span class="credits-screen-colophon mono">Agora &middot; &copy; <span id="year">2026</span> Agora</span>
     </div>
 
     <div class="credits-scroll-affordance" data-scroll-affordance aria-hidden="true">

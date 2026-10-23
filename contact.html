@@ -85,162 +85,242 @@
       </div>
     </section>
 
-    <!-- ============ DIRECT EMAIL, BY CATEGORY ============
-         Four kinds of message, four pre-subjected links, so a reply lands in the
-         right place without the sender having to think about it.
+    <!-- ============ SEND A SIGNAL: one three-step flow ============
+         Category, identity, message — a single progressive component rather than
+         the two separate sections this replaced.
 
-         No literal address appears here or anywhere else in the site's HTML.
-         Cloudflare's Email Address Obfuscation rewrites raw addresses at the edge
-         into anchors on a Cloudflare edge path, which break under our CSP and
-         survive a PJAX swap as dead markup -- so app.js builds the href and the
-         visible text from data-email-user / data-email-domain / data-email-subject
-         on boot and after every navigation. -->
-    <section class="section section--alt" id="direct">
-      <div class="container">
-        <div class="section-head" data-reveal>
-          <p class="eyebrow">Direct email</p>
-          <h2 class="h2">Pick the closest category.</h2>
-          <p>
-            Each link opens your mail client with the subject already filled in.
-            For anything long, or anything with an attachment, the form below is
-            the better door.
-          </p>
-        </div>
+         Two sections meant the visitor had to reconcile a category grid with a
+         form that had its own unrelated topic dropdown, and could submit a message
+         with no category attached at all. One flow means the category is chosen
+         once, decides the subject line, and cannot be forgotten. It also keeps the
+         first screen to a single decision, which is the whole point of asking for
+         a category before a message.
 
-        <div class="contact-categories">
-          <article class="contact-category" data-reveal>
-            <span class="contact-category__icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            </span>
-            <h3>General</h3>
-            <p>Anything that does not fit below, or a note that just needs a human to read it.</p>
-            <a class="contact-category__mail" data-email-user="mail" data-email-domain="agora.in.net"
-               data-email-subject="General enquiry" data-email-label>Write to us</a>
-          </article>
-
-          <article class="contact-category" data-reveal data-reveal-delay="80">
-            <span class="contact-category__icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>
-            </span>
-            <h3>Feedback &amp; ideas</h3>
-            <p>What feels thoughtful, what feels off, and what you would build next. This is the one that changes the product.</p>
-            <a class="contact-category__mail" data-email-user="mail" data-email-domain="agora.in.net"
-               data-email-subject="Feedback &amp; ideas" data-email-label>Share an idea</a>
-          </article>
-
-          <article class="contact-category" data-reveal data-reveal-delay="160">
-            <span class="contact-category__icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4v.6"/><path d="M12 17h.01"/></svg>
-            </span>
-            <h3>Questions</h3>
-            <p>How something works, whether a feature exists, or how to install the APK on your device.</p>
-            <a class="contact-category__mail" data-email-user="mail" data-email-domain="agora.in.net"
-               data-email-subject="Question about Agora" data-email-label>Ask a question</a>
-          </article>
-
-          <article class="contact-category" data-reveal data-reveal-delay="240">
-            <span class="contact-category__icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9h4"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg>
-            </span>
-            <h3>Press</h3>
-            <p>Interviews, coverage and partnership. Say what you are writing and by when, and you will get a real answer.</p>
-            <a class="contact-category__mail" data-email-user="mail" data-email-domain="agora.in.net"
-               data-email-subject="Press inquiry" data-email-label>Press inquiry</a>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============ CONTACT / FEEDBACK ============ -->
+         Steps 2 and 3 are `hidden` rather than merely styled away: a hidden panel
+         is out of the tab order and out of the accessibility tree, so a keyboard
+         or screen-reader visitor meets one step at a time instead of a form whose
+         fields are invisible but focusable. -->
     <section class="section section--alt" id="contact">
-      <div class="container contact-grid">
-        <div class="section-head" data-reveal style="margin-bottom:0;">
-          <p class="eyebrow">02 — Send a signal</p>
-          <h2 class="h2">Feedback, ideas, or just hello.</h2>
-          <p>
-            This is an early-build platform, and the people in it shape what it
-            becomes. Everything sent here is read by the person who writes the
-            code.
-          </p>
-        </div>
+      <div class="container">
+        <div class="signal" data-signal>
 
-        <div class="form-card" data-reveal data-reveal-delay="120">
-          <!-- Live form: app.js validates every field and POSTs the message
-               to the same-origin Cloudflare Pages Function at /api/contact. -->
-          <form id="feedback-form" method="post" novalidate>
-            <div class="form-row">
-              <div class="field">
-                <label for="fb-name">Name</label>
-                <input id="fb-name" name="name" type="text" placeholder="How should we address you?"
-                       autocomplete="name" maxlength="80" required data-validate aria-describedby="fb-name-error" />
-                <p class="field__error" id="fb-name-error" data-error-for="name" hidden></p>
-              </div>
-              <div class="field">
-                <label for="fb-email">Email</label>
-                <input id="fb-email" name="email" type="email" placeholder="you@somewhere.com"
-                       autocomplete="email" maxlength="120" required data-validate aria-describedby="fb-email-error" />
-                <p class="field__error" id="fb-email-error" data-error-for="email" hidden></p>
-              </div>
+          <ol class="signal__progress" data-signal-progress>
+            <li class="is-current" data-signal-dot="1"><span class="signal__progress-n" aria-hidden="true">01</span> Category</li>
+            <li data-signal-dot="2"><span class="signal__progress-n" aria-hidden="true">02</span> You</li>
+            <li data-signal-dot="3"><span class="signal__progress-n" aria-hidden="true">03</span> Message</li>
+          </ol>
+
+          <!-- ---------- STEP 1: category ---------- -->
+          <div class="signal__panel is-current" data-signal-step="1" id="signal-step-1"
+               role="group" aria-labelledby="signal-step-1-title">
+            <div class="section-head section-head--center">
+              <p class="eyebrow eyebrow--center">Step 01 &mdash; Send a signal</p>
+              <h2 class="h2" id="signal-step-1-title">What is this about?</h2>
+              <p>
+                Pick the closest one. It decides where your message lands and what
+                the subject line says, and you can go back and change it at any
+                point before you send.
+              </p>
             </div>
 
-            <div class="field">
-              <label for="fb-topic">Topic</label>
-              <select id="fb-topic" name="topic" required data-validate aria-describedby="fb-topic-error">
-                <option value="feedback" selected>General feedback</option>
-                <option value="bug">Bug report</option>
-                <option value="moderation">Moderation &amp; rules</option>
-                <option value="press">Press</option>
-                <option value="hello">Just saying hi</option>
-              </select>
-              <p class="field__error" id="fb-topic-error" data-error-for="topic" hidden></p>
+            <div class="contact-categories" data-signal-categories>
+          <button type="button" class="contact-category" data-category="General"
+                  data-reveal
+                  aria-describedby="signal-step-1-title">
+            <span class="contact-category__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+            <span class="contact-category__title">General</span>
+            <span class="contact-category__body">Anything that does not fit below, or a note that simply needs a human to read it.</span>
+            <span class="contact-category__go" aria-hidden="true">Choose<span class="contact-category__arrow">&rarr;</span></span>
+          </button>
+          <button type="button" class="contact-category" data-category="Feedback & Ideas"
+                  data-reveal data-reveal-delay="70"
+                  aria-describedby="signal-step-1-title">
+            <span class="contact-category__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg></span>
+            <span class="contact-category__title">Feedback &amp; Ideas</span>
+            <span class="contact-category__body">What feels thoughtful, what feels off, and what you would build next. This is the one that changes the product.</span>
+            <span class="contact-category__go" aria-hidden="true">Choose<span class="contact-category__arrow">&rarr;</span></span>
+          </button>
+          <button type="button" class="contact-category" data-category="Questions"
+                  data-reveal data-reveal-delay="140"
+                  aria-describedby="signal-step-1-title">
+            <span class="contact-category__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4v.6"/><path d="M12 17h.01"/></svg></span>
+            <span class="contact-category__title">Questions</span>
+            <span class="contact-category__body">How something works, whether a feature exists, or how to install the APK on your device.</span>
+            <span class="contact-category__go" aria-hidden="true">Choose<span class="contact-category__arrow">&rarr;</span></span>
+          </button>
+          <button type="button" class="contact-category" data-category="Press"
+                  data-reveal data-reveal-delay="210"
+                  aria-describedby="signal-step-1-title">
+            <span class="contact-category__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9h4"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg></span>
+            <span class="contact-category__title">Press</span>
+            <span class="contact-category__body">Interviews, coverage and partnership. Say what you are writing and by when, and you will get a real answer.</span>
+            <span class="contact-category__go" aria-hidden="true">Choose<span class="contact-category__arrow">&rarr;</span></span>
+          </button>
+          <button type="button" class="contact-category" data-category="Anything else"
+                  data-reveal data-reveal-delay="280"
+                  aria-describedby="signal-step-1-title">
+            <span class="contact-category__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m14.8 9.2-1.9 4.1-4.1 1.9 1.9-4.1z"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg></span>
+            <span class="contact-category__title">Anything else</span>
+            <span class="contact-category__body">None of these quite fits? Pick this and describe the topic in your own words.</span>
+            <span class="contact-category__go" aria-hidden="true">Choose<span class="contact-category__arrow">&rarr;</span></span>
+          </button>
             </div>
 
-            <div class="field">
-              <label for="fb-message">Message</label>
-              <textarea id="fb-message" name="message" placeholder="What should the square hear?"
-                        maxlength="2000" required data-validate aria-describedby="fb-message-error"></textarea>
-              <p class="field__error" id="fb-message-error" data-error-for="message" hidden></p>
-            </div>
-
-            <!-- Spam trap: hidden from people, irresistible to bots. -->
-            <div class="field field--hp" aria-hidden="true">
-              <label for="fb-company">Company</label>
-              <input id="fb-company" name="company" type="text" tabindex="-1" autocomplete="off" data-honeypot />
-            </div>
-
-            <button class="btn btn--primary btn--lg btn--block" type="submit" data-submit>
-              <span data-button-label>Send message</span>
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" />
-              </svg>
-            </button>
-
-            <p class="form-status" id="feedback-status" role="status" aria-live="polite" hidden></p>
-
-            <p class="form-note">
-              Sent securely through the Agora contact service.<br />
-              A human reply goes to the email address you provide.
-            </p>
-          </form>
-
-          <div class="form-success" id="feedback-success" hidden>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" /><path d="m8.5 12.5 2.5 2.5 5-5.5" />
-            </svg>
-            <h3>Signal received.</h3>
-            <p data-success-note>
-              Your message is on its way — a human reads every one of these.
+            <p class="contact-alt signal__alt">
+              Rather not use the form?
+              <!-- Assembled at runtime by app.js from these two attributes; no
+                   literal address exists in any HTML file, so Cloudflare's Email
+                   Address Obfuscation has nothing at the edge to rewrite. -->
+              <a data-email-user="mail" data-email-domain="agora.in.net"
+                 data-email-subject="Agora — general enquiry">Mail us directly</a>
+              &mdash; answered by a human, usually the developer.
             </p>
           </div>
 
-          <p class="contact-alt">
-            Prefer email?
-            <!-- Assembled at runtime by app.js from these two attributes; no literal
-                 address exists in any HTML file, so Cloudflare's Email Address
-                 Obfuscation has nothing at the edge to rewrite. -->
-            <a data-email-user="mail" data-email-domain="agora.in.net">mail us directly</a>
-            &mdash; answered by a human, usually the developer.
-          </p>
+          <!-- ---------- STEP 2: identity gate ----------
+               A deliberate extra step. Collecting a name and an email before the
+               message means the visitor has committed to being reachable before
+               they invest in writing, and it means step 3 opens with two fields
+               already correct instead of empty. -->
+          <div class="signal__panel" data-signal-step="2" id="signal-step-2" hidden
+               role="group" aria-labelledby="signal-step-2-title">
+            <div class="form-card signal__card">
+              <p class="eyebrow">Step 02 &mdash; You</p>
+              <h2 class="h3" id="signal-step-2-title" tabindex="-1">Who is writing?</h2>
+              <p class="signal__chosen">
+                Regarding <strong data-signal-category>General</strong>
+                <button type="button" class="signal__edit" data-signal-back="1">change</button>
+              </p>
+
+              <form id="signal-identity" data-contact-form data-signal-advance="3"
+                    data-status="signal-identity-status" novalidate>
+                <div class="form-row">
+                  <div class="field">
+                    <label for="sg-name">Name</label>
+                    <input id="sg-name" name="name" type="text" placeholder="How should we address you?"
+                           autocomplete="name" maxlength="80" required data-validate
+                           aria-describedby="sg-name-error" />
+                    <p class="field__error" id="sg-name-error" data-error-for="name" hidden></p>
+                  </div>
+                  <div class="field">
+                    <label for="sg-email">Email</label>
+                    <input id="sg-email" name="email" type="email" placeholder="you@somewhere.com"
+                           autocomplete="email" maxlength="120" required data-validate
+                           aria-describedby="sg-email-error" />
+                    <p class="field__error" id="sg-email-error" data-error-for="email" hidden></p>
+                  </div>
+                </div>
+
+                <p class="form-status" id="signal-identity-status" role="status" aria-live="polite" hidden></p>
+
+                <div class="signal__actions">
+                  <button class="btn btn--primary btn--lg" type="submit" data-submit>
+                    <span data-button-label>Continue</span>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+                  </button>
+                  <button class="btn btn--ghost" type="button" data-signal-back="1">
+                    <span aria-hidden="true">&larr;</span> Back
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- ---------- STEP 3: the message ---------- -->
+          <div class="signal__panel" data-signal-step="3" id="signal-step-3" hidden
+               role="group" aria-labelledby="signal-step-3-title">
+            <div class="form-card signal__card">
+              <p class="eyebrow">Step 03 &mdash; Message</p>
+              <h2 class="h3" id="signal-step-3-title" tabindex="-1">What should the square hear?</h2>
+
+              <!-- Live form: app.js validates every field and POSTs the message to
+                   the same-origin Cloudflare Pages Function at /api/contact. -->
+              <form id="feedback-form" method="post" data-contact-form
+                    data-status="feedback-status" data-success="feedback-success" novalidate>
+                <div class="form-row">
+                  <div class="field">
+                    <label for="fb-name">Name</label>
+                    <!-- Carried over from step 2 and left EDITABLE: the gate is
+                         there to save typing, not to lock anyone into a typo. -->
+                    <input id="fb-name" name="name" type="text" placeholder="How should we address you?"
+                           autocomplete="name" maxlength="80" required data-validate
+                           aria-describedby="fb-name-error" />
+                    <p class="field__error" id="fb-name-error" data-error-for="name" hidden></p>
+                  </div>
+                  <div class="field">
+                    <label for="fb-email">Email</label>
+                    <input id="fb-email" name="email" type="email" placeholder="you@somewhere.com"
+                           autocomplete="email" maxlength="120" required data-validate
+                           aria-describedby="fb-email-error" />
+                    <p class="field__error" id="fb-email-error" data-error-for="email" hidden></p>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label for="fb-topic">Topic</label>
+                  <!-- An <input>, not a <select>: the brief asks for no dropdown
+                       arrow and no direct editing for the four fixed categories,
+                       and a readonly input is the only control that is both. For
+                       "Anything else" the same element becomes editable.
+
+                       readOnly and NOT disabled, and that distinction is the whole
+                       bug class here: a disabled control is omitted from FormData,
+                       so the locked topic would silently vanish from the submission
+                       and the API would reject the message for a missing field.
+                       readOnly keeps it in the payload and keeps it focusable for a
+                       screen reader, while still refusing edits. -->
+                  <input id="fb-topic" name="topic" type="text" maxlength="120" required
+                         data-validate aria-describedby="fb-topic-error fb-topic-hint" readonly />
+                  <p class="field__hint" id="fb-topic-hint" data-topic-hint>
+                    Set by the category you chose in step 1.
+                  </p>
+                  <p class="field__error" id="fb-topic-error" data-error-for="topic" hidden></p>
+                </div>
+
+                <div class="field">
+                  <label for="fb-message">Message</label>
+                  <textarea id="fb-message" name="message" placeholder="What should the square hear?"
+                            maxlength="2000" required data-validate aria-describedby="fb-message-error"></textarea>
+                  <p class="field__error" id="fb-message-error" data-error-for="message" hidden></p>
+                </div>
+
+                <!-- Spam trap: hidden from people, irresistible to bots. -->
+                <div class="field field--hp" aria-hidden="true">
+                  <label for="fb-company">Company</label>
+                  <input id="fb-company" name="company" type="text" tabindex="-1" autocomplete="off" data-honeypot />
+                </div>
+
+                <div class="signal__actions">
+                  <button class="btn btn--primary btn--lg" type="submit" data-submit>
+                    <span data-button-label>Send message</span>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
+                  </button>
+                  <button class="btn btn--ghost" type="button" data-signal-back="1">
+                    <span aria-hidden="true">&larr;</span> Change topic
+                  </button>
+                </div>
+
+                <p class="form-status" id="feedback-status" role="status" aria-live="polite" hidden></p>
+
+                <p class="form-note">
+                  Sent securely through the Agora contact service.<br />
+                  A human reply goes to the email address you provide.
+                </p>
+              </form>
+
+              <div class="form-success" id="feedback-success" hidden>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" /><path d="m8.5 12.5 2.5 2.5 5-5.5" />
+                </svg>
+                <h3>Signal received.</h3>
+                <p data-success-note>
+                  Your message is on its way — a human reads every one of these.
+                </p>
+                <button class="btn btn--ghost" type="button" data-signal-restart>Send another</button>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
     </section>
@@ -279,6 +359,7 @@
           <a href="/index.html">The Square</a>
           <a href="/index.html#why-agora">Why Agora</a>
           <a href="/download.html">Download</a>
+          <a href="/about.html">About</a>
           <a href="/credits.html">Credits</a>
           <a href="/contact.html">Contact</a>
         </nav>

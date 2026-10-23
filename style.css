@@ -1560,6 +1560,28 @@ h1, h2, h3 {
 }
 
 /* ---------- 10. CTA panel ---------- */
+/* The closing invitation on about.html. A hairline band rather than a glass panel,
+   because the section immediately after it IS a .cta-panel and two of those in a row
+   read as a duplicated block. Same tokens, different register. */
+.contact-callout {
+  padding: clamp(2rem, 5vw, 3.25rem) clamp(1.5rem, 4vw, 3rem);
+  border: 1px solid var(--border);
+  border-top: 2px solid rgba(var(--accent-rgb), 0.45);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.05), transparent 62%);
+  text-align: center;
+}
+
+.contact-callout h2 {
+  margin-bottom: 0.8rem;
+}
+
+.contact-callout p {
+  max-width: 46rem;
+  margin: 0 auto 1.6rem;
+  color: var(--text-dim);
+}
+
 .cta-panel {
   position: relative;
   overflow: hidden;
@@ -2387,23 +2409,19 @@ h1, h2, h3 {
 }
 
 /* ---------- 17. Contact form ---------- */
-.contact-grid {
-  display: grid;
-  gap: 2.5rem;
-}
 
-@media (min-width: 900px) {
-  .contact-grid {
-    grid-template-columns: 0.85fr 1.15fr;
-    gap: 4.5rem;
-    align-items: start;
-  }
-  .contact-grid .section-head {
-    position: sticky;
-    top: calc(var(--header-h) + 2rem);
-  }
-}
 
+/* The card that holds a form. Restored after a bad edit deleted it: removing a
+   shared selector list by cutting to the second close-brace-on-its-own-line skipped
+   the indented inner braces of a media query and swallowed the next top-level rule
+   with it. (No literal brace appears in this comment on purpose: a brace inside CSS
+   prose defeats every naive index-based slice of this file, including the one that
+   caused this, and LaunchContract counts raw braces as a tripwire for exactly that.)
+   The class
+   survived in the @supports backdrop-filter group below, so it still looked styled
+   while having lost its border, radius, padding, background and shadow -- and both
+   contact panels flattened. test_every_container_class_has_a_box_rule now catches
+   that shape of loss. */
 .form-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -2568,11 +2586,166 @@ h1, h2, h3 {
   color: var(--text-dim);
 }
 
-/* The four direct-email categories on /contact.html. Modelled on .principle
-   rather than invented: same border, radius, surface gradient, hover lift and
-   accent wash, so a new page reads as part of the same system instead of as an
-   addition to it. Everything is a token -- no literal colour appears here, which
-   is what lets the light theme inherit the whole block unchanged. */
+/* ------------------------------------------------------------------------
+   THE THREE-STEP CONTACT FLOW
+
+   Built out of the tokens and the existing .principle / .form-card idiom rather
+   than a new visual language: same border, radius, surface gradient, hover lift
+   and accent wash the rest of the site already uses, so a whole new interaction
+   still reads as the same product. No literal colour appears in here, which is
+   what lets the light theme inherit the block unchanged.
+   ------------------------------------------------------------------------ */
+.signal {
+  position: relative;
+}
+
+/* ---- the progress rail ----------------------------------------------------
+   Decorative: the panels carry the real semantics (role=group, a labelled
+   heading, and `hidden` on the inactive steps), so the rail is aria-hidden at the
+   digit level and never the thing a screen reader relies on to know where it is. */
+.signal__progress {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem 1.4rem;
+  margin: 0 0 2.4rem;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.signal__progress li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: color 0.3s ease;
+}
+
+.signal__progress-n {
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  font-size: 0.6rem;
+  transition: border-color 0.3s ease, background-color 0.3s ease, color 0.3s ease;
+}
+
+.signal__progress li.is-current {
+  color: var(--text);
+}
+
+.signal__progress li.is-current .signal__progress-n {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.signal__progress li.is-done {
+  color: var(--text-dim);
+}
+
+.signal__progress li.is-done .signal__progress-n {
+  border-color: rgba(var(--build-rgb), 0.5);
+  color: var(--build);
+}
+
+/* ---- panels ---------------------------------------------------------------
+   `hidden` does the hiding; the global `[hidden] { display: none !important }`
+   rule already keeps these out of the tab order and the accessibility tree. The
+   animation below therefore only ever runs on the panel becoming current. */
+.signal__panel.is-current {
+  animation: signal-enter 0.42s var(--ease) both;
+}
+
+@keyframes signal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.signal__card {
+  max-width: 44rem;
+  margin-inline: auto;
+}
+
+.signal__chosen {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 1.4rem;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+}
+
+.signal__chosen strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* An inline text button, not a link: it performs an action inside the flow rather
+   than navigating, and a link that goes nowhere is worse than a button that does
+   something. Sized and coloured to read as an affordance, not as body copy. */
+.signal__edit {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  padding: 0.1rem 0.35rem;
+  border: 0;
+  border-radius: 0.3rem;
+  background: transparent;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  cursor: pointer;
+  border-bottom: 1px solid rgba(var(--accent-rgb), 0.35);
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.signal__edit:hover,
+.signal__edit:focus-visible {
+  color: var(--text-bright);
+  border-color: rgba(var(--accent-rgb), 0.8);
+}
+
+.signal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 1.4rem;
+}
+
+.signal__actions .btn--primary {
+  flex: 1 1 12rem;
+}
+
+.signal__alt {
+  margin-top: 2rem;
+  text-align: center;
+}
+
+/* ---- the category cards ----------------------------------------------------
+   Each is a real <button>, so the whole card is the control: clicking anywhere on
+   it selects, it is reachable by keyboard with no extra markup, and it has an
+   accessible name from its own text. That is why the separate per-card email link
+   is gone -- a link inside a button is invalid HTML and, worse, a small target
+   inside a large one that people miss. */
 .contact-categories {
   display: grid;
   gap: 1.1rem;
@@ -2580,9 +2753,21 @@ h1, h2, h3 {
 }
 
 .contact-category {
+  /* Undo the UA button box before anything else, or the card arrives with a
+     centred label, a system font and a grey fill. */
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+
   position: relative;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 0.7rem;
   padding: 1.75rem 1.5rem;
   border: 1px solid var(--border);
@@ -2603,17 +2788,20 @@ h1, h2, h3 {
 }
 
 .contact-category:hover,
-.contact-category:focus-within {
+.contact-category:focus-visible {
   transform: translateY(-5px);
   border-color: rgba(var(--accent-rgb), 0.35);
   box-shadow: 0 30px 60px -34px rgba(var(--glow-rgb), 0.35);
 }
 
 .contact-category:hover::before,
-.contact-category:focus-within::before {
+.contact-category:focus-visible::before {
   opacity: 1;
 }
 
+/* :focus-within was the right selector when the card contained a link. With the
+   card itself being the control it is :focus-visible, and leaving the old selector
+   in place would style the card on any descendant focus that no longer exists. */
 .contact-category__icon {
   display: grid;
   place-items: center;
@@ -2630,12 +2818,15 @@ h1, h2, h3 {
   height: 22px;
 }
 
-.contact-category h3 {
+.contact-category__title {
   font-size: 1.12rem;
+  font-weight: 600;
   color: var(--text);
 }
 
-.contact-category p {
+/* flex: 1 pushes the call to action to the bottom of the card, so the five align
+   on a row no matter how uneven the copy lengths are. */
+.contact-category__body {
   flex: 1;
   margin: 0;
   color: var(--text-dim);
@@ -2643,42 +2834,82 @@ h1, h2, h3 {
   line-height: 1.65;
 }
 
-/* Pushed to the bottom of the card by the flexible paragraph above it, so the
-   four links line up on a row no matter how uneven the copy lengths are. */
-.contact-category__mail {
-  align-self: flex-start;
+.contact-category__go {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   margin-top: 0.35rem;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.1em;
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--accent);
-  border-bottom: 1px solid rgba(var(--accent-rgb), 0.35);
-  padding-bottom: 2px;
-  transition: color 0.2s ease, border-color 0.2s ease;
 }
 
-.contact-category__mail:hover,
-.contact-category__mail:focus-visible {
-  color: var(--text-bright);
-  border-color: rgba(var(--accent-rgb), 0.8);
+.contact-category__arrow {
+  transition: transform 0.3s var(--ease);
 }
 
-/* An address assembled at runtime is longer than the authored label, and on a
-   narrow card it must wrap rather than overflow the border. */
-.contact-category__mail[data-email-user] {
-  max-width: 100%;
-  overflow-wrap: anywhere;
+.contact-category:hover .contact-category__arrow,
+.contact-category:focus-visible .contact-category__arrow {
+  transform: translateX(4px);
+}
+
+/* ---- the locked topic field ------------------------------------------------
+   Readonly, not disabled: a disabled control is dropped from FormData, so the
+   locked topic would vanish from the submission. The styling has to say "fixed"
+   without saying "broken" -- a greyed-out field reads as an error, so this keeps
+   the normal text colour and only changes the surface and the caret. */
+.field input.is-locked {
+  background: rgba(var(--overlay-rgb), 0.045);
+  border-style: dashed;
+  border-color: var(--border-strong);
+  color: var(--text-dim);
+  caret-color: transparent;
+  cursor: default;
+}
+
+.field input.is-locked:focus {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  box-shadow: none;
+}
+
+.field__hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+@media (max-width: 560px) {
+  .signal__actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .signal__actions .btn {
+    width: 100%;
+  }
+
+  .signal__progress {
+    gap: 0.4rem 0.9rem;
+    font-size: 0.6rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .signal__panel.is-current {
+    animation: none;
+  }
+
   .contact-category,
-  .contact-category::before {
+  .contact-category::before,
+  .contact-category__arrow {
     transition: none;
   }
 
   .contact-category:hover,
-  .contact-category:focus-within {
+  .contact-category:focus-visible {
     transform: none;
   }
 }
@@ -2749,21 +2980,6 @@ h1, h2, h3 {
   gap: 1rem;
 }
 
-.credits-screen-actions > a:first-child {
-  min-height: 2.5rem;
-  padding: 0.7rem 0.25rem;
-  color: var(--text-faint);
-  font-size: clamp(0.7rem, 1vw, 0.84rem);
-  letter-spacing: 0.13em;
-  line-height: 1;
-  transition: color 0.2s ease;
-}
-
-.credits-screen-actions > a:first-child:hover,
-.credits-screen-actions > a:first-child:focus-visible {
-  color: var(--text);
-}
-
 /* The large mono title balances the two oversized wheels. */
 .credits-screen-header h1 {
   color: var(--text);
@@ -2775,13 +2991,23 @@ h1, h2, h3 {
   text-indent: 0.42em;
 }
 
+/* The one link in the credits header, sized to the site's own .nav__link rather
+   than to a credits-only scale: same 0.78rem, same 0.16em, same uppercase, same
+   --text-dim resting colour and --text hover. It used to carry the .mono class as
+   well, which set 0.72rem/0.16em and then had both of those overridden here --
+   two rules fighting over one property is how a page drifts out of step with the
+   site without anyone changing either file. It now sets its own type once. */
 .credits-screen-exit {
   justify-self: end;
+  display: inline-flex;
+  align-items: center;
   min-height: 2.5rem;
-  padding: 0.7rem 0.25rem;
-  color: var(--text-faint);
-  font-size: clamp(0.7rem, 1vw, 0.84rem);
-  letter-spacing: 0.13em;
+  padding: 0.4rem 0.25rem;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
   line-height: 1;
   transition: color 0.2s ease;
 }
@@ -3140,13 +3366,6 @@ h1, h2, h3 {
   line-height: 1.65;
 }
 
-.rotary-disc__rule {
-  display: block;
-  width: 5rem;
-  height: 1px;
-  margin-top: 1rem;
-  background: linear-gradient(90deg, var(--accent), transparent);
-}
 
 /* Each role sign is a ferris-wheel passenger hanging from its OWN sector's rim.
 
@@ -3378,17 +3597,11 @@ h1, h2, h3 {
   letter-spacing: 0.12em;
 }
 
-.credits-screen-contact {
-  pointer-events: auto;
-  color: var(--text-faint);
-  font-size: clamp(0.58rem, 0.8vw, 0.68rem);
-  letter-spacing: 0.08em;
-  transition: color 0.2s ease;
-}
-
-.credits-screen-contact:hover,
-.credits-screen-contact:focus-visible {
-  color: var(--violet-soft);
+/* The bottom-bar colophon: same slot the contact link occupied, so it inherits
+   that link's sizing and only changes what a static line needs -- no hover, no
+   pointer-events override, nothing to click. */
+.credits-screen-colophon {
+  white-space: nowrap;
 }
 
 .credits-scroll-affordance {
@@ -3493,16 +3706,16 @@ h1, h2, h3 {
     white-space: nowrap;
   }
 
-  .credits-screen-actions > a:first-child {
-    display: none;
-  }
-
+  /* Was `> a:first-child { display: none }` plus `.credits-screen-exit { font-size: 0 }`
+     with the label hidden and only the ↗ span sized back up. That hid "Why Agora" and
+     reduced the exit to a bare arrow. With one link left, the first rule would have
+     hidden the only way off the credits screen on a phone, and the second would have
+     left it invisible anyway -- the arrow span it re-sized is gone. The label is now
+     shown, small, because it is the only navigation this screen has. */
   .credits-screen-exit {
-    font-size: 0;
-  }
-
-  .credits-screen-exit span {
-    font-size: 1.1rem;
+    font-size: 0.62rem;
+    letter-spacing: 0.14em;
+    padding: 0.4rem 0.2rem;
   }
 
   /* Re-solved for the shared -44% hub inset. The arm is much shorter than the
@@ -3589,8 +3802,11 @@ h1, h2, h3 {
     text-align: center;
   }
 
+  /* Retargeted to the colophon, which took the contact link's slot. Left pointing
+     at a class that no longer exists, this would have silently stopped shrinking
+     the bottom bar on a phone -- dead CSS that still looks like it is doing work. */
   .credits-rotary-status__count,
-  .credits-screen-contact {
+  .credits-screen-colophon {
     font-size: 0.56rem;
   }
 
@@ -3872,8 +4088,12 @@ h1, h2, h3 {
     padding: 1.5rem 1.35rem;
   }
 
-  .vision-grid .section-head,
-  .contact-grid .section-head {
+  /* Was a shared rule with .contact-grid .section-head, which is gone: the
+     contact section moved to its own page and no longer uses that grid. Only the
+     surviving selector is left -- editing a selector LIST by cutting from the
+     second name onwards leaves the first one dangling into whatever rule follows,
+     which silently re-targets it. */
+  .vision-grid .section-head {
     position: static;
   }
 

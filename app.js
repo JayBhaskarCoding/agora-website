@@ -14,6 +14,7 @@
      4. Reveal on scroll  — IntersectionObserver entrance animations
      5. Chrome            — header scroll state, active nav, year
      6. Feedback form     — validation + same-origin API submit
+     6b. Contact flow     — the three-step category / identity / message wizard
      7. Shared-post       — URL param parsing + post preview stub
      8. Ambient layer      — custom cursor, streaming music, the background mesh
      9. Dynamic download  — newest GitHub release APK for every CTA
@@ -116,7 +117,6 @@
   // arrived on — e.g. a shared link like /shared-post.html?post=…
   var PAGE_MAP = {
     home: '/index.html',
-    why: '/index.html#why-agora',
     download: '/download.html',
     about: '/about.html',
     credits: '/credits.html',
@@ -329,7 +329,19 @@
       if (!event.target.closest('.site-header')) setMenu(false);
     });
 
-    // Drop the menu state when resizing up to the desktop layout.
+    /* Drop the menu state when resizing up to the desktop layout.
+
+       Guarded, like every other matchMedia call in this file -- this one was not,
+       and the placement is what made it expensive. It runs in bootPage(), which is
+       deliberately OUTSIDE boot()'s try/catch so that a real hydration failure is
+       never swallowed. So in any environment without matchMedia the throw landed
+       here and took out everything after it: the menu, smooth scrolling, the reveal
+       animations, the header chrome, the contact flow AND the contact form -- while
+       the ambient layer, wrapped above, carried on working perfectly. That is
+       exactly the inverted priority the wrapper exists to prevent, in the other half
+       of boot(). Found by driving the contact flow in jsdom, which has no
+       matchMedia; nothing about the page looked wrong until a click did nothing. */
+    if (typeof window.matchMedia !== 'function') return;
     var desktop = window.matchMedia('(min-width: 769px)');
     var onBreakpoint = function (event) {
       if (event.matches) setMenu(false);
@@ -440,12 +452,28 @@
   var CONTACT_EMAIL = ['mail', 'agora.in.net'].join('@');
   var SUBMIT_TIMEOUT = 12000;                // ms before we give up on the API
 
-  function initContactForm() {
-    var form = doc.getElementById('feedback-form');
-    if (!form) return;
+  /* Set by initSignalFlow(), read by the form wiring below, so a gate step can hand
+     a validated form to the flow instead of posting it. A closure variable rather
+     than a custom DOM event because both halves live in this one IIFE and an event
+     would only add a boundary between them. Null on every page that has no flow. */
+  var signalFlow = null;
 
-    var success = doc.getElementById('feedback-success');
-    var status = doc.getElementById('feedback-status');
+  function initContactForm() {
+    /* Every form carrying the marker, not one hardcoded id. The contact page has two
+       -- the identity gate and the message form -- and they share one validation
+       machinery, so wiring them from a list is what stops the gate growing its own
+       half-copy of the rules that then drifts. */
+    Array.prototype.forEach.call(doc.querySelectorAll('form[data-contact-form]'), wireContactForm);
+  }
+
+  function wireContactForm(form) {
+    // Resolved from the form's own attributes: the identity gate has a status line
+    // but no success panel, and looking either up by a fixed id would send one
+    // form's messages to the other's slot.
+    var statusId = form.getAttribute('data-status');
+    var successId = form.getAttribute('data-success');
+    var status = statusId ? doc.getElementById(statusId) : null;
+    var success = successId ? doc.getElementById(successId) : null;
     var button = form.querySelector('[data-submit]');
     var label = button ? button.querySelector('[data-button-label]') : null;
     var idleLabel = label ? label.textContent : '';
@@ -461,7 +489,9 @@
           : 'That email address looks incomplete.';
       },
       topic: function (value) {
-        return value ? '' : 'Choose a topic so it reaches the right inbox.';
+        // Only reachable when the topic is the editable one: the four fixed
+        // categories fill and lock it in step 1, so it cannot be empty there.
+        return value.trim() ? '' : 'Add a topic so it reaches the right inbox.';
       },
       message: function (value) {
         var text = value.trim();
@@ -530,11 +560,19 @@
 
     function collect() {
       var topic = form.elements.topic;
+      var topicValue = topic ? (topic.value || '').trim() : '';
       return {
         name: (form.elements.name.value || '').trim(),
         email: (form.elements.email.value || '').trim(),
-        topic: topic.value,
-        topicLabel: topic.options[topic.selectedIndex] ? topic.options[topic.selectedIndex].text : topic.value,
+        topic: topicValue,
+        /* Was `topic.options[topic.selectedIndex].text`, which throws on an <input>
+           because it has no options -- a TypeError inside the submit handler, after
+           validation had already passed, so the message would have died silently at
+           the last step. The topic is an input now: readonly and category-filled for
+           the four fixed categories, freely typed for "Anything else". Either way its
+           value IS its label, so both fields carry the same string and the Function's
+           `topicLabel || topic` picks it up unchanged. */
+        topicLabel: topicValue,
         message: (form.elements.message.value || '').trim(),
         page: window.location.href,
         submittedAt: new Date().toISOString()
@@ -607,6 +645,14 @@
         return;
       }
 
+      /* A gate step, not a submission. Validation has already passed by here, so
+         this is the point to hand the collected identity to the flow and move on --
+         posting it would send a message with no content in it. */
+      if (form.hasAttribute('data-signal-advance') && signalFlow) {
+        signalFlow.advance(form);
+        return;
+      }
+
       // Honeypot: people never see this field, so a value means a bot.
       var trap = form.querySelector('[data-honeypot]');
       if (trap && trap.value) {
@@ -631,6 +677,149 @@
         if (typeof window.alert === 'function') window.alert(message);
       });
     });
+  }
+
+  /* ------------------------------------------------------------
+     6b. THE THREE-STEP CONTACT FLOW  (contact.html only)
+
+     Category, then identity, then message. Three panels, one section, and exactly
+     one of them is in the document flow at a time -- the other two are `hidden`,
+     which puts them out of the tab order and out of the accessibility tree rather
+     than merely styling them away. A panel that is only visually hidden is a panel
+     a keyboard visitor still has to tab through to get past.
+
+     This owns state; it does not own validation. Both forms are wired by
+     initContactForm() from the same rule table, and the gate step hands its
+     validated values back here through the `signalFlow` slot instead of posting
+     them -- so there is one set of rules and one submit path per form.
+     ------------------------------------------------------------ */
+  function initSignalFlow() {
+    var root = doc.querySelector('[data-signal]');
+    if (!root) return;
+
+    var panels = root.querySelectorAll('[data-signal-step]');
+    var dots = root.querySelectorAll('[data-signal-dot]');
+    var identity = doc.getElementById('signal-identity');
+    var message = doc.getElementById('feedback-form');
+    var success = doc.getElementById('feedback-success');
+    if (!panels.length || !identity || !message) return;
+
+    var ANYTHING_ELSE = 'Anything else';
+    var state = { category: '' };
+
+    // Whether the visitor corrected step 3's carried-over identity directly. If
+    // they did, a later pass through step 2 must not silently overwrite the
+    // correction; if they did not, step 2 stays authoritative.
+    var edited = { name: false, email: false };
+    ['name', 'email'].forEach(function (key) {
+      var input = message.elements[key];
+      if (input) input.addEventListener('input', function () { edited[key] = true; });
+    });
+
+    function panelFor(n) {
+      for (var i = 0; i < panels.length; i += 1) {
+        if (parseInt(panels[i].getAttribute('data-signal-step'), 10) === n) return panels[i];
+      }
+      return null;
+    }
+
+    function show(n) {
+      Array.prototype.forEach.call(panels, function (panel) {
+        var on = parseInt(panel.getAttribute('data-signal-step'), 10) === n;
+        panel.hidden = !on;
+        panel.classList.toggle('is-current', on);
+      });
+      Array.prototype.forEach.call(dots, function (dot) {
+        var at = parseInt(dot.getAttribute('data-signal-dot'), 10);
+        dot.classList.toggle('is-current', at === n);
+        dot.classList.toggle('is-done', at < n);
+      });
+      var named = root.querySelector('[data-signal-category]');
+      if (named) named.textContent = state.category || 'your message';
+
+      /* Move focus to the new panel's heading. Without this, focus stays on the
+         control that was clicked -- which is now inside a hidden panel, so a
+         keyboard visitor is left focused on nothing and a screen reader announces
+         no change at all. The headings carry tabindex="-1" for exactly this. */
+      var target = panelFor(n);
+      var heading = target ? target.querySelector('[tabindex="-1"]') : null;
+      if (heading && typeof heading.focus === 'function') heading.focus();
+    }
+
+    function applyCategory() {
+      var topic = message.elements.topic;
+      if (!topic) return;
+      var hint = doc.querySelector('[data-topic-hint]');
+      var locked = state.category !== ANYTHING_ELSE;
+      topic.value = locked ? state.category : '';
+      /* readOnly, NOT disabled -- and the distinction is the whole bug class here.
+         A disabled control is omitted from FormData, so a locked topic would
+         silently vanish from the submission and the Function would reject the
+         message for a missing field, at the last step, after the visitor had
+         written the whole thing. readOnly keeps it in the payload and keeps it
+         focusable for a screen reader while still refusing edits. */
+      topic.readOnly = locked;
+      topic.classList.toggle('is-locked', locked);
+      if (locked) {
+        topic.setAttribute('aria-readonly', 'true');
+        topic.removeAttribute('placeholder');
+        if (hint) hint.textContent = 'Set by the category you chose in step 1.';
+      } else {
+        topic.removeAttribute('aria-readonly');
+        topic.placeholder = 'What is this regarding?';
+        if (hint) hint.textContent = 'Type anything — this becomes the subject line.';
+      }
+    }
+
+    function restart() {
+      state.category = '';
+      edited.name = false;
+      edited.email = false;
+      message.reset();
+      // showSuccess() hid the form and revealed the panel; undo both, or a second
+      // message would have nowhere to be written.
+      message.hidden = false;
+      if (success) success.hidden = true;
+      applyCategory();
+      show(1);
+    }
+
+    // Step 1: the whole card is the control, so it is a <button> rather than a div
+    // with a click handler and a nested link -- clicking anywhere on it works, it is
+    // reachable by keyboard, and there is no second, smaller target to miss.
+    Array.prototype.forEach.call(root.querySelectorAll('[data-category]'), function (card) {
+      card.addEventListener('click', function () {
+        state.category = card.getAttribute('data-category') || '';
+        applyCategory();
+        show(parseInt(card.getAttribute('data-signal-goto'), 10) || 2);
+      });
+    });
+
+    Array.prototype.forEach.call(root.querySelectorAll('[data-signal-back]'), function (button) {
+      button.addEventListener('click', function () {
+        show(parseInt(button.getAttribute('data-signal-back'), 10) || 1);
+      });
+    });
+
+    Array.prototype.forEach.call(root.querySelectorAll('[data-signal-restart]'), function (button) {
+      button.addEventListener('click', restart);
+    });
+
+    applyCategory();
+
+    signalFlow = {
+      /* Called by the gate form's submit handler once its own validation has
+         passed. Carries the identity into step 3 and leaves it editable. */
+      advance: function (form) {
+        ['name', 'email'].forEach(function (key) {
+          var from = form.elements[key];
+          var to = message.elements[key];
+          if (from && to && !edited[key]) to.value = from.value;
+        });
+        show(parseInt(form.getAttribute('data-signal-advance'), 10) || 3);
+      },
+      reset: restart
+    };
   }
 
   /* ------------------------------------------------------------
@@ -1379,6 +1568,52 @@
       var MESH_GLOW_BLOOM = 0.30;
       var MESH_GLOW_SPREAD = 1.8;
 
+      /* ---- elevation-bucketed opacity --------------------------------------
+         Opacity follows wave height: a flat patch of the field sits at the
+         baseline, a crest lifts toward the top of the band, a trough sinks toward
+         the bottom. This is what makes the motion readable at all -- at a uniform
+         0.10 a line moving 20px is very hard to see, whereas the same line
+         brightening as it rises gives the eye a shading cue, and it is why the
+         baseline can be dimmer than a flat-alpha mesh needed to be.
+
+         Quantised into FIVE buckets rather than computed per element, and that is
+         a performance decision with a hard edge to it. A stroke carries one
+         strokeStyle, so per-edge opacity would mean one beginPath/stroke pair per
+         edge -- ~1700 of them a frame -- and the state changes alone would drop
+         frames on the credits screen, which is the least able to afford it. Five
+         bands means five strokeStyle assignments and five strokes for the whole
+         lattice. The same applies to the vertices: five globalAlpha changes
+         instead of ~600.
+
+         Five is also enough. The step between adjacent bands is ~0.04 of alpha on
+         lines and ~0.07 on vertices, which is below the just-noticeable difference
+         for a 1px stroke at these levels, so the quantisation is invisible while
+         the shading it produces is not. */
+      /* The normalised fBm sum is bell-shaped well inside its theoretical +-1: over
+         336,000 vertex samples its standard deviation is 0.264 and its 1st/99th
+         percentiles are -0.57/+0.64. Dividing the elevation by 2*amplitude -- i.e.
+         assuming the field reaches its extremes -- therefore wastes the outer bands:
+         measured, bands 0 and 4 held 0.7% and 1.5% of vertices while band 2 held
+         54.6%, so the specified 0.03 trough and 0.24 crest were effectively dead
+         code and the shading collapsed to three levels.
+
+         ELEVATION_SPREAD rescales against the range the field ACTUALLY occupies. At
+         0.50 the occupancy is 11.8 / 26.1 / 28.8 / 19.2 / 14.1 percent with 5.9%
+         clipping at the ends -- both extremes are states the mesh really visits, the
+         baseline band still holds the most, and the clipping is what makes a peak
+         read as a peak rather than stretching the ramp so thin that nothing arrives.
+         Going further (0.35) flattens it to 22/21/20/16/21 with 18.5% clipped, which
+         is posterisation rather than shading.
+
+         This touches brightness only. The displacement is untouched, so the tear
+         budget and the geometry are exactly as they were. */
+      var ELEVATION_SPREAD = 0.50;
+      var ELEVATION_BUCKETS = 5;
+      // trough -> crest. Index 2 is the flat baseline the brief specifies.
+      var LINE_ALPHAS = [0.03, 0.07, 0.10, 0.16, 0.24];
+      var DOT_ALPHAS = [0.06, 0.11, 0.18, 0.26, 0.35];
+      var DOT_RADII = [1.50, 1.62, 1.75, 1.87, 2.00];
+
       /* ---- the flow field --------------------------------------------------
          Multi-octave value noise (fBm), sampled in three dimensions: x, y, and a
          time axis that advances slowly enough to read as morphing rather than
@@ -1569,7 +1804,10 @@
       var rows = 0;
       var pixelRatio = 1;
       var pts = null;        // per-frame vertex positions, rows*columns*2
-      var lights = null;     // per-vertex crest brightness, 0..1, for the blit pass
+      var lights = null;     // per-vertex normalised elevation, 0..1
+      var vbuck = null;      // per-vertex bucket index
+      var ebuck = null;      // per-edge bucket index, in the enumeration order below
+      var edgeCap = 0;
       var jitterX = null;    // per-vertex, fixed at resize
       var jitterY = null;
       var flips = null;      // per-cell: which diagonal that cell splits along
@@ -1607,6 +1845,11 @@
         var cells = (rows - 1) * (columns - 1);
         pts = new Float32Array(vertices * 2);
         lights = new Float32Array(vertices);
+        vbuck = new Uint8Array(vertices);
+        // rows + columns + one diagonal per cell, enumerated in exactly the order
+        // the stroke passes below walk them, so an index agrees between the two.
+        edgeCap = (rows * (columns - 1)) + (columns * (rows - 1)) + ((rows - 1) * (columns - 1));
+        ebuck = new Uint8Array(Math.max(0, edgeCap));
         jitterX = new Float32Array(vertices);
         jitterY = new Float32Array(vertices);
         flips = new Uint8Array(Math.max(0, cells));
@@ -1632,6 +1875,18 @@
         }
       }
 
+      function bucketOf(elevation) {
+        var b = (elevation * ELEVATION_BUCKETS) | 0;   // |0 floors, and elevation is >= 0
+        return b > (ELEVATION_BUCKETS - 1) ? ELEVATION_BUCKETS - 1 : b;
+      }
+
+      function edgeBucket(i, j) {
+        // The mean of the two endpoints, so an edge straddling a boundary takes the
+        // band its middle is in rather than flickering between two as the wave
+        // passes -- which is what a max() or a first-endpoint rule would do.
+        return bucketOf((lights[i] + lights[j]) * 0.5);
+      }
+
       function draw(timestamp) {
         // A PJAX swap may have detached us between frames; stop rather than keep
         // painting an invisible canvas for the rest of the session.
@@ -1654,6 +1909,9 @@
 
         var row;
         var column;
+        var bucket;   // declared: the IIFE is 'use strict', so an implicit global
+                      // in the loop headers below would be a ReferenceError on the
+                      // very first frame, and `node --check` cannot see that.
         var index = 0;
         for (row = 0; row < rows; row += 1) {
           for (column = 0; column < columns; column += 1) {
@@ -1696,90 +1954,134 @@
                than merely present. It reads as light falling across a moving sheet:
                crests catch it, troughs fall away. With no audio left to drive
                contrast, this is where the contrast comes from. */
-            lights[i] = clamp(0.5 + (dy / (2 * amplitude)), 0, 1);
+            lights[i] = clamp(0.5 + (dy / (2 * amplitude * ELEVATION_SPREAD)), 0, 1);
+            vbuck[i] = bucketOf(lights[i]);
           }
         }
 
-        /* ---- the triangulated wireframe -----------------------------------
-           Three edge families per cell: its top, its left, and one diagonal. Rows
-           and columns are contiguous polylines; the diagonals are not, so they go in
-           as individual segments but share the column pass's single beginPath/stroke.
-           Two stroke calls for ~1700 edges -- a stroke per edge would be ~1700 state
-           changes a frame and would not survive a phone.
+        /* ---- the triangulated wireframe, in five elevation bands -----------
+           Three edge families per cell: its top, its left, and one diagonal.
 
-           Line alphas are constants rather than ramps, authored inside the 0.07-0.12
-           band and multiplied by the theme's ink. Keeping them uniform is the point:
-           the lattice is the structure and the vertices are where the variation lives.
-           Per-segment alpha would need a stroke per segment, which is the one thing
-           the batching exists to avoid. */
-        context.lineWidth = 1;
+           Every edge is emitted as its own two-point segment rather than as part of
+           a contiguous polyline, and that is a deliberate trade. Rows used to be one
+           polyline each, which was the cheapest possible structure -- but a polyline
+           can only carry one strokeStyle, and opacity now varies along the row as the
+           wave passes under it. So the choice is five strokes over ~1700 individual
+           segments, or ~1700 strokes over five alphas. The first is what this does.
+           Path operations are cheap appends to the current path; strokes are the
+           expensive part, and there are still only five of them.
 
-        context.strokeStyle = 'rgba(' + palette.line + ','
-          + (0.07 * palette.ink).toFixed(4) + ')';
-        context.beginPath();
+           The buckets are assigned in ONE pass before drawing, in exactly the order
+           the five passes walk the edges, so an index into ebuck agrees between the
+           two. Recomputing the bucket inside each pass would be five times the
+           arithmetic for nothing. */
+        var edgeIndex = 0;
         for (row = 0; row < rows; row += 1) {
-          var rowBase = row * columns * 2;
-          for (column = 0; column < columns; column += 1) {
-            var o = rowBase + (column * 2);
-            if (column === 0) context.moveTo(pts[o], pts[o + 1]);
-            else context.lineTo(pts[o], pts[o + 1]);
+          var rowBase = row * columns;
+          for (column = 0; column < columns - 1; column += 1) {
+            ebuck[edgeIndex++] = edgeBucket(rowBase + column, rowBase + column + 1);
           }
         }
-        context.stroke();
-
-        // Columns a step brighter than rows, so the field keeps some depth instead
-        // of reading as one flat lattice. Both stay inside the requested band.
-        context.strokeStyle = 'rgba(' + palette.line + ','
-          + (0.10 * palette.ink).toFixed(4) + ')';
-        context.beginPath();
         for (column = 0; column < columns; column += 1) {
-          for (row = 0; row < rows; row += 1) {
-            var v = ((row * columns) + column) * 2;
-            if (row === 0) context.moveTo(pts[v], pts[v + 1]);
-            else context.lineTo(pts[v], pts[v + 1]);
+          for (row = 0; row < rows - 1; row += 1) {
+            ebuck[edgeIndex++] = edgeBucket((row * columns) + column, ((row + 1) * columns) + column);
           }
         }
         for (row = 0; row < rows - 1; row += 1) {
           var cellBase = row * (columns - 1);
           for (column = 0; column < columns - 1; column += 1) {
-            var a = ((row * columns) + column) * 2;
-            var br = ((row * columns) + column + 1) * 2;
-            var bl = (((row + 1) * columns) + column) * 2;
-            var d = (((row + 1) * columns) + column + 1) * 2;
-            if (flips[cellBase + column]) {
-              context.moveTo(pts[a], pts[a + 1]);
-              context.lineTo(pts[d], pts[d + 1]);
-            } else {
-              context.moveTo(pts[br], pts[br + 1]);
-              context.lineTo(pts[bl], pts[bl + 1]);
-            }
+            var corner = (row * columns) + column;
+            ebuck[edgeIndex++] = flips[cellBase + column]
+              ? edgeBucket(corner, corner + columns + 1)
+              : edgeBucket(corner + 1, corner + columns);
           }
         }
-        context.stroke();
 
-        /* Vertices on top of the wireframe: 1.5px to 2.0px, 0.16 to 0.22 alpha,
-           blitted from the glow sprite. Both ramps reach their ceiling exactly, so
-           the Math.min caps are live rather than decorative -- a ceiling nothing can
-           reach is a comment, not a constraint.
+        context.lineWidth = 1;
+        for (bucket = 0; bucket < ELEVATION_BUCKETS; bucket += 1) {
+          context.strokeStyle = 'rgba(' + palette.line + ','
+            + (LINE_ALPHAS[bucket] * palette.ink).toFixed(4) + ')';
+          context.beginPath();
 
-           Which sprite a vertex uses is STATIC -- one in four gets the brighter
-           texture, decided by its lattice position and never changed. A version of
-           this switched sprite on a moving threshold, and vertices popped between two
-           baked textures as a crest passed under them; that popping reads as flicker
-           no matter how smooth the geometry is. All continuous variation lives in
-           alpha and radius, which cannot pop because they are floats multiplied into
-           a single blit. */
-        for (row = 0; row < rows; row += 1) {
+          var k = 0;
+          for (row = 0; row < rows; row += 1) {
+            var rb = row * columns;
+            for (column = 0; column < columns - 1; column += 1) {
+              if (ebuck[k++] !== bucket) continue;
+              var p0 = (rb + column) * 2;
+              context.moveTo(pts[p0], pts[p0 + 1]);
+              context.lineTo(pts[p0 + 2], pts[p0 + 3]);
+            }
+          }
           for (column = 0; column < columns; column += 1) {
-            var q = ((row * columns) + column) * 2;
-            var light = lights[(row * columns) + column];
-            var radius = Math.min(2, 1.5 + (light * 0.5));
-            var alpha = Math.min(0.22, 0.16 + (light * 0.06)) * palette.ink;
-            var highlight = ((column + row) % 4) === 0;
+            for (row = 0; row < rows - 1; row += 1) {
+              if (ebuck[k++] !== bucket) continue;
+              var p1 = ((row * columns) + column) * 2;
+              context.moveTo(pts[p1], pts[p1 + 1]);
+              context.lineTo(pts[p1 + (columns * 2)], pts[p1 + (columns * 2) + 1]);
+            }
+          }
+          for (row = 0; row < rows - 1; row += 1) {
+            var cb = row * (columns - 1);
+            for (column = 0; column < columns - 1; column += 1) {
+              if (ebuck[k++] !== bucket) continue;
+              // Both corners must be the SAME pair the bucket pass classified, or an
+              // edge gets stroked at its neighbour's opacity. flips picks the
+              // top-left -> bottom-right diagonal; otherwise it is the other one,
+              // which starts at top-RIGHT. A first draft drew both from top-left,
+              // which is invisible in the source and wrong on screen.
+              var c0 = (row * columns) + column;
+              var lean = flips[cb + column];
+              var da = lean ? c0 : (c0 + 1);
+              var db = lean ? (c0 + columns + 1) : (c0 + columns);
+              context.moveTo(pts[da * 2], pts[da * 2 + 1]);
+              context.lineTo(pts[db * 2], pts[db * 2 + 1]);
+            }
+          }
+          context.stroke();
+        }
 
-            drawGlow(context, highlight ? sprites.hi : sprites.node,
-              highlight ? palette.hi : palette.node,
-              pts[q], pts[q + 1], radius, alpha, MESH_GLOW_SPREAD);
+        /* Vertices on top of the wireframe, also bucketed: five globalAlpha changes
+           and five radii instead of ~600 of each. Radius rides the same band as
+           alpha, so a crest is both brighter and slightly larger, which is how a
+           shaded surface reads rather than how a dimming overlay reads.
+
+           Which sprite a vertex uses stays STATIC -- one in four gets the brighter
+           texture, decided by its lattice position and never changed. A version of
+           this switched sprite on a moving threshold, and vertices popped between
+           two baked textures as a crest passed under them; that popping reads as
+           flicker no matter how smooth the geometry is. Bucket boundaries could in
+           principle do the same thing, which is the real cost of quantising, but a
+           band crossing changes alpha by ~0.07 on a 1.9px dot -- below the
+           just-noticeable difference -- where a sprite swap changes its texture. */
+        if (sprites.node && sprites.hi) {
+          for (bucket = 0; bucket < ELEVATION_BUCKETS; bucket += 1) {
+            var dotSize = DOT_RADII[bucket] * 2 * MESH_GLOW_SPREAD;
+            var dotHalf = dotSize / 2;
+            context.globalAlpha = DOT_ALPHAS[bucket] * palette.ink;
+            for (row = 0; row < rows; row += 1) {
+              for (column = 0; column < columns; column += 1) {
+                var vi = (row * columns) + column;
+                if (vbuck[vi] !== bucket) continue;
+                var q = vi * 2;
+                context.drawImage((((column + row) % 4) === 0) ? sprites.hi : sprites.node,
+                  pts[q] - dotHalf, pts[q + 1] - dotHalf, dotSize, dotSize);
+              }
+            }
+            context.globalAlpha = 1;
+          }
+        } else {
+          // No 2D context for the off-screen sprite, so there is nothing to blit.
+          // drawGlow already carries the plain-arc fallback; this cannot happen when
+          // the main canvas has a context, but the guard is why it has one.
+          for (row = 0; row < rows; row += 1) {
+            for (column = 0; column < columns; column += 1) {
+              var wi = (row * columns) + column;
+              var wq = wi * 2;
+              var hi = ((column + row) % 4) === 0;
+              drawGlow(context, null, hi ? palette.hi : palette.node, pts[wq], pts[wq + 1],
+                DOT_RADII[vbuck[wi]], DOT_ALPHAS[vbuck[wi]] * palette.ink, MESH_GLOW_SPREAD);
+            }
           }
         }
 
@@ -2741,6 +3043,10 @@
     initSmoothScroll();
     initReveal();
     initChrome();
+    // Before initContactForm: the gate step's submit handler consults the flow, and
+    // while that only happens on a click, wiring in dependency order means a future
+    // change cannot make the order start to matter.
+    initSignalFlow();
     initContactForm();
     initSharedPost();
   }
