@@ -6,15 +6,41 @@ moderation of harm.
 
 Pure **vanilla HTML / CSS / JS** — no frameworks, no build step. Serve the repository root locally to resolve root-absolute asset URLs.
 
+## Privacy Policy — effective October 24, 2026
+
+`privacy.html` is served at `/privacy`, with the same shared header, footer, fonts,
+theme tokens and persistent PJAX shell as the main pages. All seven page footers
+include a visible **Privacy Policy** link; credits uses its compact bottom colophon
+without changing the wheel or contributor geometry. The policy has a linked contents
+list, semantic sections, a canonical URL, and a readable text measure. Email links
+use the existing runtime hydration mechanism, with readable no-JavaScript address
+fallbacks, to avoid Cloudflare email-obfuscation breakage.
+
+The policy describes the owner-supplied app architecture and practices: Supabase
+Auth/Storage, Google One-Tap, public content, reports (including reporter email in
+moderation alerts), Cloudflare/Resend, 30-day daily report/email cleanup via `pg_cron`,
+age 13+, and registered-email account deletion requests. It also discloses the
+website's actual contact-form fields, Google Fonts requests, and release session cache.
+
+**Operational verification before publication:** the website does not implement or
+verify the app's report collection, database cron, Agora Mail cleanup, account deletion,
+or provider contracts. The operator must ensure these deployed systems match the
+policy, especially permanent deletion of both database reports and notification emails.
+This policy is not a claim of an independent legal compliance audit.
+
+Known legacy `.html` URLs now have explicit 301 redirects to their clean routes ahead
+of the 200 rewrites. Client boot normalization remains as a fallback for static servers.
+No double-extension HTML filenames were found. No asset paths were changed.
+
 ## Clean URLs and local static-server support
 
 Public page URLs are `/`, `/about`, `/download`, `/contact`, `/credits`, and
-`/shared-post`. The files remain `index.html`, `about.html`, `download.html`,
-`contact.html`, `credits.html`, and `shared-post.html` on disk. Navigation, download
+`/shared-post` and `/privacy`. The files remain `index.html`, `about.html`, `download.html`,
+`contact.html`, `credits.html`, `shared-post.html`, and `privacy.html` on disk. Navigation, download
 CTAs and the Android intent's browser fallback all use the clean paths. CSS,
 JavaScript and `/assets/` references are unchanged.
 
-`_redirects` explicitly rewrites the five extensionless page paths to their files
+`_redirects` explicitly rewrites the six extensionless page paths to their files
 with status **200**, ahead of the catch-all. The enriched `/post/:id` and `/p/:id`
 rules remain unchanged. Direct clean visits and refreshes therefore serve the right
 page on Cloudflare Pages rather than the home-page fallback.

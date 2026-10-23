@@ -4392,3 +4392,43 @@ h1, h2, h3 {
       0 0 24px rgba(var(--glow-rgb), 0.16);
   }
 }
+
+/* Privacy: the shared shell with a calm, readable legal-document measure. */
+.privacy-layout { max-width: 900px; }
+.privacy-heading { margin-bottom: 2.5rem; }
+.privacy-date { color: var(--text-dim); margin-block: 1rem; }
+.privacy-intro { max-width: 65ch; }
+.privacy-contents {
+  padding: clamp(1.25rem, 3vw, 2rem);
+  margin-bottom: 3rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+.privacy-contents ol { padding-left: 1.5rem; margin-top: 1rem; }
+.privacy-contents li { padding-block: .3rem; }
+.privacy-copy { max-width: 72ch; line-height: 1.85; overflow-wrap: anywhere; }
+.privacy-copy section { scroll-margin-top: 7rem; margin-bottom: 3rem; }
+.privacy-copy h2 { font-size: clamp(1.35rem, 3vw, 1.8rem); line-height: 1.35; margin-bottom: 1rem; }
+.privacy-copy h3 { font-size: 1.1rem; margin-block: 1.5rem .65rem; }
+.privacy-copy p, .privacy-copy ul { margin-bottom: 1rem; }
+.privacy-copy ul { padding-left: 1.4rem; }
+.privacy-copy li { padding-left: .25rem; margin-block: .5rem; }
+.privacy-copy a, .privacy-contents a { text-decoration: underline; text-underline-offset: .2em; }
+.privacy-copy code { font-size: .9em; }
+.credits-screen-colophon a { margin-left: .75em; text-decoration: underline; text-underline-offset: .2em; }
+
+/* Keep the new legal exit operable without intercepting wheel interactions. */
+.credits-screen-colophon a { pointer-events: auto; display: inline-block; padding-block: .3rem; }
+@media (max-width: 680px) {
+  .credits-screen-colophon { white-space: normal; }
+  .credits-screen-colophon a { display: block; margin-left: 0; }
+}
+.privacy-copy {
+  padding: clamp(1rem, 3vw, 2rem);
+  border-radius: 16px;
+  background: rgba(var(--bg-rgb), .96);
+}
+.privacy-heading .display { font-size: clamp(2.25rem, 6vw, 4rem); }
+.privacy-contents a:focus-visible, .privacy-copy a:focus-visible,
+.credits-screen-colophon a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }

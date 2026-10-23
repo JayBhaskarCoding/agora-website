@@ -120,7 +120,8 @@
     download: '/download',
     about: '/about',
     credits: '/credits',
-    contact: '/contact'
+    contact: '/contact',
+    privacy: '/privacy'
   };
 
   var routerState = {
@@ -146,7 +147,7 @@
   var PAGE_FILES = {
     '/': '/index.html', '/about': '/about.html', '/download': '/download.html',
     '/contact': '/contact.html', '/credits': '/credits.html',
-    '/shared-post': '/shared-post.html'
+    '/shared-post': '/shared-post.html', '/privacy': '/privacy.html'
   };
 
   function canonicalPath(url) {
@@ -247,6 +248,11 @@
 
     var nextTitle = parsed.querySelector('title');
     if (nextTitle) doc.title = nextTitle.textContent;
+    // Do not leave the policy's canonical URL attached after a PJAX departure.
+    var currentCanonical = doc.querySelector('link[rel="canonical"]');
+    var nextCanonical = parsed.querySelector('link[rel="canonical"]');
+    if (currentCanonical) currentCanonical.remove();
+    if (nextCanonical) doc.head.appendChild(nextCanonical.cloneNode(true));
     var nextDescription = parsed.querySelector('meta[name="description"]');
     var currentDescription = doc.querySelector('meta[name="description"]');
     if (nextDescription && currentDescription) currentDescription.setAttribute('content', nextDescription.getAttribute('content') || '');
