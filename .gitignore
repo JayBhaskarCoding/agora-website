@@ -12,3 +12,6 @@ Thumbs.db
 # Local validation artifacts
 .cache/
 __pycache__/
+
+# Cloudflare local emulation artifacts
+.wrangler/

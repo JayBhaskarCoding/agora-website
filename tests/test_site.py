@@ -658,9 +658,8 @@ class LaunchContract(unittest.TestCase):
         robots = [a for tag, a in self.pages["shared-post.html"].tags if a.get("name") == "robots"]
         self.assertIn("noindex", robots[0]["content"])
         # External deep-link routes remain intact.
-        redirects = (ROOT / "_redirects").read_text()
-        for route in ["/post/:id", "/p/:id"]:
-            self.assertIn(route, redirects)
+        for route in ('post', 'p'):
+            self.assertTrue((ROOT / 'functions' / route / '[id].js').is_file())
 
     def test_why_agora_links(self):
         home = self.pages["index.html"]
@@ -1128,7 +1127,6 @@ class AssetLinksContract(unittest.TestCase):
         cls.path = ROOT / ASSETLINKS_PATH
         cls.raw = cls.path.read_text() if cls.path.exists() else ""
         cls.statements = json.loads(cls.raw) if cls.raw else []
-        cls.redirects = (ROOT / "_redirects").read_text()
         cls.headers_path = ROOT / "_headers"
         cls.headers = cls.headers_path.read_text() if cls.headers_path.exists() else ""
 
@@ -1220,30 +1218,17 @@ class AssetLinksContract(unittest.TestCase):
         self.assertIn("content-type: application/json", headers)
         self.assertIn("x-content-type-options: nosniff", headers)
 
-    def test_redirects_do_not_shadow_the_statement_list(self):
-        """Real files win over _redirects on Pages, but a rewrite aimed at this
-        path would take precedence and hand Android the SPA shell instead."""
-        self.assertNotIn(".well-known", self.redirects,
-                         "_redirects must not rewrite the assetlinks path")
-        # The SPA catch-all must still exist and stay last.
-        rules = [ln.strip() for ln in self.redirects.splitlines()
-                 if ln.strip() and not ln.strip().startswith("#")]
-        self.assertTrue(rules, "_redirects has no rules")
-        self.assertTrue(rules[-1].startswith("/*"),
-                        "the /* SPA catch-all must remain the final rule")
+    def test_native_assetlinks_does_not_depend_on_redirects(self):
+        self.assertFalse((ROOT / '_redirects').exists())
+        self.assertTrue((ROOT / ASSETLINKS_PATH).is_file())
 
 
 class SharedPostRouting(unittest.TestCase):
     """/post/<id> deep links must resolve their id from the PATH.
 
-    `_redirects` rewrites /post/:id and /p/:id to shared-post.html with a **200**
-    status. A 200 rewrite serves the target file's bytes but never changes the
-    browser's address bar, so on a real share link window.location.search is
-    EMPTY. Writing ?post=:id on the rewrite destination looks like it fills that
-    in; it does not -- the destination query only steers the edge's internal
-    file lookup. Parsing the query alone therefore answered "This link doesn't
-    include a post id" to every valid deep link in production, while working in
-    local dev where the visitor types ?post= by hand.
+    Pages Functions serve /post/:id and /p/:id directly without `_redirects`.
+    The browser URL stays unchanged and location.search may be empty, so IDs
+    must be read from the path rather than relying on destination query strings.
 
     The patterns below are lifted out of app.js and compiled here, so these
     tests assert what the route MEANS rather than merely that a regex exists.
@@ -1257,11 +1242,6 @@ class SharedPostRouting(unittest.TestCase):
     def setUpClass(cls):
         cls.app = (ROOT / "app.js").read_text()
         cls.html = (ROOT / "shared-post.html").read_text()
-        cls.rules = [
-            line.split()
-            for line in (ROOT / "_redirects").read_text().splitlines()
-            if line.strip() and not line.strip().startswith("#")
-        ]
         cls.statements = json.loads((ROOT / ASSETLINKS_PATH).read_text())
 
     # --- helpers -------------------------------------------------------
@@ -1283,26 +1263,20 @@ class SharedPostRouting(unittest.TestCase):
         return self.app.split(start, 1)[1].split(end, 1)[0]
 
     # --- routing -------------------------------------------------------
-    def test_deep_link_routes_rewrite_to_the_landing_page(self):
-        by_source = {rule[0]: rule[1:] for rule in self.rules}
-        for route in self.ROUTES:
-            with self.subTest(route=route):
-                self.assertIn(route, by_source,
-                              "the pretty share route must stay in _redirects")
-                destination, *status = by_source[route]
-                self.assertEqual(destination, self.LANDING)
-                self.assertEqual(status, ["200"],
-                                 "a 200 rewrite is what keeps the pretty URL in "
-                                 "the address bar -- and what leaves search empty")
+    def test_deep_link_routes_are_owned_by_pages_functions(self):
+        for route in ('post', 'p'):
+            self.assertTrue((ROOT / 'functions' / route / '[id].js').is_file())
+        source = FUNCTION_PATH.read_text()
+        self.assertIn("const LANDING_PAGE = '/shared-post';", source)
+        self.assertIn('const fallback = await loadLandingPage(context);', source)
+        self.assertIn('if (fallback) return htmlResponse(fallback, false);', source)
 
-    def test_rewrite_destination_carries_no_query_string(self):
-        """?post=:id on a 200 destination never reaches the client. Leaving it
-        there is how the query-only parser came to look correct."""
-        for rule in self.rules:
-            with self.subTest(rule=" ".join(rule)):
-                self.assertNotIn("?", rule[1],
-                                 "a rewrite destination query is dead weight and "
-                                 "actively misleading")
+
+    def test_static_landing_lookup_carries_no_query_string(self):
+        source = FUNCTION_PATH.read_text()
+        self.assertIn("const LANDING_PAGE = '/shared-post';", source)
+        self.assertIn('new URL(LANDING_PAGE, context.request.url)', source)
+
 
     def test_every_local_subresource_is_root_absolute(self):
         """The landing page is served from an arbitrary-depth path (/post/<id>),
@@ -1333,21 +1307,12 @@ class SharedPostRouting(unittest.TestCase):
                   if t == "link" and a.get("rel") == "stylesheet"}
         self.assertIn("/style.css", sheets)
 
-    def test_deep_link_rules_precede_the_catch_all(self):
-        """`/*` swallows everything below it: a deep-link rule placed after the
-        catch-all would silently serve index.html instead of the landing page,
-        and the visitor would see the home page with no post at all."""
-        sources = [rule[0] for rule in self.rules]
-        self.assertEqual(sources.count("/*"), 1, "exactly one SPA catch-all")
-        self.assertTrue(sources[-1].startswith("/*"),
-                        "the /* SPA fallback must remain the final rule")
-        for route in self.ROUTES:
-            with self.subTest(route=route):
-                self.assertEqual(sources.count(route), 1)
-                self.assertLess(sources.index(route), sources.index("/*"),
-                                f"{route} must come BEFORE the catch-all")
+    def test_deep_link_handlers_do_not_depend_on_a_catch_all(self):
+        self.assertFalse((ROOT / '_redirects').exists())
+        self.assertIn('export async function onRequestGet', FUNCTION_PATH.read_text())
+        self.assertIn('export async function onRequestHead', FUNCTION_PATH.read_text())
 
-    # --- parsing -------------------------------------------------------
+
     def test_post_id_is_read_from_the_path(self):
         pattern = self.js_regex("POST_PATH_PATTERN")
         for path in (f"/post/{self.POST_UUID}", f"/p/{self.POST_UUID}",
@@ -1599,11 +1564,6 @@ class SharedPostCard(unittest.TestCase):
         cls.css = (ROOT / "style.css").read_text()
         cls.app = (ROOT / "app.js").read_text()
         cls.page = Page(ROOT / "shared-post.html")
-        cls.redirects = [
-            line.split()
-            for line in (ROOT / "_redirects").read_text().splitlines()
-            if line.strip() and not line.strip().startswith("#")
-        ]
 
     # --- helpers -------------------------------------------------------
     def elements_with(self, attribute):
@@ -1934,11 +1894,11 @@ class SharedPostCard(unittest.TestCase):
         self.assertIn("export async function onRequestHead", self.fn,
                       "a scraper probing HEAD must not get a 405")
 
-    def test_the_landing_page_matches_the_rewrite_destination(self):
-        self.assertEqual(self.constant("LANDING_PAGE"), "/shared-post.html")
-        destinations = {rule[0]: rule[1] for rule in self.redirects}
-        self.assertEqual(destinations["/post/:id"], self.constant("LANDING_PAGE"),
-                         "the Function has to fetch the same file _redirects serves")
+    def test_landing_uses_the_native_clean_static_route(self):
+        self.assertEqual(self.constant('LANDING_PAGE'), '/shared-post')
+        self.assertTrue((ROOT / 'shared-post.html').is_file())
+        self.assertIn('assets.fetch(new Request(url.toString()', self.fn)
+
 
     def test_the_short_alias_delegates_rather_than_duplicates(self):
         alias_path = ROOT / "functions" / "p" / "[id].js"
@@ -1955,10 +1915,8 @@ class SharedPostCard(unittest.TestCase):
                 self.assertNotIn(marker, alias,
                                  f"{marker} redefined here would be a second, "
                                  "diverging implementation")
-        # The alias is still a route in its own right, so when the Function
-        # declines the static fall-through has to remain.
-        destinations = {rule[0]: rule[1] for rule in self.redirects}
-        self.assertEqual(destinations["/p/:id"], self.constant("LANDING_PAGE"))
+        # Both aliases share the explicit static-landing fallback.
+        self.assertIn('const fallback = await loadLandingPage(context);', self.fn)
 
     def test_og_url_is_canonical_so_an_alias_makes_one_preview_not_two(self):
         # Chat apps deduplicate previews by og:url. If /p/<id> advertised itself,
@@ -5310,17 +5268,13 @@ class CleanPageRoutes(unittest.TestCase):
             self.assertIn('href="/style.css"', path.read_text())
             self.assertIn('src="/app.js"', path.read_text())
 
-    def test_explicit_rewrites_precede_the_catch_all(self):
-        rules = [line.split() for line in (ROOT / '_redirects').read_text().splitlines()
-                 if line.strip() and not line.lstrip().startswith('#')]
-        catch = next(i for i, rule in enumerate(rules) if rule[0] == '/*')
+    def test_clean_pages_are_native_html_assets_without_rewrite_rules(self):
+        self.assertFalse((ROOT / '_redirects').exists())
         for clean, file in CLEAN_ROUTES.items():
-            if clean == '/':
-                continue
-            self.assertIn([clean, file, '200'], rules[:catch])
-            self.assertTrue((ROOT / file.lstrip('/')).is_file())
-        for alias in ('/post/:id', '/p/:id'):
-            self.assertIn([alias, '/shared-post.html', '200'], rules[:catch])
+            self.assertTrue((ROOT / file.lstrip('/')).is_file(), clean)
+            if clean != '/':
+                self.assertEqual(file, clean + '.html')
+
 
     def test_boot_normalizes_before_initializing_the_page(self):
         app = (ROOT / 'app.js').read_text()
@@ -5461,22 +5415,9 @@ class PrivacyPolicy(unittest.TestCase):
         css = (ROOT / 'style.css').read_text()
         self.assertRegex(css, r'\.credits-screen-colophon a\s*\{[^}]*pointer-events:\s*auto')
 
-    def test_rewrite_destinations_have_no_reverse_redirects(self):
-        rules = [line.split() for line in (ROOT / '_redirects').read_text().splitlines()
-                 if line.strip() and not line.lstrip().startswith('#')]
-        self.assertEqual(rules[-1], ['/*', '/index.html', '200'])
-        self.assertEqual(len({r[0] for r in rules}), len(rules))
-        for source, destination, status in rules:
-            self.assertEqual(status, '200', 'no external redirects may reverse a rewrite')
-            self.assertFalse(source.endswith('/'), 'no slash normalization rules')
-            self.assertTrue(destination.endswith('.html'))
-            self.assertNotIn(destination, {r[0] for r in rules},
-                             'a rewrite target must not explicitly re-enter the rule table')
-        for clean, file in CLEAN_ROUTES.items():
-            if clean != '/':
-                self.assertIn([clean, file, '200'], rules)
+    def test_native_routing_has_no_redirect_rule_cycles(self):
+        self.assertFalse((ROOT / '_redirects').exists())
         self.assertEqual(list(ROOT.glob('*.html.html')), [])
-
 
 
 class RouterLoopRegression(unittest.TestCase):
@@ -5558,4 +5499,50 @@ function click(anchor) {
 })().catch(e => {console.error(e); process.exitCode = 1;});
 '''
         result = subprocess.run(['node', '-e', script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class NativeSharedPostFallback(unittest.TestCase):
+    def test_get_and_head_serve_the_landing_without_redirect_rules(self):
+        import subprocess
+        script = r'''
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+(async () => {
+  const source = fs.readFileSync('functions/post/[id].js', 'utf8');
+  const {onRequestGet, onRequestHead} = await import('data:text/javascript;base64,' +
+    Buffer.from(source).toString('base64'));
+  const html = fs.readFileSync('shared-post.html', 'utf8');
+  const id = '0c298d8b-c2f0-4f38-8585-7199f41c7769';
+  let reads = 0, nexts = 0;
+  const context = {request: new Request('https://agora.in.net/post/' + id + '?ref=test'),
+    params: {id}, env: {ASSETS: {async fetch(request) {
+      reads++;
+      assert.equal(new URL(request.url).pathname, '/shared-post');
+      assert.equal(new URL(request.url).search, '');
+      assert.equal(request.method, 'GET');
+      return new Response(html, {headers: {'Content-Type': 'text/html'}});
+    }}}, next() {nexts++; return new Response('home fallback');}};
+  const response = await onRequestGet(context);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('location'), null);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(await response.text(), html);
+  assert.equal(nexts, 0); assert.equal(reads, 1);
+  const head = await onRequestHead(context);
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), '');
+  assert.equal(head.headers.get('location'), null);
+  assert.equal(nexts, 0);
+  context.params.id = 'not-a-uuid';
+  await onRequestGet(context);
+  assert.equal(nexts, 1, 'invalid IDs still bypass database lookup');
+  context.params.id = id;
+  context.env.ASSETS.fetch = async () => {throw Error('assets unavailable');};
+  const unavailable = await onRequestGet(context);
+  assert.equal(unavailable.status, 200);
+  assert.equal(nexts, 2, 'last-resort next() is retained if assets cannot be read');
+})().catch(e => {console.error(e); process.exitCode = 1;});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

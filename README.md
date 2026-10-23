@@ -28,12 +28,11 @@ or provider contracts. The operator must ensure these deployed systems match the
 policy, especially permanent deletion of both database reports and notification emails.
 This policy is not a claim of an independent legal compliance audit.
 
-Routing uses **200 internal rewrites only**. Do not add reverse `.html` → clean
-301/302 rules: they can re-enter the clean → `.html` rewrites and create redirect
-loops. Cloudflare Pages handles native HTML normalization; client boot normalization
-is guarded to run once and uses only `replaceState`, preserving query/hash and state.
-There are no trailing-slash redirect rules. No double-extension HTML filenames were
-found, and no asset paths were changed.
+Routing uses **Cloudflare Pages native HTML routing**, with **no `_redirects`
+file**. Do not recreate the old clean → `.html` rewrites or reverse redirects;
+they interfered with Pages' own normalization and caused redirect loops. Client
+boot normalization remains one-time `replaceState`, preserving query/hash and
+history state. No trailing-slash redirect rules are needed.
 
 PJAX leaves same-path clicks (including fragment and query links) to the browser.
 Direct router calls for the displayed path never fetch or push another history
@@ -50,10 +49,12 @@ Public page URLs are `/`, `/about`, `/download`, `/contact`, `/credits`, and
 CTAs and the Android intent's browser fallback all use the clean paths. CSS,
 JavaScript and `/assets/` references are unchanged.
 
-`_redirects` explicitly rewrites the six extensionless page paths to their files
-with status **200**, ahead of the catch-all. The enriched `/post/:id` and `/p/:id`
-rules remain unchanged. Direct clean visits and refreshes therefore serve the right
-page on Cloudflare Pages rather than the home-page fallback.
+Cloudflare Pages resolves `/contact` to `contact.html` (and the equivalent for
+all other pages) natively. Direct clean visits and refreshes require no custom
+rewrite file. `/post/<id>` and `/p/<id>` are handled by Pages Functions; they read
+the static template through `env.ASSETS.fetch('/shared-post')` and serve it directly
+if Supabase is unconfigured or unavailable, never falling back to the home page
+just because the old rewrite file is gone.
 
 At boot, known `.html` aliases are replaced in the address bar with
 `history.replaceState`, preserving existing state, query parameters and fragments.
@@ -67,8 +68,8 @@ On a basic local server such as `python3 -m http.server 5173`, start at `/` or a
 A direct clean-path refresh on such a server still needs rewrite support: the browser
 cannot run the fallback helper before the server has delivered the page.
 
-The test suite checks route-to-file resolution, clean HTML links and CTAs, rewrite
-ordering, legacy URL normalization, query/hash preservation, and runs the actual
+The test suite checks native route-to-file resolution, clean HTML links and CTAs,
+the absence of custom redirect rules, legacy URL normalization, query/hash preservation, and runs the actual
 JavaScript routing helpers against a mock static server to verify 404 fallback and
 clean history updates.
 
@@ -111,7 +112,7 @@ Useful local URLs:
 - `http://localhost:5173/download`
 - `http://localhost:5173/about`
 
-`python3 -m http.server` does not process `_redirects`, so locally a pretty
+`python3 -m http.server` cannot run Pages Functions or native HTML routing, so a pretty
 `/post/<id>` URL 404s and the shared-link flow must be driven with the
 `?post=` fallback. That asymmetry is exactly how the query-only parser shipped:
 it looked correct on every local URL. See
@@ -119,12 +120,27 @@ it looked correct on every local URL. See
 
 ## Deploy
 
-The repository root **is** the static site. Point any static host
-(Netlify, Cloudflare Pages, GitHub Pages, S3+CloudFront…) at the root and
-keep `_redirects` / `robots.txt` in place. On a host that honours
-`_redirects` (Cloudflare Pages, Netlify) the canonical share link is
-`https://your-domain/post/<id>`; the `?post=<id>` form keeps working
-everywhere, including on hosts with no redirect engine.
+The repository root **is** the Cloudflare Pages publish directory. There is no
+build step and no `_redirects` file. Keep `_headers`, `.well-known/`, and the
+`functions/` directory in the deployment. Native Pages routing handles clean HTML
+URLs; Functions own `/post/<id>`, `/p/<id>`, and the API endpoints. Other static
+hosts need their own equivalent route/function support; the `?post=<id>` fallback
+on `shared-post.html` remains useful on a simple static server.
+
+For production-like local routing and Functions:
+
+```sh
+npx wrangler pages dev . --ip 0.0.0.0 --port 5173 --compatibility-date=2026-10-19
+```
+
+Latest validation after pulling `b2b8a21` (the deletion of `_redirects`):
+**218 automated tests passed** and **36 local Cloudflare Pages HTTP checks passed**
+using Wrangler 4.152.0: seven clean routes and HEAD/refreshes, single-hop `.html`
+and slash normalization, both shared-link fallback routes, asset MIME types,
+assetlinks JSON, and audio-file delivery. Local Wrangler returned the complete audio
+file for a Range request rather than 206; production Range support and playback
+were not verified. Production Supabase/email delivery and Cloudflare dashboard
+redirect rules cannot be verified from this sandbox.
 
 ## Android App Links (`assetlinks.json`)
 
@@ -135,7 +151,7 @@ in the repository root** — not under `public/`.
 That placement is the whole ballgame. The repository root *is* the published
 site (see [Deploy](#deploy)), so a copy under `public/` is served at
 `/public/.well-known/assetlinks.json` while the canonical URL falls through the
-`/*` catch-all in `_redirects` and answers **200 with `index.html`**. Android
+native Pages SPA fallback and answers **200 with `index.html`**. Android
 then receives HTML where it expects JSON, verification fails, and the Play
 Console reports only a generic "not associated" error with nothing pointing at
 the real cause. `AssetLinksContract` in `tests/test_site.py` fails if the file
@@ -208,39 +224,25 @@ adb shell pm get-app-links net.agora.app    # want: verified
 
 Note that Cloudflare Pages serves dot-prefixed directories from Git deploys,
 which is what makes the root `.well-known/` work. If a future deploy target ever
-skips hidden directories, the fix is a `_redirects` **200 rewrite** (never a
-301/302 — Google rejects redirects on this path) from the canonical URL to a
-non-dot copy, keeping a single source of truth.
+skips hidden directories, configure that host to serve the canonical path directly
+with JSON and status 200. Do not add redirects: Android requires the canonical URL.
 
 ## Shared post deep links (`/post/<id>`)
 
 The Android app shares **pretty** links — `https://agora.in.net/post/<id>`,
-plus the short `/p/<id>` — and `_redirects` rewrites both to
-`shared-post.html`:
+plus the short `/p/<id>`. The Functions in `functions/post/[id].js` and
+`functions/p/[id].js` return the shared-post HTML directly, keeping the URL unchanged.
+They fetch the template from the clean `/shared-post` asset route rather than its
+`.html` alias, avoiding an internal HTML-normalization redirect. If author lookup
+is unavailable, they serve the generic template with `no-store`; they use
+`context.next()` only for invalid IDs or when even the template cannot be loaded.
 
-```
-/post/:id          /shared-post.html          200
-/p/:id             /shared-post.html          200
-/*                 /index.html                200
-```
+### The browser URL is not a template filename
 
-### The trap: a 200 rewrite never changes the browser URL
-
-Those are **200 rewrites**. The edge serves `shared-post.html`'s bytes while
-the address bar stays `/post/<id>`, so the script sees:
-
-```js
-location.pathname === '/post/<id>'
-location.search   === ''          // always empty
-```
-
-Writing `?post=:id` on the rewrite destination *looks* like it fills that in.
-It does not — the destination query only steers the edge's internal file
-lookup and never reaches the client. So a parser that read the query string
-alone answered **"This link doesn't include a post id"** to every real share
-link in production, while passing every local test (where the visitor types
-`?post=` by hand). The destination query is gone from `_redirects` on purpose;
-`test_rewrite_destination_carries_no_query_string` keeps it gone.
+The address bar stays `/post/<id>`, so `location.search` can be empty. The client
+must read the ID from the path, with `?post=`, `?post_id=`, and `?id=` supported as
+fallbacks for explicitly query-based links. Do not add custom rewrite rules or
+query-string redirects to pass IDs to the page.
 
 ### The resolver contract (`app.js` → `resolvePostId`)
 
@@ -722,8 +724,7 @@ Local dev note: `python3 -m http.server` has no Functions runtime, so
 All CSS/JS/image/page links are **root-absolute** (`/style.css`, `/app.js`,
 `/assets/…`, `/download`). This is deliberate: shared links arrive with
 query strings and sometimes nested paths (`/post/abc123`), and relative
-paths would resolve against that path, break, and get swallowed by the
-`_redirects` catch-all. Because of this, serve the site from the **domain
+paths would resolve against that path and request the wrong assets. Because of this, serve the site from the **domain
 root** (not a sub-folder) — `python3 -m http.server` from this folder does
 exactly that. Opening `index.html` via `file://` will no longer resolve the
 assets; use the local server instead.

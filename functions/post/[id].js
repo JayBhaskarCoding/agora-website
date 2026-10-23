@@ -27,7 +27,7 @@
 
    THE FUNCTION IS OPTIONAL BY DESIGN. With no SUPABASE_URL /
    SUPABASE_ANON_KEY configured, on a timeout, or on any error, it
-   calls context.next() and the static page is served untouched. A
+   serves the static landing page directly through env.ASSETS. A
    shared link must never 500 because a preview lookup was slow.
    ============================================================ */
 
@@ -38,7 +38,7 @@ const EDGE_TTL_SECONDS = 300;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const LANDING_PAGE = '/shared-post.html';
+const LANDING_PAGE = '/shared-post';
 
 /* This site is reachable from several domains that all point at the same Pages
    project (they are listed in the README under "Every domain, one canonical
@@ -371,8 +371,7 @@ function injectAuthor(html, author) {
 async function buildResponse(context, postId) {
   const result = await fetchPostAuthor(context.env, postId);
 
-  // Nothing to enrich with: hand the request back so the static page serves
-  // exactly as it did before this Function existed.
+  // Nothing to enrich with: let the handler serve the static landing directly.
   if (result.status === 'unconfigured' || result.status === 'error') return null;
 
   const html = await loadLandingPage(context);
@@ -420,6 +419,11 @@ export async function onRequestGet(context) {
   } catch (error) {
     console.error('Agora shared-post rendering failed; serving the static page.', error);
   }
+  // Without _redirects, context.next() at /post/:id would serve the home
+  // fallback, not the shared-post page. Fetch the clean static route directly;
+  // requesting .html here can itself return Pages' canonicalization redirect.
+  const fallback = await loadLandingPage(context);
+  if (fallback) return htmlResponse(fallback, false);
   return context.next();
 }
 
