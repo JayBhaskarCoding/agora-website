@@ -121,7 +121,8 @@
     about: '/about',
     credits: '/credits',
     contact: '/contact',
-    privacy: '/privacy'
+    privacy: '/privacy',
+    terms: '/terms'
   };
 
   var routerState = {
@@ -147,7 +148,7 @@
   var PAGE_FILES = {
     '/': '/index.html', '/about': '/about.html', '/download': '/download.html',
     '/contact': '/contact.html', '/credits': '/credits.html',
-    '/shared-post': '/shared-post.html', '/privacy': '/privacy.html'
+    '/shared-post': '/shared-post.html', '/privacy': '/privacy.html', '/terms': '/terms.html'
   };
 
   function canonicalPath(url) {

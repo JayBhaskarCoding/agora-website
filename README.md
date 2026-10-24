@@ -6,10 +6,42 @@ moderation of harm.
 
 Pure **vanilla HTML / CSS / JS** — no frameworks, no build step. Serve the repository root locally to resolve root-absolute asset URLs.
 
+## Terms of Service — effective October 24, 2026
+
+`terms.html` is served at `/terms` through native Pages HTML routing, without a
+`_redirects` file. It shares the Privacy Policy's header, footer, typography, readable
+legal-copy styling, linked contents, email hydration, and canonical metadata.
+All eight pages link to both legal documents in their footers. PJAX knows `/terms`
+and maps it to `terms.html` only for the static-server 404 fallback.
+
+The 19 sections cover acceptance, minimum age and contractual capacity, accounts,
+public content, a narrowly scoped operational content license, acceptable use,
+moderation and appeals, rights complaints, app licensing, providers, privacy and
+notices, availability/charges, termination/deletion, warranties, liability, disputes,
+changes, general provisions, and contact. Mandatory consumer/privacy rights are
+preserved; no forced arbitration, collective-action waiver, blanket consumer
+indemnity, invented legal entity, or exclusive foreign forum is imposed.
+
+**Legal and operational review required:** this document is a substantive draft,
+not a legal opinion or guarantee of enforceability. Confirm the operator's full
+legal identity and required business/contact disclosures, establishment and target
+markets, age/parental-consent requirements, and actual moderation/appeal procedures
+with qualified counsel before treating it as final. A footer link does not itself
+create valid contractual assent. The Android app must separately show the Terms
+and Privacy Policy at the appropriate point, capture acceptance/version where
+required, and handle material-change notices. This website change does not add
+those app-side mechanisms, copyright-agent registration, or a grievance-officer
+appointment. Do not claim such registrations or appointments without completing
+the relevant processes.
+
+Validation: **224 tests passing**, including legal-page structure, content safeguards,
+all-footer discovery, route aliases, query/hash preservation, and 404-only PJAX
+fallback. No server redirect rules or asset paths were added or changed.
+
 ## Privacy Policy — effective October 24, 2026
 
 `privacy.html` is served at `/privacy`, with the same shared header, footer, fonts,
-theme tokens and persistent PJAX shell as the main pages. All seven page footers
+theme tokens and persistent PJAX shell as the main pages. All eight page footers
 include a visible **Privacy Policy** link; credits uses its compact bottom colophon
 without changing the wheel or contributor geometry. The policy has a linked contents
 list, semantic sections, a canonical URL, and a readable text measure. Email links
@@ -44,8 +76,8 @@ idempotent link synchronization and one-time listener registration.
 ## Clean URLs and local static-server support
 
 Public page URLs are `/`, `/about`, `/download`, `/contact`, `/credits`, and
-`/shared-post` and `/privacy`. The files remain `index.html`, `about.html`, `download.html`,
-`contact.html`, `credits.html`, `shared-post.html`, and `privacy.html` on disk. Navigation, download
+`/shared-post`, `/privacy`, and `/terms`. The files remain `index.html`, `about.html`, `download.html`,
+`contact.html`, `credits.html`, `shared-post.html`, `privacy.html`, and `terms.html` on disk. Navigation, download
 CTAs and the Android intent's browser fallback all use the clean paths. CSS,
 JavaScript and `/assets/` references are unchanged.
 
