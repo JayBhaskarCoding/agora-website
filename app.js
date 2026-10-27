@@ -1258,11 +1258,11 @@
         result: 'warp'
       }));
       filter.appendChild(node('feGaussianBlur', {
-        'in': 'warp', stdDeviation: '0.6', result: 'soft'
+        'in': 'warp', stdDeviation: '1.0', result: 'soft'
       }));
       filter.appendChild(node('feDisplacementMap', {
         'in': 'SourceGraphic', 'in2': 'soft',
-        scale: '14',
+        scale: '26',
         xChannelSelector: 'R',
         yChannelSelector: 'G'
       }));

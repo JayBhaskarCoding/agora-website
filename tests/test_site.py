@@ -5217,18 +5217,18 @@ class CursorContract(unittest.TestCase):
     def test_the_liquid_field_surrounds_the_pointer(self):
         self.assertIn("pointer-events: none;", self.rule(".cursor-lens {"))
         field = self.rule("body.has-custom-cursor .cursor-lens {")
-        self.assertIn("width: 112px", field,
+        self.assertIn("width: 88px", field,
                       "the disturbance must extend around the pointer, not sit in a tiny lens")
-        self.assertIn("height: 112px", field)
+        self.assertIn("height: 88px", field)
         self.assertIn("mask-image: radial-gradient(", field)
-        self.assertIn("transparent 68%", field,
-                      "the field must dissolve at its edge instead of showing a disc")
+        self.assertIn("transparent 47%", field,
+                      "the field must end as a crisp edge instead of a vignette")
         # Real displacement of the backdrop, never a tint or a text transform.
         self.assertIn("url(#agora-liquid)", self.css)
         self.assertNotIn("agora-reverse-fisheye", self.css + self.js)
         self.assertIn("feTurbulence", self.js)
         self.assertIn("feDisplacementMap", self.js)
-        self.assertIn("scale: '14'", self.js)
+        self.assertIn("scale: '26'", self.js)
         # The middle is a filled orb now, not an empty hole: solid lavender
         # fill with a crisp white ring and a black outer border, like the
         # reference cursor image.
@@ -5244,22 +5244,17 @@ class CursorContract(unittest.TestCase):
                          "a gradient here would make the centre fade away")
         self.assertNotIn("border:", orb,
                          "a border here would draw a second complete circle")
-        # A hairline reticle sits outside the orb, and it is masked open: the
-        # arc, not a closed ring, is what keeps the pointer from being a circle.
-        reticle = self.rule(".cursor-lens::after {", last=True)
-        self.assertIn("width: 28px", reticle)
-        self.assertIn("border-top-color:", reticle)
-        self.assertIn("border-left-color:", reticle)
-        self.assertIn("mask-image: conic-gradient(", reticle)
-        # Only the reticle reacts to a target; the 132px field never resizes.
+        # No reticle ring around the bead -- the pointer is just the bead.
+        reticle_body = self.rule(".cursor-lens::after {", last=True)
+        self.assertNotIn("conic-gradient", reticle_body,
+                         "the reticle arc must be gone")
+        self.assertNotIn("width:", reticle_body,
+                         "the reticle must not size itself around the bead")
+        # Only the bead reacts to a target; the 88px field never resizes.
         target_orb = self.rule("body.has-custom-cursor .cursor-lens.is-target::before {")
         self.assertIn("width: 20px", target_orb)
-        target = self.rule("body.has-custom-cursor .cursor-lens.is-target::after {")
-        self.assertIn("width: 36px", target)
         pressed_orb = self.rule("body.has-custom-cursor .cursor-lens.is-pressed::before {")
         self.assertIn("width: 12px", pressed_orb)
-        pressed = self.rule("body.has-custom-cursor .cursor-lens.is-pressed::after {")
-        self.assertIn("width: 22px", pressed)
 
 
 class StylesheetIntegrity(unittest.TestCase):

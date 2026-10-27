@@ -508,33 +508,34 @@ main,
 
   /* The pointer is a LOCAL LIQUID DISTURBANCE, not a piece of glass.
 
-     This 112px disc paints no tint, rim or sheen of its own. It exists only to
+     This 88px disc paints no tint, rim or sheen of its own. It exists only to
      carry a backdrop-filter, which refracts the content under and around the
-     pointer. The radial mask is the shape of that disturbance -- strongest in
-     the middle, completely gone by 68% of the radius -- so the distortion
-     dissolves into the page instead of ending on a hard geometric edge.
+     pointer. The radial mask is tight -- black to transparent at 47% -- so the
+     disturbance stays a clean, prominent circle with no soft vignette fading
+     out at its circumference. It ends as a crisp edge instead of a glowing
+     halo.
 
-     The orb and the hairline reticle below are the visible pointer. Neither
-     element scales, rotates or re-letters the content it passes over, so
-     hovering copy can never make that copy pop out; only the backdrop bends. */
+     The small solid bead below is the visible pointer. Neither element
+     scales, rotates or re-letters the content it passes over, so hovering copy
+     can never make that copy pop out; only the backdrop bends. */
   body.has-custom-cursor .cursor-lens {
     position: fixed;
     top: 0;
     left: 0;
     z-index: 10000 !important;
     display: block;
-    width: 112px;
-    height: 112px;
+    width: 88px;
+    height: 88px;
     border: 0;
     border-radius: 50%;
     background: transparent;
     opacity: 0;
-    transform: translate3d(-56px, -56px, 0) translate(-50%, -50%);
-    -webkit-mask-image: radial-gradient(circle, black 0%, black 28%, transparent 68%);
-    mask-image: radial-gradient(circle, black 0%, black 28%, transparent 68%);
+    transform: translate3d(-44px, -44px, 0) translate(-50%, -50%);
+    -webkit-mask-image: radial-gradient(circle, black 0%, black 46%, transparent 47%);
+    mask-image: radial-gradient(circle, black 0%, black 46%, transparent 47%);
     transition: opacity 0.16s var(--ease);
-    -webkit-backdrop-filter: blur(1.2px) saturate(135%);
-    backdrop-filter: blur(1.2px) saturate(135%);
+    -webkit-backdrop-filter: blur(1.6px) saturate(145%);
+    backdrop-filter: blur(1.6px) saturate(145%);
     will-change: transform;
   }
 
@@ -543,8 +544,8 @@ main,
      soft blur above, so the disturbance never disappears. */
   @supports ((backdrop-filter: url(#agora-liquid)) or (-webkit-backdrop-filter: url(#agora-liquid))) {
     body.has-custom-cursor .cursor-lens {
-      -webkit-backdrop-filter: url(#agora-liquid) saturate(140%);
-      backdrop-filter: url(#agora-liquid) saturate(140%);
+      -webkit-backdrop-filter: url(#agora-liquid) saturate(150%);
+      backdrop-filter: url(#agora-liquid) saturate(150%);
     }
   }
 
@@ -573,21 +574,6 @@ main,
     transition: width 0.18s var(--ease), height 0.18s var(--ease);
   }
 
-  /* The aim reticle stays a broken arc outside the bead so it never reads as a
-     second complete circle around the pointer. */
-  .cursor-lens::after {
-    width: 28px;
-    height: 28px;
-    border: 1px solid rgba(var(--lavender-rgb), 0.38);
-    border-top-color: rgba(var(--lavender-rgb), 0.9);
-    border-left-color: rgba(var(--lavender-rgb), 0.62);
-    box-shadow: 0 0 0 1px rgba(var(--cursor-lens-edge-rgb), 0.1);
-    -webkit-mask-image: conic-gradient(from 0deg, transparent 0deg 44deg, black 62deg 360deg);
-    mask-image: conic-gradient(from 0deg, transparent 0deg 44deg, black 62deg 360deg);
-    transition: width 0.18s var(--ease), height 0.18s var(--ease),
-      border-color 0.18s var(--ease);
-  }
-
   body.has-custom-cursor .cursor-lens.is-visible {
     opacity: 1;
   }
@@ -597,23 +583,9 @@ main,
     height: 20px;
   }
 
-  body.has-custom-cursor .cursor-lens.is-target::after {
-    width: 36px;
-    height: 36px;
-    border-color: rgba(var(--lavender-rgb), 0.52);
-    border-top-color: rgba(var(--lavender-rgb), 1);
-    border-left-color: rgba(var(--lavender-rgb), 0.74);
-  }
-
   body.has-custom-cursor .cursor-lens.is-pressed::before {
     width: 12px;
     height: 12px;
-  }
-
-  body.has-custom-cursor .cursor-lens.is-pressed::after {
-    width: 22px;
-    height: 22px;
-    border-top-color: rgba(var(--lavender-rgb), 1);
   }
 }
 
