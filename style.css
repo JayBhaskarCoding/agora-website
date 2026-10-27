@@ -118,6 +118,10 @@
      refraction plus one hairline ring -- so the only channel it needs is the
      edge colour of that ring, kept per theme so it never glows white on white. */
   --cursor-lens-edge-rgb: 255, 255, 255;
+  /* A subtle dark vignette shadow sits just outside the field so the edge of
+     the disturbance reads as a gentle fall-off rather than a sharp disc. Kept
+     per theme so it never glows white on white in the light theme. */
+  --cursor-vignette-rgb: 0, 0, 0;
   /* The solid lavender bead needs a crisp white ring and a black outer border,
      exactly like the reference cursor. Kept per theme so the bead never reads
      as a hole or a second circle. */
@@ -306,6 +310,7 @@
     /* The ring darkens in light mode so it still reads over the off-white
        mesh instead of glowing white on white. */
     --cursor-lens-edge-rgb: 15, 23, 42;
+    --cursor-vignette-rgb: 0, 0, 0;
     --cursor-lens-ring-rgb: 15, 23, 42;
     --cursor-lens-ring-outer-rgb: 255, 255, 255;
 
@@ -511,9 +516,12 @@ main,
      This 88px disc paints no tint, rim or sheen of its own. It exists only to
      carry a backdrop-filter, which refracts the content under and around the
      pointer. The radial mask holds full strength at the centre then fades to
-     transparent by 80% of the radius, so the distortion is strongest around the
-     pointer and blurs away into the page at its outer edge instead of ending on
-     a hard vignette.
+     transparent by 90% of the radius, so the distortion is strongest around the
+     pointer and dissolves smoothly into the page at its outer edge -- a soft
+     vignette instead of a hard cut-off.
+
+     A subtle dark vignette shadow sits just outside the field so the edge of
+     the disturbance reads as a gentle fall-off rather than a sharp disc.
 
      The small solid bead below is the visible pointer. Neither element
      scales, rotates or re-letters the content it passes over, so hovering copy
@@ -531,11 +539,12 @@ main,
     background: transparent;
     opacity: 0;
     transform: translate3d(-44px, -44px, 0) translate(-50%, -50%);
-    -webkit-mask-image: radial-gradient(circle, black 0%, black 35%, transparent 80%);
-    mask-image: radial-gradient(circle, black 0%, black 35%, transparent 80%);
+    -webkit-mask-image: radial-gradient(circle, black 0%, black 30%, transparent 90%);
+    mask-image: radial-gradient(circle, black 0%, black 30%, transparent 90%);
     transition: opacity 0.16s var(--ease);
     -webkit-backdrop-filter: blur(1.6px) saturate(145%);
     backdrop-filter: blur(1.6px) saturate(145%);
+    box-shadow: 0 0 20px rgba(var(--cursor-vignette-rgb), 0.35);
     will-change: transform;
   }
 
