@@ -563,13 +563,13 @@ main,
      border, exactly like the reference cursor. Nothing fades to transparent --
      it is one filled circle, not an empty ring. */
   .cursor-lens::before {
-    width: 20px;
-    height: 20px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
     background: rgb(var(--lavender-rgb));
     box-shadow:
-      0 0 0 3px rgba(var(--cursor-lens-ring-rgb), 1),
-      0 0 0 5px rgba(var(--cursor-lens-ring-outer-rgb), 1);
+      0 0 0 2px rgba(var(--cursor-lens-ring-rgb), 1),
+      0 0 0 4px rgba(var(--cursor-lens-ring-outer-rgb), 1);
     transition: width 0.18s var(--ease), height 0.18s var(--ease);
   }
 
@@ -593,8 +593,8 @@ main,
   }
 
   body.has-custom-cursor .cursor-lens.is-target::before {
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
   }
 
   body.has-custom-cursor .cursor-lens.is-target::after {
@@ -606,8 +606,8 @@ main,
   }
 
   body.has-custom-cursor .cursor-lens.is-pressed::before {
-    width: 16px;
-    height: 16px;
+    width: 12px;
+    height: 12px;
   }
 
   body.has-custom-cursor .cursor-lens.is-pressed::after {

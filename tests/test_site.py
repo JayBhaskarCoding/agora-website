@@ -5233,12 +5233,12 @@ class CursorContract(unittest.TestCase):
         # fill with a crisp white ring and a black outer border, like the
         # reference cursor image.
         orb = self.rule(".cursor-lens::before {")
-        self.assertIn("width: 20px", orb)
+        self.assertIn("width: 14px", orb)
         self.assertIn("background: rgb(var(--lavender-rgb));", orb,
                       "the orb must be a solid filled colour, not a gradient")
-        self.assertIn("0 0 0 3px rgba(var(--cursor-lens-ring-rgb), 1)", orb,
+        self.assertIn("0 0 0 2px rgba(var(--cursor-lens-ring-rgb), 1)", orb,
                       "the orb needs a crisp white ring")
-        self.assertIn("0 0 0 5px rgba(var(--cursor-lens-ring-outer-rgb), 1)", orb,
+        self.assertIn("0 0 0 4px rgba(var(--cursor-lens-ring-outer-rgb), 1)", orb,
                       "the orb needs a crisp black outer border")
         self.assertNotIn("radial-gradient(", orb,
                          "a gradient here would make the centre fade away")
@@ -5253,11 +5253,11 @@ class CursorContract(unittest.TestCase):
         self.assertIn("mask-image: conic-gradient(", reticle)
         # Only the reticle reacts to a target; the 132px field never resizes.
         target_orb = self.rule("body.has-custom-cursor .cursor-lens.is-target::before {")
-        self.assertIn("width: 24px", target_orb)
+        self.assertIn("width: 20px", target_orb)
         target = self.rule("body.has-custom-cursor .cursor-lens.is-target::after {")
         self.assertIn("width: 36px", target)
         pressed_orb = self.rule("body.has-custom-cursor .cursor-lens.is-pressed::before {")
-        self.assertIn("width: 16px", pressed_orb)
+        self.assertIn("width: 12px", pressed_orb)
         pressed = self.rule("body.has-custom-cursor .cursor-lens.is-pressed::after {")
         self.assertIn("width: 22px", pressed)
 
