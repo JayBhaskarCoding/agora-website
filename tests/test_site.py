@@ -5299,14 +5299,22 @@ class CursorContract(unittest.TestCase):
     def test_the_glow_is_its_own_soft_layer_under_the_field(self):
         """The lens is radially masked, so a glow painted by it would be clipped at
         the same hard circle it exists to soften. It gets a separate fixed layer,
-        moved in the same transform write as the lens, in the site's own
-        lavender -> violet -> blue family and faded out on every edge so it can
-        never read as a second ring around the bead."""
+        in the site's own lavender -> violet -> blue family, faded out on every
+        edge so it can never read as a second ring around the bead.
+
+        It is sized to the field, not beyond it: a bloom wider than the
+        disturbance reads as a second cursor. 72% of its radius plus the blur
+        lands on the lens's own fall-off, so the two read as one object."""
         glow = self.rule("body.has-custom-cursor .cursor-glow {")
+        field = self.rule("body.has-custom-cursor .cursor-lens {")
         self.assertIn("position: fixed;", glow)
-        self.assertIn("width: 168px", glow)
-        self.assertIn("height: 168px", glow)
-        self.assertIn("filter: blur(", glow)
+        self.assertIn("width: 104px", glow)
+        self.assertIn("height: 104px", glow)
+        glow_d = int(re.search(r"width: (\d+)px", glow).group(1))
+        field_d = int(re.search(r"width: (\d+)px", field).group(1))
+        self.assertLessEqual(glow_d - field_d, 24,
+                             "the bloom must not outgrow the disturbance field")
+        self.assertIn("filter: blur(7px);", glow)
         self.assertIn("rgba(var(--lavender-rgb)", glow)
         self.assertIn("rgba(var(--violet-soft-rgb)", glow)
         self.assertIn("rgba(var(--blue-rgb)", glow)
@@ -5319,7 +5327,7 @@ class CursorContract(unittest.TestCase):
         self.assertNotIn("box-shadow", glow)
         self.assertIn("doc.querySelector('.cursor-glow')", self.js)
         self.assertIn("glow.style.transform = position;", self.js,
-                      "one transform write must move the bloom with the lens")
+                      "the bloom's own transform write carries its trailing position")
         self.assertIn("glow.classList.add('is-visible')", self.js)
         self.assertIn("glow.classList.remove('is-visible')", self.js)
         # The global display:none is the default; the media block opts in, and
@@ -5333,6 +5341,36 @@ class CursorContract(unittest.TestCase):
         tail = self.css[self.css.index(kill):]
         self.assertIn(".cursor-glow {", tail)
         self.assertIn("display: none !important;", tail.split(".cursor-glow {", 1)[1])
+
+    def test_the_bloom_trails_the_pointer_through_a_viscous_medium(self):
+        """The visitor asked for the light to move as if through liquid. That is
+        a trailing position for the DRAWN bloom only: the distortion field stays
+        pinned to the pointer, because lag there makes small targets hard to
+        aim at. The trail is an exponential ease -- it approaches the pointer
+        without ever overshooting, so it reads as viscosity rather than a
+        spring -- and it is time-based, so its duration does not change with
+        refresh rate."""
+        self.assertIn("gx:", self.js)
+        self.assertIn("gy:", self.js)
+        self.assertIn("state.parked", self.js,
+                      "the first move and every re-entry must snap, not sail in")
+        self.assertIn("Math.exp(-dt / 170)", self.js,
+                      "a fixed per-frame step would trail longer on a 144Hz screen")
+        self.assertIn("Math.min(64, now - state.last)", self.js,
+                      "a background tab's huge delta must be clamped")
+        self.assertIn("if (lagX || lagY) queue();", self.js,
+                      "the trail must keep animating after the pointer stops")
+        self.assertIn("if (distance > 88) {", self.js,
+                      "an unbounded trail detaches the bloom on a fast flick")
+        self.assertIn("Math.sqrt(stretchX * stretchX + stretchY * stretchY)", self.js)
+        self.assertNotIn("Math.sin", self.js,
+                         "a spring would overshoot; the medium is viscous")
+        # The lens must not be given the same treatment.
+        lens_write = self.js.split("lens.style.transform", 1)[1].split(";", 1)[0]
+        self.assertIn("state.x.toFixed(2)", lens_write)
+        self.assertNotIn("state.gx", lens_write)
+        self.assertIn("state.parked = true;", self.js,
+                      "leaving the page must park the bloom for a clean re-entry")
 
 
 class StylesheetIntegrity(unittest.TestCase):

@@ -1217,26 +1217,79 @@
     lens.setAttribute('data-cursor-ready', 'true');
     doc.body.classList.add('has-custom-cursor');
 
-    var state = { x: -100, y: -100, tx: -100, ty: -100, frame: 0 };
+    /* Two positions: the field's, which is 1:1 with the pointer, and the
+       bloom's, which is dragged behind it. `parked` means the glow has no
+       meaningful previous point (first move, or the pointer just re-entered),
+       so it should snap instead of sailing across the page. */
+    var state = {
+      x: -100, y: -100, tx: -100, ty: -100, frame: 0,
+      gx: -100, gy: -100, last: 0, parked: true
+    };
     /* The one thing that changes on a hovered control: the aim ring widens a
        little. Nothing on the page itself is measured, transformed or
        recoloured, so a heading or a link cannot pop, shift or re-letter under
        the pointer. */
     var targetSelector = 'a, button, .btn, .nav__link, input, select, textarea, [role="button"]';
 
-    function paint() {
+    function paint(now) {
       state.frame = 0;
+      var dt = state.last ? Math.min(64, now - state.last) : 16.7;
+      state.last = now;
+
       /* The field is 1:1 with the pointer. There is no interpolation here: a
-         lerp is a permanent, visible lag between the native pointer and the
-         distortion, and it is worst exactly when the visitor is trying to aim
-         at a small target. rAF still coalesces moves to one write per frame,
-         and the write is a compositor-only translate3d on a fixed element. */
+         lag between the native pointer and the distortion is worst exactly
+         when the visitor is trying to aim at a small target. rAF still
+         coalesces moves to one write per frame, and the write is a
+         compositor-only translate3d on a fixed element. */
       state.x = state.tx;
       state.y = state.ty;
-      var position = 'translate3d(' + state.x.toFixed(2) + 'px,' +
+      lens.style.transform = 'translate3d(' + state.x.toFixed(2) + 'px,' +
         state.y.toFixed(2) + 'px,0) translate(-50%, -50%)';
-      lens.style.transform = position;
+
+      /* The bloom is dragged behind the bead through a thick medium. An
+         exponential ease has no overshoot -- it is viscous, not springy -- and
+         settles exactly under the pointer. The step is scaled by the real frame
+         delta, so a slow frame takes a proportionally larger step and the
+         trail's duration does not change with refresh rate. */
+      if (state.parked) {
+        state.gx = state.tx;
+        state.gy = state.ty;
+        state.parked = false;
+      } else {
+        var ease = 1 - Math.exp(-dt / 170);
+        state.gx += (state.tx - state.gx) * ease;
+        state.gy += (state.ty - state.gy) * ease;
+        /* The medium stretches, but only so far. On a fast flick the trailing
+           distance would otherwise reach hundreds of pixels and the bloom would
+           read as a second, detached orb. Past one field width it is pulled
+           along like surface tension, so the light stays part of the pointer. */
+        var stretchX = state.tx - state.gx;
+        var stretchY = state.ty - state.gy;
+        var distance = Math.sqrt(stretchX * stretchX + stretchY * stretchY);
+        if (distance > 88) {
+          var pull = (distance - 88) / distance;
+          state.gx += stretchX * pull;
+          state.gy += stretchY * pull;
+        }
+      }
+      var lagX = state.tx - state.gx;
+      var lagY = state.ty - state.gy;
+      if (Math.abs(lagX) < 0.12 && Math.abs(lagY) < 0.12) {
+        state.gx = state.tx;
+        state.gy = state.ty;
+        lagX = 0;
+        lagY = 0;
+        /* The trail has come to rest. Forget the frame clock so the next move
+           starts from a normal 60fps step instead of a clamped 64ms lurch. */
+        state.last = 0;
+      }
+      var position = 'translate3d(' + state.gx.toFixed(2) + 'px,' +
+        state.gy.toFixed(2) + 'px,0) translate(-50%, -50%)';
       glow.style.transform = position;
+
+      /* Keep painting only while the bloom is still catching up: an idle
+         pointer must not leave a permanent animation frame running. */
+      if (lagX || lagY) queue();
     }
 
     function queue() {
@@ -1259,6 +1312,10 @@
     function hide() {
       lens.classList.remove('is-visible', 'is-target', 'is-pressed');
       glow.classList.remove('is-visible');
+      /* Re-entering the page should drop the bloom under the pointer, not
+         drag it in from wherever it was last seen. */
+      state.parked = true;
+      state.last = 0;
     }
 
     function installLiquidFilter() {
@@ -1334,6 +1391,9 @@
         if (state.frame) window.cancelAnimationFrame(state.frame);
         state.frame = 0;
         state.x = state.y = state.tx = state.ty = -100;
+        state.gx = state.gy = -100;
+        state.last = 0;
+        state.parked = true;
       } else {
         doc.body.classList.add('has-custom-cursor');
       }

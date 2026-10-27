@@ -593,26 +593,30 @@ main,
   }
 
   /* A background bloom, not a ring: it fades out in every direction, so the
-     bead stays the only hard edge. It sits one layer under the refraction
-     field and uses the same lavender/violet/blue family as the page. */
+     bead stays the only hard edge. It is sized to the refraction field rather
+     than beyond it -- a bloom that outgrows the disturbance reads as a second,
+     wider cursor. 72% of this radius plus the blur lands on the lens's own
+     40px fall-off. The JS drags it behind the pointer, so this layer is the
+     viscous part: the disturbance stays under the pointer while the light
+     trails through the medium and settles a beat later. */
   body.has-custom-cursor .cursor-glow {
     position: fixed;
     top: 0;
     left: 0;
     z-index: 9999 !important;
     display: block;
-    width: 168px;
-    height: 168px;
+    width: 104px;
+    height: 104px;
     border-radius: 50%;
     background: radial-gradient(
       circle,
-      rgba(var(--lavender-rgb), 0.24) 0%,
-      rgba(var(--violet-soft-rgb), 0.13) 34%,
-      rgba(var(--blue-rgb), 0.07) 56%,
+      rgba(var(--lavender-rgb), 0.32) 0%,
+      rgba(var(--violet-soft-rgb), 0.18) 34%,
+      rgba(var(--blue-rgb), 0.09) 56%,
       transparent 72%
     );
     opacity: 0;
-    transform: translate3d(-84px, -84px, 0) translate(-50%, -50%);
+    transform: translate3d(-52px, -52px, 0) translate(-50%, -50%);
     filter: blur(7px);
     transition: opacity 0.2s var(--ease);
     will-change: transform;
