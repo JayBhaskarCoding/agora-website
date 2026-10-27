@@ -113,14 +113,11 @@
   --device-accent-rgb: 139, 92, 246;
   --device-accent-soft: rgba(var(--device-accent-rgb), 0.08);
 
-  /* ---- 1f. Cursor lens ------------------------------------------------
-     The lens is a translucent disc, so its own body is painted from these
-     channels rather than from --surface-rgb: it sits over both cards and the
-     near-black mesh, and it must keep its rim in both themes. */
-  --cursor-lens-rgb: 12, 13, 19;
-  --cursor-lens-hi-rgb: 255, 255, 255;
+  /* ---- 1f. Cursor disturbance -----------------------------------------
+     The pointer paints no body of its own any more -- it is a backdrop
+     refraction plus one hairline ring -- so the only channel it needs is the
+     edge colour of that ring, kept per theme so it never glows white on white. */
   --cursor-lens-edge-rgb: 255, 255, 255;
-  --cursor-lens-sheen-rgb: 255, 255, 255;
 
   /* ---- 1g. Masks & embedded assets ------------------------------------
      #000 here is an ALPHA carrier for mask-image, not a theme colour: the
@@ -301,13 +298,9 @@
     --shadow-glow: 0 18px 44px -22px rgba(var(--shadow-rgb), 0.2);
     --shadow-card: 0 18px 40px -24px rgba(var(--shadow-rgb), 0.16);
 
-    /* The lens body flips to a pale slate so its rim still reads over the
-       off-white mesh; the highlight stays white because it is a specular,
-       not a surface. */
-    --cursor-lens-rgb: 15, 23, 42;
-    --cursor-lens-hi-rgb: 255, 255, 255;
+    /* The ring darkens in light mode so it still reads over the off-white
+       mesh instead of glowing white on white. */
     --cursor-lens-edge-rgb: 15, 23, 42;
-    --cursor-lens-sheen-rgb: 255, 255, 255;
 
     /* Darker chevron: the dark theme's #9aa8bf is only 2.44:1 on white,
        below the 3:1 bar for a non-text control indicator. Matched to
@@ -490,8 +483,8 @@ main,
   will-change: transform;
 }
 
-/* Zero-sized host for #agora-reverse-fisheye. It must stay in the document
-   for the backdrop-filter reference to resolve, but never paints or hit-tests. */
+/* Zero-sized host for #agora-liquid. It must stay in the document for the
+   backdrop-filter reference to resolve, but never paints or hit-tests. */
 .cursor-lens-defs {
   position: absolute;
   width: 0;
@@ -506,45 +499,45 @@ main,
     cursor: none !important;
   }
 
-  /* The lens is a disc of real backdrop glass. The radial gradients supply the
-     concave profile (clear centre, denser rim) and the specular sweep; the
-     SVG pass below adds the actual refraction where the engine supports it. */
+  /* The pointer is a LOCAL LIQUID DISTURBANCE, not a piece of glass.
+
+     This 200px disc paints no tint, rim or sheen of its own. It exists only to
+     carry a backdrop-filter, which refracts the content under and around the
+     pointer. The radial mask is the shape of that disturbance -- strongest in
+     the middle, completely gone by 72% of the radius -- so the distortion
+     dissolves into the page instead of ending on a hard geometric edge.
+
+     The small ring and bead below are the visible pointer. Neither element
+     scales, rotates or re-letters the content it passes over, so hovering copy
+     can never make that copy pop out; only the backdrop bends. */
   body.has-custom-cursor .cursor-lens {
     position: fixed;
     top: 0;
     left: 0;
     z-index: 10000 !important;
     display: block;
-    /* 36px is a lens, not a porthole: large enough to read as glass, small
-       enough that it does not sit across a line of body copy and tint it. */
-    width: 36px;
-    height: 36px;
-    border: 1px solid rgba(var(--cursor-lens-edge-rgb), 0.34);
+    width: 200px;
+    height: 200px;
+    border: 0;
     border-radius: 50%;
-    background:
-      radial-gradient(circle at 32% 26%, rgba(var(--cursor-lens-hi-rgb), 0.5), transparent 46%),
-      radial-gradient(circle at 50% 50%, rgba(var(--cursor-lens-rgb), 0.02) 44%, rgba(var(--cursor-lens-rgb), 0.3) 80%, rgba(var(--cursor-lens-rgb), 0.04) 100%);
-    box-shadow:
-      0 0 0 1px rgba(var(--cursor-lens-edge-rgb), 0.08),
-      inset 0 1px 1px rgba(var(--cursor-lens-sheen-rgb), 0.6),
-      inset 0 -10px 16px -8px rgba(var(--cursor-lens-rgb), 0.55),
-      0 10px 28px -12px rgba(var(--cursor-lens-rgb), 0.8);
+    background: transparent;
     opacity: 0;
     transform: translate3d(-100px, -100px, 0) translate(-50%, -50%);
-    transition: width 0.2s var(--ease), height 0.2s var(--ease),
-      opacity 0.14s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
-    -webkit-backdrop-filter: blur(2px) saturate(145%);
-    backdrop-filter: blur(2px) saturate(145%);
-    will-change: transform, width, height;
+    -webkit-mask-image: radial-gradient(circle, black 0%, black 34%, transparent 72%);
+    mask-image: radial-gradient(circle, black 0%, black 34%, transparent 72%);
+    transition: opacity 0.16s var(--ease);
+    -webkit-backdrop-filter: blur(1.4px) saturate(135%);
+    backdrop-filter: blur(1.4px) saturate(135%);
+    will-change: transform;
   }
 
   /* Progressive enhancement: only engines that accept an SVG filter in
      backdrop-filter take the displacement pass. Everything else keeps the
-     blur and radial refraction above, so the lens never disappears. */
-  @supports ((backdrop-filter: url(#agora-reverse-fisheye)) or (-webkit-backdrop-filter: url(#agora-reverse-fisheye))) {
+     soft blur above, so the disturbance never disappears. */
+  @supports ((backdrop-filter: url(#agora-liquid)) or (-webkit-backdrop-filter: url(#agora-liquid))) {
     body.has-custom-cursor .cursor-lens {
-      -webkit-backdrop-filter: url(#agora-reverse-fisheye) blur(2px) saturate(145%);
-      backdrop-filter: url(#agora-reverse-fisheye) blur(2px) saturate(145%);
+      -webkit-backdrop-filter: url(#agora-liquid) saturate(140%);
+      backdrop-filter: url(#agora-liquid) saturate(140%);
     }
   }
 
@@ -552,87 +545,49 @@ main,
   .cursor-lens::after {
     content: "";
     position: absolute;
+    left: 50%;
+    top: 50%;
     border-radius: 50%;
     pointer-events: none;
+    transform: translate(-50%, -50%);
   }
 
-  /* Specular sweep: a convex lens catches the room light on its upper-left. */
+  /* The aim point: one lavender hairline, the same edge language as the wheel
+     rims and the header's specular line. It is the only part of the pointer
+     with a visible body, and it stays small enough to sit inside a word. */
   .cursor-lens::before {
-    inset: 4px;
-    background:
-      radial-gradient(circle at 34% 24%, rgba(var(--cursor-lens-sheen-rgb), 0.68), transparent 40%),
-      radial-gradient(circle at 64% 78%, rgba(var(--cursor-lens-hi-rgb), 0.16), transparent 55%);
-    opacity: 0.85;
+    width: 26px;
+    height: 26px;
+    border: 1px solid rgba(var(--lavender-rgb), 0.72);
+    box-shadow:
+      0 0 0 1px rgba(var(--cursor-lens-edge-rgb), 0.16),
+      0 0 18px rgba(var(--glow-rgb), 0.35);
+    transition: width 0.18s var(--ease), height 0.18s var(--ease),
+      border-color 0.18s var(--ease);
   }
 
-  /* Reverse fish-eye: shade the inner rim like a concave bowl so the edge
-     reads as refraction rather than as a flat ring. */
+  /* The bead is the exact pixel the pointer is on. */
   .cursor-lens::after {
-    inset: 9%;
-    box-shadow:
-      inset 0 1px 2px rgba(var(--cursor-lens-edge-rgb), 0.35),
-      inset 0 -8px 14px rgba(var(--cursor-lens-rgb), 0.4);
+    width: 4px;
+    height: 4px;
+    background: var(--blue);
+    box-shadow: 0 0 10px var(--blue);
   }
 
   body.has-custom-cursor .cursor-lens.is-visible {
     opacity: 1;
   }
 
-  body.has-custom-cursor .cursor-lens.is-target {
-    width: 46px;
-    height: 46px;
-    border-color: rgba(var(--cursor-lens-edge-rgb), 0.5);
-    box-shadow:
-      0 0 0 1px rgba(var(--cursor-lens-edge-rgb), 0.1),
-      inset 0 1px 1px rgba(var(--cursor-lens-sheen-rgb), 0.66),
-      inset 0 -10px 16px -8px rgba(var(--cursor-lens-rgb), 0.54),
-      0 12px 28px -14px rgba(var(--cursor-lens-rgb), 0.78);
+  body.has-custom-cursor .cursor-lens.is-target::before {
+    width: 34px;
+    height: 34px;
+    border-color: rgba(var(--lavender-rgb), 0.95);
   }
 
-  body.has-custom-cursor .cursor-lens.is-pressed {
-    width: 54px;
-    height: 54px;
-    border-color: rgba(var(--cursor-lens-edge-rgb), 0.58);
-  }
-
-  /* Local warp. JS writes --cursor-x/--cursor-y in px and the normalised
-     --cursor-nx/--cursor-ny (-1..1) on the hovered element only; the pivot
-     follows the focal point, so copy pinches around the lens instead of
-     swinging from its own centre.
-
-     Individual transform properties are used on purpose. `transform` would
-     replace the hover lift on .principle/.step/.btn, while `rotate` and
-     `scale` compose with it -- and both are compositor-friendly. */
-  body.has-custom-cursor .is-cursor-warp {
-    rotate: calc((var(--cursor-nx, 0) - var(--cursor-ny, 0)) * 0.16deg);
-    scale: 1.0015;
-    transform-origin: var(--cursor-origin-x, 50%) var(--cursor-origin-y, 50%);
-    text-shadow:
-      calc(var(--cursor-nx, 0) * 0.32px) calc(var(--cursor-ny, 0) * 0.32px) 0 rgba(var(--violet-soft-rgb), 0.16),
-      calc(var(--cursor-nx, 0) * -0.26px) calc(var(--cursor-ny, 0) * -0.26px) 0 rgba(var(--blue-rgb), 0.1);
-    transition: rotate 0.24s var(--ease), scale 0.24s var(--ease),
-      text-shadow 0.24s var(--ease);
-    will-change: rotate, scale;
-  }
-
-  /* Links, buttons and the controls keep their exact geometry under the lens.
-     Only the chromatic edge moves, so a hovered target cannot appear to shift
-     away from the point the visitor is aiming at. */
-  body.has-custom-cursor .is-cursor-glint {
-    text-shadow:
-      calc(var(--cursor-nx, 0) * 0.3px) calc(var(--cursor-ny, 0) * 0.3px) 0 rgba(var(--violet-soft-rgb), 0.18),
-      calc(var(--cursor-nx, 0) * -0.24px) calc(var(--cursor-ny, 0) * -0.24px) 0 rgba(var(--blue-rgb), 0.12);
-    transition: text-shadow 0.24s var(--ease);
-  }
-
-  /* A hair of tracking around the focal point. Set once on enter, not per
-     frame: animating a layout property on every pointermove is the thrash
-     this guard exists to avoid. */
-  body.has-custom-cursor h1.is-cursor-warp,
-  body.has-custom-cursor h2.is-cursor-warp,
-  body.has-custom-cursor h3.is-cursor-warp,
-  body.has-custom-cursor p.is-cursor-warp {
-    letter-spacing: 0.005em;
+  body.has-custom-cursor .cursor-lens.is-pressed::before {
+    width: 20px;
+    height: 20px;
+    border-color: rgba(var(--lavender-rgb), 1);
   }
 }
 
@@ -3632,10 +3587,8 @@ h1, h2, h3 {
   display: grid;
   justify-items: center;
   gap: clamp(0.9rem, calc(var(--rotary-disc-size) * 0.015), 1.5rem);
-  /* The name plate is the last child and sits at the card's bottom edge. This
-     reserved strip keeps the bio clear of it without a second absolutely
-     positioned element taking part in the card's height. */
-  padding-bottom: 2.65rem;
+  /* No padding is reserved for the name plate: it hangs from the rim outside
+     this card again, so the card is exactly the portrait plus its bio. */
   /* Its own arm: see .rotary-segment__content. Width floored at 200px so the
      110px avatar and its caption always fit -- the review's bare min(17.5vw,
      260px) is 68px on a 390px phone, narrower than the avatar it contains. */
@@ -3714,31 +3667,40 @@ h1, h2, h3 {
   line-height: 1.55;
 }
 
-/* The creator's name plate belongs to the profile card, not to the rim.
+/* Each profile segment owns a static name plate at its local outer rim.
+   The article rotates with the sector; the formula below subtracts that
+   sector's base angle and adds the JS-supplied inverse wheel rotation, so the
+   plate orbits the circumference and stays upright as the wheel turns.
 
-   It used to orbit the bottom wheel as an independent label: at 900x1200 it
-   floated 250px away from the portrait it named, and on a phone its orbit put
-   it straight through the status bar. Because it is now a child of the card it
-   rotates and settles with it, inherits the card's counter-rotation, and always
-   appears in the card's own layout zone -- the plate sits in the strip reserved
-   by padding-bottom on the profile block. Only the emphasis is still driven by
-   JS (the .is-active class); there is no second rotation to keep in sync. */
+   The plate deliberately lives OUTSIDE .rotary-segment__content--profile: the
+   card scales to 0.6 whenever it is not the settled sector, and a plate inside
+   it would scale, rotate and travel with the copy instead of hanging from the
+   rim the visitor is reading. Only emphasis is JS-driven (.is-active). */
 .rotary-name-tag {
   position: absolute;
-  left: 50%;
-  bottom: 0;
+  top: 50%;
+  left: 96%;
   z-index: 8;
-  max-width: 100%;
-  padding-inline: 12px;
-  font-size: clamp(0.6rem, calc(var(--rotary-disc-size) * 0.0092), 0.8rem);
   opacity: 0.82;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%) rotate(calc(0deg - var(--segment-angle, 0deg) + var(--tag-counter-rotation, 0deg)));
   transform-origin: 50% 50%;
   transition: opacity 0.22s var(--ease);
+  will-change: transform;
 }
 
 .rotary-name-tag.is-active {
   opacity: 1;
+}
+
+/* A short hairline ties the plate back to the rim it hangs from. */
+.rotary-name-tag::after {
+  content: "";
+  position: absolute;
+  right: -2.2rem;
+  top: 50%;
+  width: 2.2rem;
+  height: 1px;
+  background: linear-gradient(90deg, var(--blue), transparent);
 }
 
 .rotary-name-tag__line {
@@ -3948,7 +3910,6 @@ h1, h2, h3 {
     top: 78%;
     left: 108%;
     gap: 0.45rem;
-    padding-bottom: 2.25rem;
   }
 
   .rotary-profile__photo-frame {
@@ -3976,6 +3937,13 @@ h1, h2, h3 {
     text-overflow: ellipsis;
   }
 
+  /* The plate stays on the true rim (left: 96%) on phones too. Pulling it in
+     to 84% detached it from the circumference the visitor can see. */
+  .rotary-name-tag::after {
+    right: -1rem;
+    width: 1rem;
+  }
+
   /* One rule for all three signs: 41.2% of the disc out from the hub, which is
      the radius the "Developer" sign already hung at here. */
   .rotary-sign-hanger {
@@ -3989,49 +3957,69 @@ h1, h2, h3 {
     height: clamp(1.5rem, calc(var(--rotary-disc-size) * 0.06), 5rem);
   }
 
+  /* A compact two-line strip pinned to the very bottom of a phone: the hint
+     and counter share the first line, the colophon centres on the second.
+     It used to sit 4.35rem up the screen (to clear the sound control), which
+     is exactly where the rim-mounted name plate now hangs. */
   .credits-rotary-status {
-    left: 0.75rem;
-    bottom: max(4.35rem, calc(env(safe-area-inset-bottom) + 3.65rem));
-    width: min(17rem, calc(100vw - 3rem));
-    min-height: 2.35rem;
-    display: grid;
-    /* The counter takes its natural width; the colophon gets the rest and is
-       allowed to wrap. `1fr auto` let the colophon's max-content width size the
-       track and push both columns outside the pill. */
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 0.25rem 0.55rem;
-    padding: 0.5rem 0.7rem;
-    transform: none;
+    left: 50%;
+    bottom: max(0.5rem, env(safe-area-inset-bottom));
+    width: calc(100vw - 1.5rem);
+    max-width: none;
+    min-height: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: center;
+    gap: 0.12rem 0.7rem;
+    padding: 0.36rem 0.7rem 0.4rem;
+    border-radius: 0.85rem;
+    transform: translateX(-50%);
   }
 
   .credits-rotary-status__hint {
-    grid-column: 1 / -1;
     font-size: 0.56rem;
     letter-spacing: 0.1em;
-    text-align: center;
   }
 
-  /* Retargeted to the colophon, which took the contact link's slot. Left pointing
-     at a class that no longer exists, this would have silently stopped shrinking
-     the bottom bar on a phone -- dead CSS that still looks like it is doing work. */
   .credits-rotary-status__count,
   .credits-screen-colophon {
     font-size: 0.56rem;
   }
 
-  /* Keep the sound control in the opposite safe corner, clear of both the
-     status stack and the visible bottom-right wheel arc. */
+  /* Always its own line, so the first row stays a tidy hint/counter pair and
+     the colophon cannot push either of them onto a third line. */
+  .credits-screen-colophon {
+    flex-basis: 100%;
+    text-align: center;
+    line-height: 1.45;
+    letter-spacing: 0.08em;
+  }
+
+  /* The status bar owns the bottom edge now, so the sound control sits just
+     above it on the left -- clear of the status, the wheel and the rim plate. */
   .credits-rotary-page .ambient-toggle {
     right: auto;
     left: 0.75rem;
-    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    bottom: calc(max(0.5rem, env(safe-area-inset-bottom)) + 4.2rem);
     min-height: 2.15rem;
     padding: 0.48rem 0.65rem;
     font-size: 0.56rem;
   }
 
+  /* The rim name plate and the scroll cue want the same narrow band above the
+     status bar. The cue is decorative (aria-hidden) and duplicates the "wheel
+     to rotate" hint that is already in the status bar, so it yields. */
   .credits-scroll-affordance {
-    bottom: max(8.5rem, calc(env(safe-area-inset-bottom) + 7rem));
+    display: none;
+  }
+}
+
+/* Between 769 and 1000px the centred status bar reaches the sound control in
+   the bottom-right corner. Raise the control clear of the bar on this screen. */
+@media (min-width: 769px) and (max-width: 1000px) {
+  .credits-rotary-page .ambient-toggle {
+    bottom: calc(1rem + 3.5rem);
   }
 }
 
@@ -4631,7 +4619,13 @@ h1, h2, h3 {
 .credits-screen-colophon a { pointer-events: auto; display: inline-block; padding-block: .3rem; }
 @media (max-width: 768px) {
   .credits-screen-colophon { white-space: normal; }
-  .credits-screen-colophon a { display: block; margin-left: 0; }
+  /* Inline, so the two legal links share the colophon line instead of adding
+     two more rows to the compact status strip. */
+  .credits-screen-colophon a {
+    display: inline;
+    margin-left: 0.5em;
+    padding-block: 0;
+  }
 }
 .privacy-copy {
   padding: clamp(1rem, 3vw, 2rem);

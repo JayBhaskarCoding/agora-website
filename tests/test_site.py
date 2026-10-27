@@ -556,8 +556,8 @@ class LaunchContract(unittest.TestCase):
         self.assertIn("data-rotary-name-tag=\"1\"", html)
         self.assertIn("data-rotary-name-tag=\"2\"", html)
         app = (ROOT / "app.js").read_text()
-        self.assertNotIn("--tag-counter-rotation", app,
-                         "the plate rides with its card, so it needs no second rotation")
+        self.assertIn("--tag-counter-rotation", app,
+                      "each plate orbits the rim and must undo the wheel rotation")
         self.assertIn("tag.classList.toggle('is-active'", app)
         self.assertIn("nameTags.length !== bottomSegments.length", app)
         self.assertIn("padding: 8px 16px", self.css)
@@ -2463,11 +2463,11 @@ class CreditsRotaryGeometry(unittest.TestCase):
 
         Mobile is no longer the 168px box the old suite assumed. The blocks
         really render 230px wide (the paragraph) and 200px wide (the profile
-        card), the copy is three or four lines of 10.56px/1.45 text, and the
-        card carries a 2.25rem strip at its bottom edge for the name plate.
-        Measuring what renders is the whole reason the arms moved: a model that
-        was 62px narrower than the real paragraph "proved" a collision-free
-        layout that overlapped on a phone.
+        card), and the copy is three or four lines of 10.56px/1.45 text. The
+        name plate hangs from the rim outside the card again, so the card is
+        exactly the portrait plus its bio. Measuring what renders is the whole
+        reason the arms moved: a model that was 62px narrower than the real
+        paragraph "proved" a collision-free layout that overlapped on a phone.
         """
         if mobile:
             # .rotary-segment__content: width min(max(0.23*100vw, 230px), 340px)
@@ -2485,8 +2485,7 @@ class CreditsRotaryGeometry(unittest.TestCase):
             blines = math.ceil(96 / max(1, pw / (bfs * 0.505)))
             ph = (frame
                   + 0.45 * self.REM                     # mobile grid gap
-                  + blines * bfs * 1.4
-                  + 2.25 * self.REM)                    # reserved name-plate strip
+                  + blines * bfs * 1.4)
         else:
             cw = min(480, 0.37 * d)
             fs = max(15.2, min(0.018 * d, 21.6))
@@ -2655,11 +2654,10 @@ class CreditsRotaryGeometry(unittest.TestCase):
         self.fail(f"no {selector} rule declares {prop}")
 
     def orbit_radius(self, kind, mobile):
-        """Distance from the hub, as a percentage of the disc, at which the rim
-        label hangs. Only the role sign still orbits: the name plate is a child
-        of the profile card and is covered by a structural test instead."""
-        selector = ".rotary-sign-hanger {"
-        self.assertEqual(kind, "sign")
+        """Distance from the hub, as a percentage of the disc, at which a rim
+        label hangs. Both label families orbit now: the role sign hangs from
+        its cord and the name plate sits on the profile wheel's circumference."""
+        selector = ".rotary-sign-hanger {" if kind == "sign" else ".rotary-name-tag {"
         if mobile:
             try:
                 body, _ = self.block(selector, self.mobile_offset())
@@ -2785,10 +2783,8 @@ class CreditsRotaryGeometry(unittest.TestCase):
         directions is fixed no matter which contributor is showing. The two
         non-settled blocks are measured at the 0.6 scale they really render at.
 
-        The profile wheel no longer has an orbiting label to collide with: its
-        name plate is a child of the card (asserted structurally below), so
-        checking it as a free-floating box would be modelling a layout that no
-        longer exists.
+        This only covers the upper wheel. The profile wheel's own name plate
+        orbits outside its card again and has a dedicated test below.
         """
         rays = (40, 160, 280)
         for mobile, viewports in ((False, self.DESKTOP), (True, self.MOBILE)):
@@ -2811,13 +2807,15 @@ class CreditsRotaryGeometry(unittest.TestCase):
                         self.assertFalse(self.hits(cbox, lbox),
                                          "the copy collides with its own rim label")
 
-    def test_each_name_plate_lives_inside_its_profile_card(self):
-        """The plate used to orbit the bottom wheel as an independent label. At
-        900x1200 it floated 250px from the portrait it named, and on a phone its
-        orbit put it through the status bar. It is now the last child of the
-        profile card, so it inherits the card's rotation and sits in the strip
-        the card reserves for it. That is a structural contract, not a
-        coordinate: if the markup moves back out, no arm can save the layout.
+    def test_each_name_plate_orbits_outside_its_profile_card(self):
+        """The plate belongs to its profile segment, but not to its card.
+
+        It hung from the rim in the original layout, was moved inside the card
+        for one round, and that made it scale and travel with the copy instead
+        of staying on the circumference. It is now a sibling of the card again:
+        still owned by the same rotated article, positioned at left:96%, and
+        counter-rotated by JS so the name reads horizontally. A structural test
+        is the only thing that can stop a future tidy-up nesting it again.
         """
         for i in range(3):
             article = re.search(
@@ -2830,16 +2828,46 @@ class CreditsRotaryGeometry(unittest.TestCase):
                 r'<div class="rotary-segment__content rotary-segment__content--profile">'
                 r'([\s\S]*?)\n            </div>', body)
             self.assertIsNotNone(content, f"profile card {i} has no content wrapper")
-            self.assertIn(f'data-rotary-name-tag="{i}"', content.group(1),
-                          f"the name plate for profile {i} is not inside its card")
+            self.assertNotIn(f'data-rotary-name-tag="{i}"', content.group(1),
+                             f"the name plate for profile {i} is nested in its card again")
+            self.assertIn(f'data-rotary-name-tag="{i}"', body,
+                          f"the name plate for profile {i} left its segment")
             for other in range(3):
                 if other != i:
-                    self.assertNotIn(f'data-rotary-name-tag="{other}"', content.group(1),
-                                     "a name plate crossed into another profile card")
-        self.assertNotIn("--tag-counter-rotation", self.app,
-                         "the plate is no longer counter-rotated independently")
+                    self.assertNotIn(f'data-rotary-name-tag="{other}"', body,
+                                     "a name plate crossed into another profile segment")
+        self.assertIn("--tag-counter-rotation", self.app,
+                      "the plate must undo the wheel rotation independently")
         self.assertIn("tag.classList.toggle('is-active'", self.app,
-                      "only the emphasis is still JS-driven")
+                      "emphasis is still JS-driven")
+
+    def test_profile_copy_never_collides_with_its_rim_plate(self):
+        """The profile wheel's plate hangs from the rim just outside the card,
+        on the same ray as the portrait it names. All three landing rays are
+        checked, with the two non-settled cards measured at the 0.6 scale they
+        really render at, so a plate can never settle on top of its own copy.
+        """
+        rays = (220, 100, 340)
+        for mobile, viewports in ((False, self.DESKTOP), (True, self.MOBILE)):
+            left, top = self.arm("profile", mobile)
+            for w, h in viewports:
+                d = self.disc_diameter(w, h, mobile)
+                (_, _), (pw, phh) = self._metrics(w, h, d, mobile)
+                tw, th = self.label_box(mobile, d, w)
+                r_orbit = self.orbit_radius("name", mobile)
+                for theta in rays:
+                    scale = 1.0 if theta == 220 else 0.6
+                    cx, cy = self.content_centre(w, h, mobile, "bottom", theta, left, top)
+                    cbox = self.box(cx, cy, pw * scale, phh * scale)
+                    # Two of the three rays are below the fold on a phone; an
+                    # offscreen card cannot collide with anything a visitor sees.
+                    if cbox[2] <= 0 or cbox[0] >= w or cbox[3] <= 0 or cbox[1] >= h:
+                        continue
+                    lx, ly = self.ray_point(w, h, mobile, "bottom", theta, r_orbit)
+                    lbox = self.box(lx, ly, tw, th)
+                    with self.subTest(viewport=f"{w}x{h}", mobile=mobile, ray=theta):
+                        self.assertFalse(self.hits(cbox, lbox),
+                                         "the profile copy collides with its rim plate")
 
     def test_the_two_detail_blocks_never_overlap_each_other(self):
         for mobile, viewports in ((False, self.DESKTOP), (True, self.MOBILE)):
@@ -4912,9 +4940,9 @@ class CreditsChrome(unittest.TestCase):
         space from its left:50% anchor to the right edge. The long colophon won
         that fight, the hint and the counter were squeezed to 8px wide and
         wrapped one character per line -- a 258px-tall pill straight through the
-        profile card. The bar now caps at the viewport gutter, its labels never
-        break, and on a phone the counter keeps its natural width while the
-        colophon gets the remaining space instead of sizing the track.
+        profile card. The bar now caps at the viewport gutter and its labels
+        never break. On a phone it is a compact two-line strip pinned to the
+        bottom edge: hint and counter on the first line, colophon on the second.
         """
         base = re.search(r"\.credits-rotary-status \{([^}]*)\}",
                          self.css_code).group(1)
@@ -4929,8 +4957,23 @@ class CreditsChrome(unittest.TestCase):
                               f"the {part} can still wrap one letter per line")
         mobile = self.css_code.split("@media (max-width: 768px)", 1)[-1]
         rule = mobile.split(".credits-rotary-status {", 1)[1].split("}", 1)[0]
-        self.assertIn("grid-template-columns: auto minmax(0, 1fr);", rule)
-        self.assertIn("width: min(17rem, calc(100vw - 3rem));", rule)
+        self.assertIn("display: flex;", rule)
+        self.assertIn("flex-wrap: wrap;", rule)
+        self.assertIn("width: calc(100vw - 1.5rem);", rule)
+        self.assertIn("bottom: max(0.5rem, env(safe-area-inset-bottom));", rule,
+                      "the strip must sit at the bottom, clear of the rim plate")
+        self.assertIn("transform: translateX(-50%);", rule)
+        # The colophon takes its own line so the first row stays hint/counter.
+        colophon = next(
+            body for body in re.findall(r"\.credits-screen-colophon \{([^}]*)\}",
+                                        mobile)
+            if "flex-basis" in body)
+        self.assertIn("flex-basis: 100%;", colophon)
+        # Its legal links are inline on a phone; block links added two rows.
+        late = self.css_code.rsplit("@media (max-width: 768px)", 1)[-1]
+        links = late.split(".credits-screen-colophon a {", 1)[1].split("}", 1)[0]
+        self.assertIn("display: inline;", links)
+        self.assertIn("padding-block: 0;", links)
 
 
         """Dead CSS is not harmless: `.credits-screen-contact` still had a hover rule
@@ -5105,7 +5148,7 @@ class MotionTokens(unittest.TestCase):
                 self.assertIsNone(
                     re.search(r"(?<![\w-])ease(?![\w-])", match.group(1)),
                     "a transition still uses the browser's default easing")
-        self.assertGreaterEqual(self.css.count("var(--ease)"), 70)
+        self.assertGreaterEqual(self.css.count("var(--ease)"), 65)
 
 
 class CursorContract(unittest.TestCase):
@@ -5154,36 +5197,45 @@ class CursorContract(unittest.TestCase):
         self.assertIn(".cursor-lens {", tail)
         self.assertIn("display: none !important;", tail.split(".cursor-lens {", 1)[1])
 
-    def test_text_may_bend_but_controls_never_move(self):
-        # Two selectors, two effects.
-        self.assertIn("var textSelector", self.js)
-        self.assertIn("var surfaceSelector", self.js)
-        surface = re.search(r"var surfaceSelector = '([^']+)'", self.js).group(1)
+    def test_hovering_copy_never_moves_it(self):
+        """The pointer must not pop text out, scale it, rotate it or re-letter
+        it. The whole effect lives in the field's backdrop-filter, so the markup
+        under the pointer keeps its exact geometry. Any comeback of the old
+        per-element warp/glint machinery fails here."""
+        for stale in ("is-cursor-warp", "is-cursor-glint", "textSelector",
+                      "surfaceSelector", "writeWarp", "--cursor-nx",
+                      "--cursor-ny", "getBoundingClientRect"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, self.js)
+                self.assertNotIn(stale, self.css)
+        self.assertIn("targetSelector", self.js)
+        self.assertIn("classList.toggle('is-target'", self.js)
+        selector = re.search(r"var targetSelector = '([^']+)'", self.js).group(1)
         for name in ("a", "button"):
-            self.assertIn(name, surface)
-        text = re.search(r"var textSelector = '([^']+)'", self.js).group(1)
-        for name in ("h1", "p", "li"):
-            self.assertIn(name, text)
-        self.assertNotRegex(text, r"(^|,\s*)a($|,)",
-                            "links must not take the geometric warp")
-        self.assertIn("is-cursor-glint", self.js)
-        self.assertIn("is-cursor-warp", self.js)
-        glint = self.rule("body.has-custom-cursor .is-cursor-glint {")
-        self.assertIn("text-shadow", glint)
-        self.assertNotIn("rotate", glint,
-                         "a hovered link must not rotate under the lens")
-        self.assertNotIn("scale", glint,
-                         "a hovered link must not scale under the lens")
+            self.assertIn(name, selector)
 
-    def test_the_lens_stays_small_and_never_hit_tests(self):
+    def test_the_liquid_field_surrounds_the_pointer(self):
         self.assertIn("pointer-events: none;", self.rule(".cursor-lens {"))
-        lens = self.rule("body.has-custom-cursor .cursor-lens {")
-        self.assertIn("width: 36px", lens)
-        self.assertIn("height: 36px", lens)
-        target = self.rule("body.has-custom-cursor .cursor-lens.is-target {")
-        self.assertIn("width: 46px", target)
-        pressed = self.rule("body.has-custom-cursor .cursor-lens.is-pressed {")
-        self.assertIn("width: 54px", pressed)
+        field = self.rule("body.has-custom-cursor .cursor-lens {")
+        self.assertIn("width: 200px", field,
+                      "the disturbance must extend around the pointer, not sit in a tiny lens")
+        self.assertIn("height: 200px", field)
+        self.assertIn("mask-image: radial-gradient(", field)
+        self.assertIn("transparent 72%", field,
+                      "the field must dissolve at its edge instead of showing a disc")
+        # Real displacement of the backdrop, never a tint or a text transform.
+        self.assertIn("url(#agora-liquid)", self.css)
+        self.assertNotIn("agora-reverse-fisheye", self.css + self.js)
+        self.assertIn("feTurbulence", self.js)
+        self.assertIn("feDisplacementMap", self.js)
+        self.assertIn("scale: '24'", self.js)
+        # Only the aim ring reacts to a target; the 200px field never resizes.
+        ring = self.rule(".cursor-lens::before {")
+        self.assertIn("width: 26px", ring)
+        target = self.rule("body.has-custom-cursor .cursor-lens.is-target::before {")
+        self.assertIn("width: 34px", target)
+        pressed = self.rule("body.has-custom-cursor .cursor-lens.is-pressed::before {")
+        self.assertIn("width: 20px", pressed)
 
 
 class StylesheetIntegrity(unittest.TestCase):

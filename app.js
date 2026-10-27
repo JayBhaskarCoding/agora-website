@@ -1162,9 +1162,10 @@
     var finePointer = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)');
     if (!finePointer || !finePointer.matches || reduceMotion()) return;
 
-    /* One lens and one filter host for the lifetime of the document. PJAX
-       replaces <main> and the header, never <body>, so both survive a swap --
-       and the guard makes a second boot a no-op rather than a second sprite. */
+    /* One disturbance field and one filter host for the lifetime of the
+       document. PJAX replaces <main> and the header, never <body>, so both
+       survive a swap -- and the guard makes a second boot a no-op rather than
+       a second sprite. */
     var lens = doc.querySelector('.cursor-lens');
     if (!lens) {
       lens = doc.createElement('span');
@@ -1172,7 +1173,7 @@
       lens.setAttribute('aria-hidden', 'true');
       doc.body.appendChild(lens);
     }
-    installReverseFisheye();
+    installLiquidFilter();
     if (lens.getAttribute('data-cursor-ready') === 'true') {
       doc.body.classList.add('has-custom-cursor');
       return;
@@ -1181,105 +1182,23 @@
     doc.body.classList.add('has-custom-cursor');
 
     var state = { x: -100, y: -100, tx: -100, ty: -100, frame: 0 };
-    var target = null;
-    var targetMode = '';
-    /* Two effect tiers, because one size does not fit every surface.
-
-       Reading copy may bend a hair under the lens: a heading or a paragraph has
-       no hit area of its own, so moving its glyphs cannot move a target the
-       visitor is trying to click. Interactive elements are different -- a rolled
-       button or a link must stay exactly where it was painted, or the lens looks
-       like it is misaligning the thing it is hovering. Those get a chromatic
-       glint only (the shared .is-cursor-glint rule), never a geometric warp. */
-    var textSelector = 'h1, h2, h3, h4, p, li, blockquote, figcaption';
-    var surfaceSelector = 'a, button, .btn, .nav__link, input, select, textarea';
-    var warpProps = ['--cursor-x', '--cursor-y', '--cursor-nx', '--cursor-ny',
-      '--cursor-origin-x', '--cursor-origin-y'];
-
-    /* The warp transition lives on .is-cursor-warp, so dropping the class in
-       the same tick the pointer leaves would snap the element back. Instead
-       the focal point is wound to neutral first and the class is removed only
-       after the 300ms transition has finished. The timer is stored on the
-       element, not in one shared slot, so an element that was left a moment
-       ago still gets cleaned up while a new one is being warped. */
-    function releaseWarp() {
-      var el = target;
-      target = null;
-      targetMode = '';
-      el.style.setProperty('--cursor-nx', '0');
-      el.style.setProperty('--cursor-ny', '0');
-      window.clearTimeout(el.__cursorExit);
-      el.__cursorExit = window.setTimeout(function () {
-        el.__cursorExit = 0;
-        el.classList.remove('is-cursor-warp', 'is-cursor-glint');
-        for (var i = 0; i < warpProps.length; i++) {
-          el.style.removeProperty(warpProps[i]);
-        }
-      }, 320);
-    }
-
-    function clearTarget() {
-      if (target) releaseWarp();
-    }
-
-    function setTarget(next, mode) {
-      if (next === target && mode === targetMode) return;
-      clearTarget();
-      if (!next) return;
-      // Re-entering a still-cooling element cancels its cleanup.
-      if (next.__cursorExit) {
-        window.clearTimeout(next.__cursorExit);
-        next.__cursorExit = 0;
-      }
-      target = next;
-      targetMode = mode;
-      target.classList.add(mode === 'glint' ? 'is-cursor-glint' : 'is-cursor-warp');
-    }
-
-    function hit(event) {
-      if (!event.target || !event.target.closest) return null;
-      var el = event.target.closest(textSelector + ', ' + surfaceSelector);
-      if (!el) return null;
-      return { el: el, mode: el.matches(surfaceSelector) ? 'glint' : 'warp' };
-    }
-
-    /* Element-local focal point. Written as px for --cursor-x/y (the values
-       the CSS contract names) and normalised -1..1 for the perspective tilt,
-       whose origin follows the same point so the text pinches under the
-       lens instead of rotating around the element's centre. */
-    function writeWarp(rect) {
-      if (!target) return;
-      var width = rect.width || 1;
-      var height = rect.height || 1;
-      var x = state.tx - rect.left;
-      var y = state.ty - rect.top;
-      var nx = Math.max(-1, Math.min(1, (x / width) * 2 - 1));
-      var ny = Math.max(-1, Math.min(1, (y / height) * 2 - 1));
-      target.style.setProperty('--cursor-x', Math.round(x) + 'px');
-      target.style.setProperty('--cursor-y', Math.round(y) + 'px');
-      target.style.setProperty('--cursor-nx', nx.toFixed(3));
-      target.style.setProperty('--cursor-ny', ny.toFixed(3));
-      target.style.setProperty('--cursor-origin-x', ((x / width) * 100).toFixed(2) + '%');
-      target.style.setProperty('--cursor-origin-y', ((y / height) * 100).toFixed(2) + '%');
-    }
+    /* The one thing that changes on a hovered control: the aim ring widens a
+       little. Nothing on the page itself is measured, transformed or
+       recoloured, so a heading or a link cannot pop, shift or re-letter under
+       the pointer. */
+    var targetSelector = 'a, button, .btn, .nav__link, input, select, textarea, [role="button"]';
 
     function paint() {
       state.frame = 0;
-      /* The lens is 1:1 with the pointer. There is no interpolation here: a
+      /* The field is 1:1 with the pointer. There is no interpolation here: a
          lerp is a permanent, visible lag between the native pointer and the
-         glass, and it is worst exactly when the visitor is trying to aim at a
-         small target. rAF still coalesces moves to one write per frame, and the
-         write is a compositor-only translate3d on a fixed element.
-
-         Read once, then write: a single getBoundingClientRect for the hovered
-         element, then compositor-only properties. Nothing here touches layout
-         or forces a style recalc for the rest of the page. */
-      var rect = target ? target.getBoundingClientRect() : null;
+         distortion, and it is worst exactly when the visitor is trying to aim
+         at a small target. rAF still coalesces moves to one write per frame,
+         and the write is a compositor-only translate3d on a fixed element. */
       state.x = state.tx;
       state.y = state.ty;
       lens.style.transform = 'translate3d(' + state.x.toFixed(2) + 'px,' +
         state.y.toFixed(2) + 'px,0) translate(-50%, -50%)';
-      if (rect) writeWarp(rect);
     }
 
     function queue() {
@@ -1292,19 +1211,18 @@
       state.tx = event.clientX;
       state.ty = event.clientY;
       lens.classList.add('is-visible');
-      var found = hit(event);
-      setTarget(found ? found.el : null, found ? found.mode : '');
-      lens.classList.toggle('is-target', !!found);
+      var overTarget = !!(event.target && event.target.closest
+        && event.target.closest(targetSelector));
+      lens.classList.toggle('is-target', overTarget);
       queue();
     }
 
     function hide() {
       lens.classList.remove('is-visible', 'is-target', 'is-pressed');
-      clearTarget();
     }
 
-    function installReverseFisheye() {
-      if (doc.getElementById('agora-reverse-fisheye')) return;
+    function installLiquidFilter() {
+      if (doc.getElementById('agora-liquid')) return;
       var SVG_NS = 'http://www.w3.org/2000/svg';
       function node(name, attrs) {
         var el = doc.createElementNS(SVG_NS, name);
@@ -1323,26 +1241,28 @@
         height: '0'
       });
       var filter = node('filter', {
-        id: 'agora-reverse-fisheye',
+        id: 'agora-liquid',
         x: '-25%', y: '-25%', width: '150%', height: '150%',
         'color-interpolation-filters': 'sRGB'
       });
       /* fractalNoise around the 0.5 midpoint becomes a smooth displacement
          field: red/green deviations pull the backdrop in opposite directions,
-         which is the optical signature of looking INTO a concave surface. */
+         so the pixels under and around the pointer flow like a slow liquid.
+         The blur rounds off the noise first; the displacement scale is what a
+         visitor reads as the strength of the disturbance. */
       filter.appendChild(node('feTurbulence', {
         type: 'fractalNoise',
-        baseFrequency: '0.014 0.02',
+        baseFrequency: '0.018 0.026',
         numOctaves: '2',
         seed: '7',
         result: 'warp'
       }));
       filter.appendChild(node('feGaussianBlur', {
-        'in': 'warp', stdDeviation: '0.6', result: 'soft'
+        'in': 'warp', stdDeviation: '0.7', result: 'soft'
       }));
       filter.appendChild(node('feDisplacementMap', {
         'in': 'SourceGraphic', 'in2': 'soft',
-        scale: '5',
+        scale: '24',
         xChannelSelector: 'R',
         yChannelSelector: 'G'
       }));
@@ -2640,10 +2560,11 @@
       topPlate.style.setProperty('--disc-rotation', topRotation + 'deg');
       bottomPlate.style.setProperty('--disc-rotation', bottomRotation + 'deg');
 
-      // The name plate now sits inside the profile card, so it inherits the
-      // card's counter-rotation instead of orbiting the rim on its own. Only
-      // the emphasis is JS-driven; no second rotation has to be kept in sync.
+      // Each name plate lives inside its own rotated sector. Counter the whole
+      // bottom-wheel rotation in JS; CSS also subtracts that sector's fixed
+      // base angle, keeping every plate on the rim and perfectly horizontal.
       Array.prototype.forEach.call(nameTags, function (tag, index) {
+        tag.style.setProperty('--tag-counter-rotation', (-bottomRotation) + 'deg');
         tag.classList.toggle('is-active', index === state.memberIndex);
       });
 
