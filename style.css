@@ -552,18 +552,21 @@ main,
     transform: translate(-50%, -50%);
   }
 
-  /* The core: a small filled orb, lit from its upper left. It is what stops the
-     pointer reading as an empty ring -- there is real body in the middle now --
-     and because the fill fades to nothing at its own rim it still does not read
-     as a solid circular badge. The 1.2px bright centre is the exact pixel the
-     pointer is on. */
+  /* The core: a filled orb, lit from its upper left, with a crisp opaque ring
+     around it -- white in the dark theme via --cursor-lens-edge-rgb -- so it
+     reads as a single bright bead rather than an empty circle. The fill fades
+     at its own rim; the ring sits outside it, so it never draws a second
+     complete circle under the pointer. The 1.2px bright centre is the exact
+     pixel the pointer is on. */
   .cursor-lens::before {
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
     background:
-      radial-gradient(circle at 50% 50%, rgba(var(--lavender-rgb), 0.95) 0 1.2px, transparent 2.1px),
-      radial-gradient(circle 9px at 40% 34%, rgba(var(--lavender-rgb), 0.96) 0 22%, rgba(var(--blue-rgb), 0.88) 48%, rgba(var(--blue-rgb), 0.35) 74%, transparent 96%);
+      radial-gradient(circle at 50% 50%, rgba(var(--lavender-rgb), 0.97) 0 2px, transparent 3px),
+      radial-gradient(circle at 38% 36%, rgba(var(--lavender-rgb), 0.96) 0 26%, rgba(var(--blue-rgb), 0.88) 54%, rgba(var(--blue-rgb), 0.35) 74%, transparent 100%);
     box-shadow:
+      0 0 0 3px rgba(var(--cursor-lens-edge-rgb), 0.95),
       0 0 9px rgba(var(--glow-rgb), 0.45),
       0 0 18px rgba(var(--glow-blue-rgb), 0.2);
     transition: width 0.18s var(--ease), height 0.18s var(--ease);
@@ -591,8 +594,8 @@ main,
   }
 
   body.has-custom-cursor .cursor-lens.is-target::before {
-    width: 18px;
-    height: 18px;
+    width: 24px;
+    height: 24px;
   }
 
   body.has-custom-cursor .cursor-lens.is-target::after {
@@ -604,8 +607,8 @@ main,
   }
 
   body.has-custom-cursor .cursor-lens.is-pressed::before {
-    width: 12px;
-    height: 12px;
+    width: 16px;
+    height: 16px;
   }
 
   body.has-custom-cursor .cursor-lens.is-pressed::after {

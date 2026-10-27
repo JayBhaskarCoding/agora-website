@@ -5231,11 +5231,13 @@ class CursorContract(unittest.TestCase):
         self.assertIn("scale: '14'", self.js)
         # The middle is a filled orb now, not an empty hole.
         orb = self.rule(".cursor-lens::before {")
-        self.assertIn("width: 16px", orb)
+        self.assertIn("width: 20px", orb)
         self.assertIn("radial-gradient(", orb,
                       "the orb needs a fill; a bare border reads as an empty ring")
         self.assertNotIn("border:", orb,
                          "a border here would draw a second complete circle")
+        # A crisp opaque ring sits outside the orb fill via box-shadow spread.
+        self.assertIn("0 0 0 3px", orb)
         # A hairline reticle sits outside the orb, and it is masked open: the
         # arc, not a closed ring, is what keeps the pointer from being a circle.
         reticle = self.rule(".cursor-lens::after {", last=True)
@@ -5245,11 +5247,11 @@ class CursorContract(unittest.TestCase):
         self.assertIn("mask-image: conic-gradient(", reticle)
         # Only the reticle reacts to a target; the 132px field never resizes.
         target_orb = self.rule("body.has-custom-cursor .cursor-lens.is-target::before {")
-        self.assertIn("width: 18px", target_orb)
+        self.assertIn("width: 24px", target_orb)
         target = self.rule("body.has-custom-cursor .cursor-lens.is-target::after {")
         self.assertIn("width: 36px", target)
         pressed_orb = self.rule("body.has-custom-cursor .cursor-lens.is-pressed::before {")
-        self.assertIn("width: 12px", pressed_orb)
+        self.assertIn("width: 16px", pressed_orb)
         pressed = self.rule("body.has-custom-cursor .cursor-lens.is-pressed::after {")
         self.assertIn("width: 22px", pressed)
 
