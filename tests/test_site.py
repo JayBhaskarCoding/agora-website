@@ -5229,9 +5229,6 @@ class CursorContract(unittest.TestCase):
         self.assertIn("feTurbulence", self.js)
         self.assertIn("feDisplacementMap", self.js)
         self.assertIn("scale: '24'", self.js)
-        # A subtle dark vignette shadow sits outside the field so the edge of
-        # the disturbance reads as a gentle fall-off instead of a sharp disc.
-        self.assertIn("box-shadow: 0 0 20px rgba(var(--cursor-vignette-rgb), 0.35)", field)
         # The middle is a filled orb now, not an empty hole: solid lavender
         # fill with a crisp white ring and a black outer border, like the
         # reference cursor image.
