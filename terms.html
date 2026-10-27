@@ -43,7 +43,7 @@
 
       <nav class="nav__links" aria-label="Primary">
         <a class="nav__link" href="/" data-page="home" data-nav-key="home">The Square</a>
-        <a class="nav__link" href="/#why-agora">Why Agora</a>
+        <a class="nav__link" href="/#why-agora" data-nav-key="why-agora">Why Agora</a>
         <a class="nav__link" href="/download" data-page="download" data-nav-key="download">Download</a>
         <a class="nav__link" href="/about" data-page="about" data-nav-key="about">About</a>
         <a class="nav__link" href="/credits" data-page="credits" data-nav-key="credits">Credits</a>
@@ -246,18 +246,21 @@
           </a>
           <p>A human-first digital public square for free speech. Chronological by design, ad-free by principle.</p>
           <span class="site-footer__signal"><i aria-hidden="true"></i> signal stable</span>
+          <p class="site-footer__platforms">Android app · out now<br />iOS &amp; desktop — coming soon</p>
         </div>
 
-        <nav aria-label="Footer">
+        <nav aria-label="Footer" class="site-footer__nav">
           <h4>Pages</h4>
-          <a href="/">The Square</a>
-          <a href="/#why-agora">Why Agora</a>
-          <a href="/download">Download</a>
-          <a href="/about">About</a>
-          <a href="/credits">Credits</a>
-          <a href="/contact">Contact</a>
-          <a href="/privacy" data-page="privacy">Privacy Policy</a>
-          <a href="/terms" data-page="terms">Terms of Service</a>
+          <div class="site-footer__links">
+            <a href="/">The Square</a>
+            <a href="/#why-agora">Why Agora</a>
+            <a href="/download">Download</a>
+            <a href="/about">About</a>
+            <a href="/credits">Credits</a>
+            <a href="/contact">Contact</a>
+            <a href="/privacy" data-page="privacy">Privacy Policy</a>
+            <a href="/terms" data-page="terms">Terms of Service</a>
+          </div>
         </nav>
 
         <div class="site-footer__contact">
@@ -273,7 +276,6 @@
                  text from these two attributes at runtime. -->
             <a data-email-user="mail" data-email-domain="agora.in.net">Email the team</a>
           </p>
-          <p>Android app · APK, out now<br />iOS &amp; desktop — coming soon</p>
         </div>
       </div>
 

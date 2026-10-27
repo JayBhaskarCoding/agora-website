@@ -470,11 +470,34 @@
      Header border on scroll · active nav link · footer year.
      ------------------------------------------------------------ */
   function initChrome() {
+    /* On the home page the header has two sections to track, not one page.
+       "Why Agora" is an in-page section, so it gets the active underline while
+       it sits under the header, and hands it back to The Square the moment the
+       visitor scrolls out of it -- in either direction. On every other page
+       there is no #why-agora and the page-based state below stands. */
+    function syncSectionNav() {
+      var why = doc.getElementById('why-agora');
+      var homeLink = doc.querySelector('.nav__links [data-nav-key="home"]');
+      var whyLink = doc.querySelector('.nav__links [data-nav-key="why-agora"]');
+      if (!why || !homeLink || !whyLink) return;
+      var header = doc.querySelector('.site-header');
+      /* #why-agora carries `scroll-margin-top: 5rem`, so a click on the nav
+         link lands the section 80px down -- already past a bare header-height
+         threshold at phone width. The reading line has to sit below that gap,
+         or the section the visitor just jumped to would hand the underline
+         straight back to The Square. */
+      var offset = (header ? header.offsetHeight : 0) + 24;
+      var rect = why.getBoundingClientRect();
+      var inWhy = rect.top <= offset && rect.bottom > offset;
+      whyLink.classList.toggle('is-active', inWhy);
+      homeLink.classList.toggle('is-active', !inWhy);
+    }
+
     var onScroll = function () {
       var header = doc.querySelector('.site-header');
       if (header) header.classList.toggle('is-scrolled', window.scrollY > 8);
+      syncSectionNav();
     };
-    onScroll();
     if (!chromeState.bound) {
       chromeState.bound = true;
       window.addEventListener('scroll', onScroll, { passive: true });
@@ -486,6 +509,9 @@
     Array.prototype.forEach.call(doc.querySelectorAll('[data-nav-key]'), function (link) {
       link.classList.toggle('is-active', link.getAttribute('data-nav-key') === pageKey);
     });
+    // After the page-based state, so a reload on /#why-agora opens with the
+    // section link active instead of immediately handing it back to The Square.
+    onScroll();
 
     var year = doc.getElementById('year');
     if (year) year.textContent = String(new Date().getFullYear());
@@ -1173,6 +1199,16 @@
       lens.setAttribute('aria-hidden', 'true');
       doc.body.appendChild(lens);
     }
+    /* The bloom is a separate fixed layer: the lens itself is masked, so a
+       glow painted by the lens would be clipped at the same circle it is meant
+       to soften. */
+    var glow = doc.querySelector('.cursor-glow');
+    if (!glow) {
+      glow = doc.createElement('span');
+      glow.className = 'cursor-glow';
+      glow.setAttribute('aria-hidden', 'true');
+      doc.body.appendChild(glow);
+    }
     installLiquidFilter();
     if (lens.getAttribute('data-cursor-ready') === 'true') {
       doc.body.classList.add('has-custom-cursor');
@@ -1197,8 +1233,10 @@
          and the write is a compositor-only translate3d on a fixed element. */
       state.x = state.tx;
       state.y = state.ty;
-      lens.style.transform = 'translate3d(' + state.x.toFixed(2) + 'px,' +
+      var position = 'translate3d(' + state.x.toFixed(2) + 'px,' +
         state.y.toFixed(2) + 'px,0) translate(-50%, -50%)';
+      lens.style.transform = position;
+      glow.style.transform = position;
     }
 
     function queue() {
@@ -1211,6 +1249,7 @@
       state.tx = event.clientX;
       state.ty = event.clientY;
       lens.classList.add('is-visible');
+      glow.classList.add('is-visible');
       var overTarget = !!(event.target && event.target.closest
         && event.target.closest(targetSelector));
       lens.classList.toggle('is-target', overTarget);
@@ -1219,6 +1258,7 @@
 
     function hide() {
       lens.classList.remove('is-visible', 'is-target', 'is-pressed');
+      glow.classList.remove('is-visible');
     }
 
     function installLiquidFilter() {

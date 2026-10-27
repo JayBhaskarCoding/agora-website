@@ -5296,6 +5296,44 @@ class CursorContract(unittest.TestCase):
         pressed_orb = self.rule("body.has-custom-cursor .cursor-lens.is-pressed::before {")
         self.assertIn("width: 12px", pressed_orb)
 
+    def test_the_glow_is_its_own_soft_layer_under_the_field(self):
+        """The lens is radially masked, so a glow painted by it would be clipped at
+        the same hard circle it exists to soften. It gets a separate fixed layer,
+        moved in the same transform write as the lens, in the site's own
+        lavender -> violet -> blue family and faded out on every edge so it can
+        never read as a second ring around the bead."""
+        glow = self.rule("body.has-custom-cursor .cursor-glow {")
+        self.assertIn("position: fixed;", glow)
+        self.assertIn("width: 168px", glow)
+        self.assertIn("height: 168px", glow)
+        self.assertIn("filter: blur(", glow)
+        self.assertIn("rgba(var(--lavender-rgb)", glow)
+        self.assertIn("rgba(var(--violet-soft-rgb)", glow)
+        self.assertIn("rgba(var(--blue-rgb)", glow)
+        self.assertIn("transparent 72%", glow,
+                      "the bloom must fade out, not end on an edge")
+        self.assertNotIn("border:", glow,
+                         "any border here rebuilds the ring the glow replaced")
+        self.assertNotIn("border-width", glow)
+        self.assertNotIn("border-color", glow)
+        self.assertNotIn("box-shadow", glow)
+        self.assertIn("doc.querySelector('.cursor-glow')", self.js)
+        self.assertIn("glow.style.transform = position;", self.js,
+                      "one transform write must move the bloom with the lens")
+        self.assertIn("glow.classList.add('is-visible')", self.js)
+        self.assertIn("glow.classList.remove('is-visible')", self.js)
+        # The global display:none is the default; the media block opts in, and
+        # the coarse-pointer kill switch hides it with the lens.
+        self.assertIn("display: none", self.rule(".cursor-glow {"))
+        gate = "@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)"
+        self.assertGreater(self.css.index("body.has-custom-cursor .cursor-glow {"),
+                           self.css.index(gate),
+                           "the painted bloom must live inside the fine-pointer gate")
+        kill = "@media (hover: none), (pointer: coarse), (prefers-reduced-motion: reduce)"
+        tail = self.css[self.css.index(kill):]
+        self.assertIn(".cursor-glow {", tail)
+        self.assertIn("display: none !important;", tail.split(".cursor-glow {", 1)[1])
+
 
 class StylesheetIntegrity(unittest.TestCase):
     """Structural checks on style.css that no per-rule test can make.
@@ -5400,6 +5438,7 @@ class ContactPage(unittest.TestCase):
     def setUpClass(cls):
         cls.app = (ROOT / "app.js").read_text()
         cls.code = _strip_js_comments(cls.app)
+        cls.css = _strip_css_comments((ROOT / "style.css").read_text())
         cls.pages = {p.name: p.read_text() for p in ROOT.glob("*.html")}
         table = cls.app.split("var PAGE_MAP = {", 1)[1].split("};", 1)[0]
         cls.page_map = dict(re.findall(r"(\w+): '(/[^']*)'", table))
@@ -5473,7 +5512,7 @@ class ContactPage(unittest.TestCase):
     def test_every_full_shell_page_offers_the_same_navigation(self):
         """index, about, download and contact share one header. If one drops a link the
         site is not navigable from that page, and the page still looks finished."""
-        expected_keys = {"home", "download", "about", "credits", "contact"}
+        expected_keys = {"home", "why-agora", "download", "about", "credits", "contact"}
         expected_hrefs = {"/", "/download", "/about",
                           "/credits", "/contact"}
         for name in ("index.html", "about.html", "download.html", "contact.html", "privacy.html", "terms.html"):
@@ -5494,6 +5533,106 @@ class ContactPage(unittest.TestCase):
         self.assertIn('href="/contact" data-page="contact" data-nav-key="contact"',
                       self.pages["contact.html"])
         self.assertIn("path.replace(/\.html$/, '')", self.code)
+
+    def test_the_why_agora_section_takes_the_header_highlight_on_home(self):
+        """The header links to an in-page section, so the page key alone can never
+        light it up: on index.html the key is always `home`, wherever the visitor
+        has scrolled to. initChrome tracks the section against the header band and
+        hands the underline back to The Square the moment it scrolls clear -- in
+        either direction."""
+        self.assertIn('data-nav-key="why-agora"', self.pages["index.html"])
+        spy = self.code.split("function syncSectionNav()", 1)[1].split("var onScroll", 1)[0]
+        self.assertIn("doc.getElementById('why-agora')", spy)
+        self.assertIn("doc.querySelector('.nav__links [data-nav-key=\"home\"]')", spy)
+        self.assertIn("doc.querySelector('.nav__links [data-nav-key=\"why-agora\"]')", spy)
+        self.assertIn("getBoundingClientRect()", spy)
+        self.assertIn("rect.top <= offset", spy)
+        self.assertIn("rect.bottom > offset", spy)
+        self.assertIn("whyLink.classList.toggle('is-active', inWhy)", spy)
+        self.assertIn("homeLink.classList.toggle('is-active', !inWhy)", spy)
+        self.assertIn("(header ? header.offsetHeight : 0) + 24", spy,
+                      "the reading line must clear #why-agora's scroll-margin, or the "
+                      "link the visitor just clicked hands the underline back at once")
+        self.assertIn("scroll-margin-top: 5rem", self.css)
+        self.assertIn("window.addEventListener('scroll', onScroll", self.code,
+                      "the section state must update as the visitor scrolls")
+        # The page-based pass runs first and onScroll() last, so a reload on
+        # /#why-agora opens with the section highlighted, not a flash of The Square.
+        page_pass = self.code.index("doc.querySelectorAll('[data-nav-key]')")
+        self.assertGreater(self.code.index("onScroll();", page_pass), page_pass)
+
+    def test_the_footer_pages_links_are_split_into_two_columns(self):
+        """Eight links in one column made the Pages block taller than the brand
+        and left dead width beside Contact. Two columns halve the block and use
+        that space, so the footer reads as three balanced groups."""
+        self.assertIn(".site-footer__links {", self.css)
+        block = self.css.split(".site-footer__links {", 1)[1].split("}", 1)[0]
+        self.assertIn("display: grid;", block)
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr));", block)
+        for name in ("index.html", "about.html", "download.html",
+                     "contact.html", "privacy.html", "terms.html"):
+            foot = re.search(r'<nav aria-label="Footer"[^>]*>(.*?)</nav>',
+                             self.pages[name], re.DOTALL)
+            with self.subTest(page=name):
+                self.assertIsNotNone(foot)
+                self.assertIn('class="site-footer__links"', foot.group(1))
+
+    def test_platform_status_belongs_with_the_signal_not_the_contact_block(self):
+        """The release line is product status, not a way to reach the team. It sits
+        under `signal stable` in the brand column, and it no longer says APK: the
+        download page is the place that talks about the file."""
+        for name in ("index.html", "about.html", "download.html",
+                     "contact.html", "privacy.html", "terms.html"):
+            brand = self.pages[name].split('class="site-footer__brand"', 1)[1].split("</div>", 1)[0]
+            contact = self.pages[name].split('class="site-footer__contact"', 1)[1].split("</div>", 1)[0]
+            with self.subTest(page=name):
+                self.assertIn('class="site-footer__signal"', brand)
+                self.assertGreater(brand.index('class="site-footer__platforms"'),
+                                   brand.index('class="site-footer__signal"'),
+                                   "the platform line must follow the signal")
+                self.assertIn("Android app · out now", brand)
+                self.assertIn("iOS &amp; desktop — coming soon", brand)
+                self.assertNotIn("APK", brand)
+                self.assertNotIn("Android app", contact)
+        platforms = self.css.split(".site-footer__platforms {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("text-transform", platforms,
+                         "uppercasing here turns the platform name iOS into IOS")
+
+    def test_the_legal_pages_clear_the_fixed_header_on_a_phone(self):
+        """Privacy and Terms open on a bare .section, whose 4rem top padding is
+        barely more than the 58px phone header. Their eyebrow sat two pixels
+        under the bar. The rule has to include the header token like every other
+        page's hero does."""
+        for name in ("privacy.html", "terms.html"):
+            with self.subTest(page=name):
+                self.assertIn('class="privacy-page', self.pages[name])
+        self.assertIn(".privacy-page > .section {", self.css)
+        rule = self.css.split(".privacy-page > .section {", 1)[1].split("}", 1)[0]
+        self.assertIn("padding-top: calc(var(--header-h) + clamp(1.75rem, 4vw, 3rem));", rule)
+
+    def test_the_sound_control_shrinks_to_an_icon_on_a_phone(self):
+        """A fixed 105px pill covered a line of body copy somewhere on every
+        phone page -- the release note under the download button, the bio on
+        contact, the last line of the footer. The control keeps its aria-label,
+        so the icon alone is still announced."""
+        block = self.css.split("@media (max-width: 640px) {", 1)[1].split("\n}", 1)[0]
+        rule = block.split(".ambient-toggle {", 1)[1].split("}", 1)[0]
+        self.assertIn("width: 2.35rem;", rule)
+        self.assertIn("min-height: 2.35rem;", rule)
+        self.assertIn("padding: 0;", rule)
+        self.assertIn(".ambient-toggle span {", block)
+        self.assertIn("display: none;", block.split(".ambient-toggle span {", 1)[1])
+
+    def test_the_contact_send_button_does_not_stretch_in_a_column(self):
+        """Below 560px the action row becomes a column. The primary button keeps
+        its desktop `flex: 1 1 12rem`, where the basis becomes a HEIGHT: the send
+        button rendered as a 192px-tall oval between the message box and Change
+        topic. The column layout has to reset it to its content height."""
+        block = self.css.split("@media (max-width: 560px) {", 1)[1].split("\n}", 1)[0]
+        primary = block.split(".signal__actions .btn--primary {", 1)[1].split("}", 1)[0]
+        self.assertIn("flex: none;", primary)
+        self.assertIn(".signal__actions .btn {", block)
+        self.assertIn("width: 100%;", block)
 
     def test_every_contact_entry_point_reaches_the_page_not_a_hash(self):
         """The callout and the footers must navigate to /contact. A link to

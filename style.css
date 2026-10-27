@@ -496,6 +496,12 @@ main,
   will-change: transform;
 }
 
+.cursor-glow {
+  display: none;
+  pointer-events: none;
+  will-change: transform;
+}
+
 /* Zero-sized host for #agora-liquid. It must stay in the document for the
    backdrop-filter reference to resolve, but never paints or hit-tests. */
 .cursor-lens-defs {
@@ -521,12 +527,11 @@ main,
      pointer and dissolves smoothly into the page at its outer edge -- a soft
      vignette instead of a hard cut-off.
 
-     A subtle dark vignette shadow sits just outside the field so the edge of
-     the disturbance reads as a gentle fall-off rather than a sharp disc.
-
-     The small solid bead below is the visible pointer. Neither element
-     scales, rotates or re-letters the content it passes over, so hovering copy
-     can never make that copy pop out; only the backdrop bends. */
+     The glow below is the only painted part of the field: a low lavender-to-
+     blue bloom that lifts the pointer off dark copy without becoming a ring.
+     The small solid bead is the visible pointer. Neither element scales,
+     rotates or re-letters the content it passes over, so hovering copy can
+     never make that copy pop out; only the backdrop bends. */
   body.has-custom-cursor .cursor-lens {
     position: fixed;
     top: 0;
@@ -587,6 +592,36 @@ main,
     opacity: 1;
   }
 
+  /* A background bloom, not a ring: it fades out in every direction, so the
+     bead stays the only hard edge. It sits one layer under the refraction
+     field and uses the same lavender/violet/blue family as the page. */
+  body.has-custom-cursor .cursor-glow {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 9999 !important;
+    display: block;
+    width: 168px;
+    height: 168px;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle,
+      rgba(var(--lavender-rgb), 0.24) 0%,
+      rgba(var(--violet-soft-rgb), 0.13) 34%,
+      rgba(var(--blue-rgb), 0.07) 56%,
+      transparent 72%
+    );
+    opacity: 0;
+    transform: translate3d(-84px, -84px, 0) translate(-50%, -50%);
+    filter: blur(7px);
+    transition: opacity 0.2s var(--ease);
+    will-change: transform;
+  }
+
+  body.has-custom-cursor .cursor-glow.is-visible {
+    opacity: 1;
+  }
+
   body.has-custom-cursor .cursor-lens.is-target::before {
     width: 20px;
     height: 20px;
@@ -609,13 +644,30 @@ main,
   .cursor-lens {
     display: none !important;
   }
+
+  .cursor-glow {
+    display: none !important;
+  }
 }
 
 @media (max-width: 640px) {
   .ambient-toggle {
     right: 0.85rem;
     bottom: max(0.85rem, env(safe-area-inset-bottom));
-    padding-inline: 0.7rem;
+    width: 2.35rem;
+    min-height: 2.35rem;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+    border-radius: 50%;
+  }
+
+  /* On a phone the label is the widest part of this fixed control and the only
+     part that can cover a line of body copy. The icon alone keeps the footer,
+     the download card and legal text clear; the button's aria-label (kept in
+     sync by the sound controller) still announces its state. */
+  .ambient-toggle span {
+    display: none;
   }
 }
 
@@ -3012,6 +3064,22 @@ h1, h2, h3 {
     width: 100%;
   }
 
+  /* In a row, the desktop `flex: 1 1 12rem` is a width. In this column it is a
+     HEIGHT, and the primary button grew into a 192px-tall oval between the
+     fields and the next control. Let the button be its own height again. */
+  .signal__actions .btn--primary {
+    flex: none;
+  }
+
+  /* The step heading carries tabindex="-1" only so focus can move to it and a
+     screen reader can announce the new panel. It is not a control, so the
+     global accent focus ring reads as a stray box around the question after a
+     tap. The panel change is the visible feedback; Tab still lands on the first
+     field with its own ring. */
+  .signal__panel [tabindex="-1"]:focus {
+    outline: none;
+  }
+
   .signal__progress {
     gap: 0.4rem 0.9rem;
     font-size: 0.6rem;
@@ -4007,13 +4075,15 @@ h1, h2, h3 {
   }
 
   /* The status bar owns the bottom edge now, so the sound control sits just
-     above it on the left -- clear of the status, the wheel and the rim plate. */
+     above it on the left -- clear of the status, the wheel and the rim plate.
+     Like every other phone page it is an icon-only circle at this width. */
   .credits-rotary-page .ambient-toggle {
     right: auto;
     left: 0.75rem;
     bottom: calc(max(0.5rem, env(safe-area-inset-bottom)) + 4.2rem);
+    width: 2.15rem;
     min-height: 2.15rem;
-    padding: 0.48rem 0.65rem;
+    padding: 0;
     font-size: 0.56rem;
   }
 
@@ -4078,6 +4148,16 @@ h1, h2, h3 {
   margin-bottom: 1.1rem;
 }
 
+/* The eight page links are one short block, not a column taller than the
+   brand. Two columns keep the Pages group square and use the width that used
+   to sit empty between it and Contact. */
+.site-footer__links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: clamp(1rem, 2.4vw, 2rem);
+  align-content: start;
+}
+
 .site-footer__brand p {
   margin-top: 1rem;
   color: var(--text-dim);
@@ -4105,6 +4185,20 @@ h1, h2, h3 {
   background: var(--accent);
   box-shadow: 0 0 10px rgba(var(--glow-rgb), 0.9);
   animation: pulse 2.6s ease-in-out infinite;
+}
+
+/* Platform availability lives with the signal, not in the Contact column:
+   it is a status line about the product, not a way to reach the team.
+
+   Deliberately NOT uppercased: text-transform turned the platform name "iOS"
+   into "IOS" on every footer. The mixed case is the correct spelling. */
+.site-footer__platforms {
+  margin-top: 0.85rem;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  line-height: 1.75;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4633,6 +4727,14 @@ h1, h2, h3 {
     box-shadow: 0 10px 28px -14px rgba(var(--glow-blue-rgb), 0.4),
       0 0 24px rgba(var(--glow-rgb), 0.16);
   }
+}
+
+/* Privacy and Terms open on a plain .section instead of .page-hero, so their
+   top padding was the section default -- and on a phone that is barely more
+   than the fixed header, leaving the eyebrow two pixels under the bar. Give
+   them the same header allowance every other page gets. */
+.privacy-page > .section {
+  padding-top: calc(var(--header-h) + clamp(1.75rem, 4vw, 3rem));
 }
 
 /* Privacy: the shared shell with a calm, readable legal-document measure. */
