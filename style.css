@@ -87,8 +87,14 @@
   /* Deeper sibling of the brand gradient for text-bearing chips, so the
      ink on top clears WCAG AA at every stop. */
   --brand-gradient-ink: linear-gradient(105deg, #7C3AED, #8B5CF6 58%, #60A5FA);
-  --glass: rgba(var(--surface-rgb), 0.88);
-  --glass-deep: rgba(28, 25, 45, 0.88);
+  /* One frosted-glass recipe for every translucent surface on the site.
+     The fill is deliberately see-through: a panel that is 88% opaque hides
+     the blur behind it, so the glass reads as flat paint. At 66% the same
+     blur visibly softens whatever passes underneath, matching the liquid
+     field around the pointer. */
+  --glass: rgba(var(--surface-rgb), 0.66);
+  --glass-deep: rgba(28, 25, 45, 0.74);
+  --glass-filter: blur(18px) saturate(160%);
   --refuse: #FB7185;
   --refuse-border: rgba(var(--refuse-rgb), 0.25);
   --build: #6EE7B7;
@@ -282,8 +288,8 @@
     --brand-gradient-ink: linear-gradient(105deg, #5B21B6, #6D28D9 58%, #1D4ED8);
     /* Translucent white over off-white needs less opacity to read as
        glass rather than as flat white paint.                           */
-    --glass: rgba(var(--surface-rgb), 0.72);
-    --glass-deep: rgba(237, 233, 254, 0.9);
+    --glass: rgba(var(--surface-rgb), 0.68);
+    --glass-deep: rgba(237, 233, 254, 0.82);
 
     /* Light glass header: white at a slightly higher alpha than dark, because
        a white veil needs more body to hold its edge over off-white content.
@@ -449,9 +455,9 @@ main,
   border: 1px solid var(--border-strong);
   border-radius: 9999px;
   color: var(--text-dim);
-  background: rgba(var(--surface-rgb), 0.78);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
   box-shadow: 0 12px 35px -22px rgba(var(--glow-rgb), 0.8);
   font-family: var(--font-mono);
   font-size: 0.62rem;
@@ -699,7 +705,7 @@ ol {
 
 .section--alt {
   /* Let the site-wide dot mesh remain visible through the alternate band. */
-  background: rgba(var(--bg-soft-rgb), 0.82);
+  background: rgba(var(--bg-soft-rgb), 0.62);
   border-block: 1px solid var(--border);
 }
 
@@ -904,8 +910,8 @@ h1, h2, h3 {
      on every PJAX swap. With border-box, both are exactly --header-h. */
   height: var(--header-h);
   background: rgba(var(--header-glass-rgb), var(--header-glass-alpha));
-  -webkit-backdrop-filter: blur(20px) saturate(170%);
-  backdrop-filter: blur(20px) saturate(170%);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
   border-bottom: 1px solid rgba(var(--header-glass-edge-rgb), 0.14);
   box-shadow:
     inset 0 1px 0 rgba(var(--header-glass-sheen-rgb), 0.18),
@@ -1160,6 +1166,9 @@ h1, h2, h3 {
   max-height: calc(100dvh - var(--header-h));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* A full-screen nav cannot show the page through it without ghosting the
+     hero copy, so it stays nearly opaque; the shared frost still applies to
+     the sliver of backdrop that reaches it. */
   background: rgba(var(--bg-rgb), 0.98);
   border-bottom: 1px solid var(--border);
   opacity: 0;
@@ -1570,7 +1579,7 @@ h1, h2, h3 {
   padding: 1.9rem 1.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: linear-gradient(160deg, var(--surface), rgba(var(--surface-rgb), 0.4));
+  background: linear-gradient(160deg, var(--glass), rgba(var(--surface-rgb), 0.34));
   transition: transform 0.35s var(--ease), border-color 0.35s var(--ease), box-shadow 0.35s var(--ease);
   overflow: hidden;
 }
@@ -2442,7 +2451,7 @@ h1, h2, h3 {
   border-radius: var(--radius);
   padding: 2rem 1.6rem;
   text-align: center;
-  background: rgba(var(--bg-rgb), 0.6);
+  background: var(--glass);
 }
 
 .creator__name {
@@ -2884,7 +2893,7 @@ h1, h2, h3 {
   padding: 1.75rem 1.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: linear-gradient(160deg, var(--surface), rgba(var(--surface-rgb), 0.4));
+  background: linear-gradient(160deg, var(--glass), rgba(var(--surface-rgb), 0.34));
   transition: transform 0.35s var(--ease), border-color 0.35s var(--ease), box-shadow 0.35s var(--ease);
   overflow: hidden;
 }
@@ -3078,8 +3087,8 @@ h1, h2, h3 {
   height: var(--header-h);
   padding: 0 clamp(1rem, 3vw, 2.5rem);
   background: rgba(var(--header-glass-rgb), var(--header-glass-alpha));
-  -webkit-backdrop-filter: blur(20px) saturate(170%);
-  backdrop-filter: blur(20px) saturate(170%);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
   border-bottom: 1px solid rgba(var(--header-glass-edge-rgb), 0.14);
   box-shadow:
     inset 0 1px 0 rgba(var(--header-glass-sheen-rgb), 0.18),
@@ -3736,8 +3745,8 @@ h1, h2, h3 {
   border-radius: 9999px;
   color: var(--text-faint);
   background: rgba(var(--bg-rgb), 0.66);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
   transform: translateX(-50%);
   pointer-events: none;
 }
@@ -4042,7 +4051,7 @@ h1, h2, h3 {
 /* ---------- 19. Footer ---------- */
 .site-footer {
   border-top: 1px solid var(--border);
-  background: rgba(var(--bg-soft-rgb), 0.84);
+  background: rgba(var(--bg-soft-rgb), 0.64);
   padding-top: clamp(2.75rem, 6vw, 4rem);
 }
 
@@ -4149,8 +4158,23 @@ h1, h2, h3 {
   color: var(--text-faint);
 }
 
-/* Shared glass surfaces, with an opaque fallback for older browsers. */
+/* Shared glass surfaces, with an opaque fallback for older browsers.
+
+   Every translucent surface on the site now consumes ONE recipe,
+   --glass-filter, so a card, the header, the mobile menu and the credits
+   status bar all frost the page the same way. The group is split because
+   panels swap their opaque fallback for the shared see-through --glass fill,
+   while chrome that already paints its own translucent fill only borrows the
+   filter. */
 @supports ((backdrop-filter: blur(18px)) or (-webkit-backdrop-filter: blur(18px))) {
+  .site-header,
+  .credits-screen-header,
+  .ambient-toggle,
+  .credits-rotary-status,
+  .mobile-menu,
+  .section--alt,
+  .site-footer,
+  .privacy-copy,
   .principle,
   .cta-panel,
   .dl-card,
@@ -4158,11 +4182,31 @@ h1, h2, h3 {
   .post-preview,
   .peek,
   .creator,
+  .creator__card,
   .form-card,
-  .standard {
+  .standard,
+  .step,
+  .contact-callout,
+  .contact-category,
+  .secure-note {
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+  }
+
+  /* Panels use the shared see-through fill instead of opaque paint, so the
+     blur has something to show through. */
+  .principle,
+  .cta-panel,
+  .dl-card,
+  .shared-card,
+  .post-preview,
+  .peek,
+  .creator,
+  .creator__card,
+  .form-card,
+  .standard,
+  .step {
     background: var(--glass);
-    -webkit-backdrop-filter: blur(18px);
-    backdrop-filter: blur(18px);
   }
 }
 
@@ -4631,7 +4675,7 @@ h1, h2, h3 {
 .privacy-copy {
   padding: clamp(1rem, 3vw, 2rem);
   border-radius: 16px;
-  background: rgba(var(--bg-rgb), .96);
+  background: rgba(var(--bg-rgb), 0.74);
 }
 .privacy-heading .display { font-size: clamp(2.25rem, 6vw, 4rem); }
 .privacy-contents a:focus-visible, .privacy-copy a:focus-visible,

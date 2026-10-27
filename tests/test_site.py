@@ -809,7 +809,8 @@ class LaunchContract(unittest.TestCase):
         primary = re.search(r"\.btn--primary \{([^}]+)\}", self.css)[1]
         self.assertIn("background: var(--accent)", primary)
         self.assertIn("border-radius: 9999px", primary)
-        self.assertIn("backdrop-filter: blur(18px)", self.css)
+        self.assertIn("--glass-filter: blur(18px) saturate(160%);", self.css)
+        self.assertIn("backdrop-filter: var(--glass-filter);", self.css)
         self.assertEqual(self.css.count("{"), self.css.count("}"))
         for old_accent in ["#a5f3fc", "#22d3ee", "--emerald", "#fda4af"]:
             self.assertNotIn(old_accent, self.css)
@@ -5127,6 +5128,45 @@ class HeaderGlassParity(unittest.TestCase):
                 self.assertIn(token, light,
                               "the light theme inherits a colour built for black glass")
         self.assertNotEqual(dark["--header-glass-rgb"], light["--header-glass-rgb"])
+
+
+class GlassSurfaces(unittest.TestCase):
+    """One frosted-glass recipe for every see-through surface.
+
+    The pointer's local lens and the site's panels must read as the same
+    material. Panels used to be 88% opaque, so their 18px blur was invisible:
+    the fill did all the work and the glass was flat paint. These assertions
+    keep the shared --glass-filter wired to every translucent surface and keep
+    the panel fill see-through enough for the blur to show.
+    """
+
+    SURFACES = (
+        ".site-header", ".credits-screen-header", ".ambient-toggle",
+        ".credits-rotary-status", ".mobile-menu", ".section--alt",
+        ".site-footer", ".privacy-copy", ".principle", ".cta-panel",
+        ".dl-card", ".shared-card", ".post-preview", ".peek", ".creator",
+        ".creator__card", ".form-card", ".standard", ".step",
+        ".contact-callout", ".contact-category", ".secure-note",
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        cls.css = _strip_css_comments((ROOT / "style.css").read_text())
+
+    def test_one_filter_recipe_drives_every_glass_surface(self):
+        self.assertIn("--glass-filter: blur(18px) saturate(160%);", self.css)
+        start = self.css.index("@supports ((backdrop-filter: blur(18px))")
+        shared = self.css[start:self.css.index("[data-reveal]", start)]
+        for selector in self.SURFACES:
+            with self.subTest(surface=selector):
+                self.assertIn(selector, shared,
+                              "this translucent surface skipped the shared glass")
+        self.assertEqual(shared.count("var(--glass-filter)"), 2,
+                         "the group must set both the standard and -webkit filter")
+
+    def test_panel_fill_is_see_through_enough_for_the_blur(self):
+        self.assertIn("--glass: rgba(var(--surface-rgb), 0.66);", self.css)
+        self.assertIn("--glass: rgba(var(--surface-rgb), 0.68);", self.css)
 
 
 class MotionTokens(unittest.TestCase):
