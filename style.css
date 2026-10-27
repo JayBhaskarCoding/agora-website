@@ -3609,9 +3609,9 @@ h1, h2, h3 {
      radius "Developer" already hung at, which was the one that looked right. */
   left: 99.7%;
   z-index: 7;
-  display: grid;
-  justify-items: center;
+  position: relative;
   width: max-content;
+  height: clamp(2.5rem, calc(var(--rotary-disc-size) * 0.06), 5rem);
   opacity: 0.82;
   transform: translate(-50%, 0) rotate(calc(0deg - var(--segment-angle, 0deg) - var(--disc-rotation, 0deg) + var(--tag-swing-angle, 0deg)));
   transform-origin: 50% 0;
@@ -3626,18 +3626,20 @@ h1, h2, h3 {
 .rotary-sign-hanger__cord {
   position: absolute;
   top: 0;
+  left: 50%;
   width: 1px;
   height: clamp(2.5rem, calc(var(--rotary-disc-size) * 0.06), 5rem);
+  transform-origin: 0 0;
   background: linear-gradient(180deg, rgba(var(--lavender-rgb), 0.8), rgba(var(--blue-rgb), 0.28));
   box-shadow: 0 0 12px rgba(var(--glow-rgb), 0.42);
 }
 
 .rotary-sign-hanger__cord--left {
-  left: 18%;
+  transform: rotate(-55deg);
 }
 
 .rotary-sign-hanger__cord--right {
-  right: 18%;
+  transform: rotate(55deg);
 }
 
 .rotary-sign,
@@ -3670,7 +3672,10 @@ h1, h2, h3 {
 }
 
 .rotary-sign {
-  transform: scale(var(--tag-scale, 0.76));
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%) scale(var(--tag-scale, 0.76));
   transform-origin: 50% 0;
   transition: transform 0.22s var(--ease);
 }
@@ -4046,6 +4051,10 @@ h1, h2, h3 {
      go and ate the gap above the description. Scale it with the disc, with a
      24px floor so the cord still reads as a cord. */
   .rotary-sign-hanger__cord {
+    height: clamp(1.5rem, calc(var(--rotary-disc-size) * 0.06), 5rem);
+  }
+
+  .rotary-sign-hanger {
     height: clamp(1.5rem, calc(var(--rotary-disc-size) * 0.06), 5rem);
   }
 

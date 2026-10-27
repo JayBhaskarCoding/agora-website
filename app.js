@@ -2796,8 +2796,11 @@
       if (!rotationDelta) return;
       state.rotationTarget += rotationDelta;
       Array.prototype.forEach.call(tagHangers, function (tag, index) {
-        var impulse = rotationDelta * (index === state.memberIndex ? 0.16 : 0.08) * speedScale;
-        state.tagVelocities[index] = clamp(state.tagVelocities[index] - impulse, -18, 18);
+        /* Sudden wheel spins kick the tags hard -- the faster the wheel is
+           already moving, the wider each tag swings. A lazy scroll sways them
+           gently; a hard flick throws them wide left and right. */
+        var impulse = rotationDelta * (index === state.memberIndex ? 0.45 : 0.22) * speedScale;
+        state.tagVelocities[index] = clamp(state.tagVelocities[index] - impulse, -24, 24);
       });
       queueFrame();
     }
