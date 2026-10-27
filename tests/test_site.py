@@ -5221,8 +5221,8 @@ class CursorContract(unittest.TestCase):
                       "the disturbance must extend around the pointer, not sit in a tiny lens")
         self.assertIn("height: 88px", field)
         self.assertIn("mask-image: radial-gradient(", field)
-        self.assertIn("transparent 47%", field,
-                      "the field must end as a crisp edge instead of a vignette")
+        self.assertIn("transparent 80%", field,
+                      "the field must blur away at its outer edge instead of ending on a vignette")
         # Real displacement of the backdrop, never a tint or a text transform.
         self.assertIn("url(#agora-liquid)", self.css)
         self.assertNotIn("agora-reverse-fisheye", self.css + self.js)
