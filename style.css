@@ -3624,10 +3624,20 @@ h1, h2, h3 {
 }
 
 .rotary-sign-hanger__cord {
+  position: absolute;
+  top: 0;
   width: 1px;
   height: clamp(2.5rem, calc(var(--rotary-disc-size) * 0.06), 5rem);
   background: linear-gradient(180deg, rgba(var(--lavender-rgb), 0.8), rgba(var(--blue-rgb), 0.28));
   box-shadow: 0 0 12px rgba(var(--glow-rgb), 0.42);
+}
+
+.rotary-sign-hanger__cord--left {
+  left: 18%;
+}
+
+.rotary-sign-hanger__cord--right {
+  right: 18%;
 }
 
 .rotary-sign,
@@ -3984,20 +3994,20 @@ h1, h2, h3 {
      geometry solver a second set of numbers to disagree with. */
 
   .rotary-disc__contributions {
-    font-size: clamp(0.66rem, calc(var(--rotary-disc-size) * 0.014), 0.88rem);
+    font-size: clamp(0.7rem, calc(var(--rotary-disc-size) * 0.014), 0.88rem);
     line-height: 1.45;
   }
 
   .rotary-segment__content--profile {
     top: 78%;
     left: 108%;
-    gap: 0.45rem;
+    gap: 0.25rem;
   }
 
   .rotary-profile__photo-frame {
-    width: clamp(70px, calc(var(--rotary-disc-size) * 0.15), 100px);
-    height: clamp(70px, calc(var(--rotary-disc-size) * 0.15), 100px);
-    border-width: 2px;
+    width: clamp(85px, calc(var(--rotary-disc-size) * 0.18), 120px);
+    height: clamp(85px, calc(var(--rotary-disc-size) * 0.18), 120px);
+    border-width: 3px;
   }
 
   .rotary-segment__bio {

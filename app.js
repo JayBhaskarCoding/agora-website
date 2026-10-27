@@ -2792,11 +2792,11 @@
       return delta;
     }
 
-    function applyRotationDelta(rotationDelta) {
+    function applyRotationDelta(rotationDelta, speedScale) {
       if (!rotationDelta) return;
       state.rotationTarget += rotationDelta;
       Array.prototype.forEach.call(tagHangers, function (tag, index) {
-        var impulse = rotationDelta * (index === state.memberIndex ? 0.16 : 0.08);
+        var impulse = rotationDelta * (index === state.memberIndex ? 0.16 : 0.08) * speedScale;
         state.tagVelocities[index] = clamp(state.tagVelocities[index] - impulse, -18, 18);
       });
       queueFrame();
@@ -2816,7 +2816,12 @@
       // A hard notch arms the quicker snap threshold so one firm flick advances
       // a whole sector instead of needing the user to keep scrolling into it.
       if (Math.abs(delta) >= FAST_WHEEL_DELTA) armCommitBoost();
-      applyRotationDelta(rotationDelta);
+      /* The faster the wheel is already spinning, the harder each input kicks
+         the role tags: a lazy scroll makes them sway gently, a hard flick
+         throws them wide. The spring below always damps them back to centre
+         once the spinning settles, so the motion reads as viscous, not springy. */
+      var speedScale = 1 + Math.abs(state.rotationVelocity) / 500;
+      applyRotationDelta(rotationDelta, speedScale);
       scheduleSnap();
     }
 
@@ -2861,7 +2866,8 @@
 
       // Finger-up is the same direction as scrolling down: it advances the
       // wheel. The accumulated target is evaluated by the shared 65% snap rule.
-      applyRotationDelta(clamp(verticalDelta * TOUCH_DAMPING, -TOUCH_MAX_STEP, TOUCH_MAX_STEP));
+      var touchSpeedScale = 1 + Math.abs(state.touchVelocity) / 40;
+      applyRotationDelta(clamp(verticalDelta * TOUCH_DAMPING, -TOUCH_MAX_STEP, TOUCH_MAX_STEP), touchSpeedScale);
       if (Math.abs(state.touchVelocity) >= TOUCH_FLING_VELOCITY) armCommitBoost();
     }
 
