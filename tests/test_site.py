@@ -6207,3 +6207,139 @@ class TermsOfService(unittest.TestCase):
         self.assertIn("terms: '/terms'", app)
         self.assertIn("'/terms': '/terms.html'", app)
         self.assertIn('href="/terms" data-page="terms"', self.html)
+
+
+class CreditsRoleSuspension(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.html = (ROOT / 'credits.html').read_text()
+        cls.css = _strip_css_comments((ROOT / 'style.css').read_text())
+        cls.app = (ROOT / 'app.js').read_text()
+        cls.rotary = cls.app.split('  function initCreditsRotary()', 1)[1]
+
+    def test_all_role_strings_form_an_upward_isosceles_triangle(self):
+        from xml.etree import ElementTree
+        cords = re.findall(r'<svg class="rotary-sign-hanger__cord".*?</svg>', self.html, re.S)
+        self.assertEqual(len(cords), 3)
+        self.assertNotIn('<span class="rotary-sign-hanger__cord"', self.html)
+        for markup in cords:
+            svg = ElementTree.fromstring(markup)
+            self.assertEqual(svg.attrib['viewBox'], '0 0 100 100')
+            self.assertEqual(svg.attrib['preserveAspectRatio'], 'none')
+            self.assertEqual(svg.attrib['aria-hidden'], 'true')
+            self.assertEqual(svg.attrib['focusable'], 'false')
+            path = svg.find('path')
+            self.assertEqual(path.attrib['d'], 'M 0 100 L 50 0 L 100 100')
+            self.assertEqual(path.attrib['vector-effect'], 'non-scaling-stroke')
+        hangers = re.findall(r'<div class="rotary-sign-hanger".*?</div>', self.html, re.S)
+        self.assertEqual(len(hangers), 3)
+        for hanger in hangers:
+            self.assertLess(hanger.index('<svg'), hanger.index('class="rotary-sign"'))
+
+    def test_rope_endpoints_track_sign_scale_without_moving_the_pivot(self):
+        hanger = re.search(r'\.rotary-sign-hanger\s*\{([^}]+)\}', self.css)[1]
+        cord = re.search(r'\.rotary-sign-hanger__cord\s*\{([^}]+)\}', self.css)[1]
+        self.assertIn('left: 99.7%', hanger)
+        self.assertIn('top: 50%', hanger)
+        self.assertIn('transform-origin: 50% 0', hanger)
+        self.assertIn('padding-top: var(--tag-cord-length)', hanger)
+        self.assertIn('position: absolute', cord)
+        self.assertIn('top: 0', cord)
+        self.assertIn('left: 50%', cord)
+        self.assertIn('width: calc(100% * var(--tag-scale, 0.76))', cord)
+        height = re.search(r'height:\s*([^;]+)', cord)[1]
+        length = re.search(r'--tag-cord-length:\s*([^;]+)', hanger)[1]
+        self.assertEqual(height, length, 'rope base must meet the sign top exactly')
+        self.assertIn('transition: width 0.22s ease', cord)
+        # At either emphasis scale, the sign's scaled top corners and the
+        # SVG's lower endpoints have identical coordinates about the pivot.
+        for width in (115.2, 128, 176, 220):
+            for scale in (.76, .9, 1):
+                for h in (40, 48, 80):
+                    half = width * scale / 2
+                    self.assertAlmostEqual(math.hypot(half, h), math.hypot(-half, h))
+                    self.assertGreater(h, 0)
+
+    def test_elapsed_time_is_read_before_the_clock_is_updated(self):
+        step = self.rotary.split('    function step(timestamp)', 1)[1].split('    function normalizeWheelDelta', 1)[0]
+        self.assertLess(step.index('var frameMs = timestamp - state.lastTime'),
+                        step.index('\n      state.lastTime = timestamp;'))
+        self.assertIn('var dt = clamp(frameMs, 8, 34) / 1000;', step)
+        self.assertIn('var tagDt = clamp(frameMs, 0, 34) / 1000;', step)
+        self.assertIn('advanceRoleTag(index, tagDrive, tagDt)', step)
+        self.assertIn('-state.rotationVelocity * 0.65 - acceleration * 0.045', step)
+        self.assertNotIn('timestamp - state.lastTime, 8, 34', step)
+
+    def test_reduced_motion_suppresses_extra_tag_sway(self):
+        self.assertIn('var quietTags = reduceMotion();', self.rotary)
+        self.assertRegex(self.rotary, r'if \(quietTags\)\s*\{\s*state.tagAngles\[index\] = 0;\s*state.tagVelocities\[index\] = 0;')
+        self.assertIn('if (reduceMotion()) return;', self.rotary)
+        reduced = self.css.split('@media (prefers-reduced-motion: reduce)', 1)[1]
+        self.assertIn('.rotary-sign-hanger__cord', reduced)
+        self.assertIn('.rotary-sign,', reduced)
+
+    def test_actual_spring_handles_flicks_reversals_and_repeated_spins(self):
+        import subprocess
+        constants = '\n'.join(re.findall(r'    var TAG_[A-Z_]+ = [\d.]+;', self.rotary))
+        helper = self.rotary.split('    function advanceRoleTag(', 1)[1].split('    /* How long', 1)[0]
+        helper = 'function advanceRoleTag(' + helper
+        impulse = self.rotary.split('    function applyRotationDelta(', 1)[1].split('    function hideScrollAffordance(', 1)[0]
+        impulse = 'function applyRotationDelta(' + impulse
+        script = r'''
+const assert = require('node:assert/strict');
+var state, quiet = false, frames = 0;
+var tagHangers = [{},{},{}];
+function clamp(x,a,b) {return Math.max(a,Math.min(b,x));}
+function reduceMotion() {return quiet;}
+function queueFrame() {frames++;}
+function reset() {state={rotationTarget:0, memberIndex:0,tagAngles:[0,0,0],tagVelocities:[0,0,0]};}
+''' + constants + helper + impulse + r'''
+const peaks = [];
+for (const fps of [30,60,120,144]) {
+  reset(); applyRotationDelta(45);
+  assert.equal(state.rotationTarget, 45);
+  assert.ok(Math.abs(state.tagVelocities[0]) > Math.abs(state.tagVelocities[1]));
+  let peak = 0, crossings = 0, previous = 0;
+  for (let frame=0;frame<fps*10;frame++) {
+    advanceRoleTag(0,0,1/fps);
+    const angle = state.tagAngles[0];
+    assert.ok(Number.isFinite(angle));
+    assert.ok(Math.abs(angle)<=TAG_MAX_ANGLE);
+    peak = Math.max(peak,Math.abs(angle));
+    if (angle*previous<0) crossings++;
+    previous=angle;
+  }
+  assert.ok(peak>40, 'a hard flick must sway strongly, not twitch');
+  assert.ok(crossings>=3, 'sign must swing both left and right');
+  assert.equal(state.tagAngles[0], 0, 'pendulum must eventually stop');
+  assert.equal(state.tagVelocities[0], 0);
+  peaks.push(peak);
+}
+assert.ok(Math.max(...peaks)-Math.min(...peaks)<2, 'frame-rate-dependent impulse');
+reset(); applyRotationDelta(11);
+let gentlePeak=0;
+for(let i=0;i<60;i++) {advanceRoleTag(0,0,1/60);gentlePeak=Math.max(gentlePeak,Math.abs(state.tagAngles[0]));}
+assert.ok(gentlePeak>12 && gentlePeak<40, 'ordinary input should be lively but weaker');
+reset(); applyRotationDelta(45);
+for(let i=0;i<8;i++)advanceRoleTag(0,0,1/60);
+applyRotationDelta(-45);
+assert.ok(state.tagVelocities[0]>0, 'sudden reversal must kick the other way');
+reset();
+for(let i=0;i<1200;i++) {
+  applyRotationDelta(i%30<15?45:-45);
+  for(let j=0;j<3;j++) {
+    advanceRoleTag(j,i%30<15?-1800:1800,.034);
+    assert.ok(Number.isFinite(state.tagAngles[j]));
+    assert.ok(Math.abs(state.tagAngles[j])<=TAG_MAX_ANGLE);
+    assert.ok(Math.abs(state.tagVelocities[j])<=TAG_MAX_VELOCITY);
+  }
+}
+reset(); advanceRoleTag(0,-600,1/60);
+assert.ok(state.tagAngles[0]<0, 'actual wheel motion must drive a sign without another gesture');
+reset(); quiet=true; applyRotationDelta(45);
+assert.deepEqual(state.tagVelocities,[0,0,0]);
+assert.equal(state.rotationTarget,45,'reduced motion should not disable wheel navigation');
+console.log(JSON.stringify({hardFlickPeak:peaks[1],gentlePeak,cappedAt:TAG_MAX_ANGLE}));
+'''
+        result = subprocess.run(['node', '-e', script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

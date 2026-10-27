@@ -3600,7 +3600,7 @@ h1, h2, h3 {
    "Developer" looked correct.
 
    The plate supplies the wheel rotation, the segment supplies its base angle,
-   and the hanger subtracts both before adding app.js's small spring swing, so
+   and the hanger subtracts both before adding app.js's pendulum swing, so
    the sign stays upright and swings from the cord. */
 .rotary-sign-hanger {
   position: absolute;
@@ -3611,7 +3611,12 @@ h1, h2, h3 {
   z-index: 7;
   position: relative;
   width: max-content;
+<<<<<<< HEAD
   height: clamp(2.5rem, calc(var(--rotary-disc-size) * 0.06), 5rem);
+=======
+  --tag-cord-length: clamp(2.5rem, calc(var(--rotary-disc-size) * 0.06), 5rem);
+  padding-top: var(--tag-cord-length);
+>>>>>>> 385d83328e0ee7f18912a111d12e5e100c8b9a1e
   opacity: 0.82;
   transform: translate(-50%, 0) rotate(calc(0deg - var(--segment-angle, 0deg) - var(--disc-rotation, 0deg) + var(--tag-swing-angle, 0deg)));
   transform-origin: 50% 0;
@@ -3623,15 +3628,30 @@ h1, h2, h3 {
   opacity: 1;
 }
 
+/* The SVG's apex is the unchanged hanger pivot. Its lower endpoints sit on
+   the scaled sign's two upper corners, so both strings are ABOVE the plate.
+   Absolute placement keeps intrinsic SVG dimensions out of the grid's sizing. */
 .rotary-sign-hanger__cord {
   position: absolute;
   top: 0;
   left: 50%;
+<<<<<<< HEAD
   width: 1px;
   height: clamp(2.5rem, calc(var(--rotary-disc-size) * 0.06), 5rem);
   transform-origin: 0 0;
   background: linear-gradient(180deg, rgba(var(--lavender-rgb), 0.8), rgba(var(--blue-rgb), 0.28));
   box-shadow: 0 0 12px rgba(var(--glow-rgb), 0.42);
+=======
+  width: calc(100% * var(--tag-scale, 0.76));
+  height: clamp(2.5rem, calc(var(--rotary-disc-size) * 0.06), 5rem);
+  transform: translateX(-50%);
+  overflow: visible;
+  fill: none;
+  stroke: rgba(var(--lavender-rgb), 0.72);
+  stroke-width: 1;
+  pointer-events: none;
+  transition: width 0.22s ease;
+>>>>>>> 385d83328e0ee7f18912a111d12e5e100c8b9a1e
 }
 
 .rotary-sign-hanger__cord--left {
@@ -4132,6 +4152,8 @@ h1, h2, h3 {
   .rotary-segment,
   .rotary-segment__content,
   .rotary-sign-hanger,
+  .rotary-sign-hanger__cord,
+  .rotary-sign,
   .rotary-name-tag,
   .credits-scroll-affordance,
   .credits-scroll-affordance__wheel,

@@ -2479,6 +2479,39 @@
     var SETTLE_ANGLE = 0.02;          // inside this, lock exactly onto the target
     var SETTLE_VELOCITY = 0.6;        // so the wheel never idles a hair off
 
+    // Separate underdamped sign springs: degrees, seconds, and deg/s throughout.
+    // The wheel remains critically damped; only the hanging signs ring visibly.
+    var TAG_STIFFNESS = 38;
+    var TAG_DAMPING = 3.2;
+    var TAG_INPUT_IMPULSE = 14;
+    var TAG_MAX_ANGLE = 65;
+    var TAG_MAX_VELOCITY = 900;
+    var TAG_SETTLE_ANGLE = 0.03;
+    var TAG_SETTLE_VELOCITY = 0.15;
+
+    function advanceRoleTag(index, drive, dt) {
+      // Substeps keep sharp reversals stable, including a clamped background-tab
+      // resume. Limits prevent a rapid spin from flipping a sign over its pivot.
+      var steps = Math.max(1, Math.ceil(dt / (1 / 120)));
+      var h = dt / steps;
+      for (var stepIndex = 0; stepIndex < steps; stepIndex += 1) {
+        var tagAcceleration = drive - TAG_STIFFNESS * state.tagAngles[index]
+          - TAG_DAMPING * state.tagVelocities[index];
+        state.tagVelocities[index] = clamp(state.tagVelocities[index] + tagAcceleration * h,
+          -TAG_MAX_VELOCITY, TAG_MAX_VELOCITY);
+        state.tagAngles[index] += state.tagVelocities[index] * h;
+        if (Math.abs(state.tagAngles[index]) > TAG_MAX_ANGLE) {
+          state.tagAngles[index] = clamp(state.tagAngles[index], -TAG_MAX_ANGLE, TAG_MAX_ANGLE);
+          state.tagVelocities[index] *= -0.2;
+        }
+      }
+      if (Math.abs(state.tagAngles[index]) < TAG_SETTLE_ANGLE
+        && Math.abs(state.tagVelocities[index]) < TAG_SETTLE_VELOCITY) {
+        state.tagAngles[index] = 0;
+        state.tagVelocities[index] = 0;
+      }
+    }
+
     /* How long the arriving block's ease-up plays. Must equal the
        rotary-arrive animation duration in style.css. */
     var ARRIVAL_MS = 420;
@@ -2708,12 +2741,19 @@
 
     function step(timestamp) {
       state.raf = 0;
+<<<<<<< HEAD
       if (!state.lastTime) state.lastTime = timestamp;
       /* One frame delta, measured BEFORE lastTime is advanced. The previous
          version advanced lastTime first and then subtracted it again, so dt was
          always zero -> clamped to the 8ms floor on every frame, and the spring
          ran at half speed on a 60Hz display and one third on 144Hz. */
       var frameMs = clamp(timestamp - state.lastTime, 8, 34);
+=======
+      if (!state.lastTime) state.lastTime = timestamp - 16.67;
+      var frameMs = timestamp - state.lastTime;
+      var dt = clamp(frameMs, 8, 34) / 1000;
+      var tagDt = clamp(frameMs, 0, 34) / 1000;
+>>>>>>> 385d83328e0ee7f18912a111d12e5e100c8b9a1e
       state.lastTime = timestamp;
       var elapsed = frameMs / 16.67;
 
@@ -2729,7 +2769,10 @@
          minus a drag proportional to velocity; at damping == 2*sqrt(stiffness)
          the error decays exponentially with no overshoot, so the wheel is fast
          while the gap is large and eases itself into the sector as it closes. */
+<<<<<<< HEAD
       var dt = frameMs / 1000;
+=======
+>>>>>>> 385d83328e0ee7f18912a111d12e5e100c8b9a1e
       var error = state.rotationTarget - state.rotation;
       var acceleration = (error * SPRING_STIFFNESS) - (state.rotationVelocity * SPRING_DAMPING);
       state.rotationVelocity = clamp(
@@ -2763,21 +2806,23 @@
         state.rotationVelocity = 0;
       }
 
-      // Every role tag has its own delayed pendulum. The CSS applies the
-      // exact inverse wheel rotation first, then this small spring swing.
+      // Immediate input gives a kick; actual wheel velocity/acceleration keeps
+      // driving the signs during a snap or reversal after the gesture ends.
+      var tagDrive = clamp(-state.rotationVelocity * 0.65 - acceleration * 0.045, -1800, 1800);
+      var quietTags = reduceMotion();
       Array.prototype.forEach.call(tagHangers, function (tag, index) {
-        state.tagVelocities[index] += (-state.tagAngles[index] * 0.105 - state.tagVelocities[index] * 0.18) * elapsed;
-        state.tagAngles[index] += state.tagVelocities[index] * elapsed;
-        if (Math.abs(state.tagAngles[index]) < 0.01 && Math.abs(state.tagVelocities[index]) < 0.01) {
+        if (quietTags) {
           state.tagAngles[index] = 0;
           state.tagVelocities[index] = 0;
+        } else {
+          advanceRoleTag(index, tagDrive, tagDt);
         }
       });
 
       render();
 
       var tagsMoving = state.tagAngles.some(function (angle, index) {
-        return Math.abs(angle) > 0.01 || Math.abs(state.tagVelocities[index]) > 0.01;
+        return Math.abs(angle) > TAG_SETTLE_ANGLE || Math.abs(state.tagVelocities[index]) > TAG_SETTLE_VELOCITY;
       });
       var moving = Math.abs(state.rotationTarget - state.rotation) > 0.02
         || Math.abs(state.rotationVelocity) > SETTLE_VELOCITY
@@ -2796,11 +2841,18 @@
       if (!rotationDelta) return;
       state.rotationTarget += rotationDelta;
       Array.prototype.forEach.call(tagHangers, function (tag, index) {
+<<<<<<< HEAD
         /* Sudden wheel spins kick the tags hard -- the faster the wheel is
            already moving, the wider each tag swings. A lazy scroll sways them
            gently; a hard flick throws them wide left and right. */
         var impulse = rotationDelta * (index === state.memberIndex ? 0.45 : 0.22) * speedScale;
         state.tagVelocities[index] = clamp(state.tagVelocities[index] - impulse, -24, 24);
+=======
+        if (reduceMotion()) return;
+        var impulse = rotationDelta * TAG_INPUT_IMPULSE * (index === state.memberIndex ? 1 : 0.72);
+        state.tagVelocities[index] = clamp(state.tagVelocities[index] - impulse,
+          -TAG_MAX_VELOCITY, TAG_MAX_VELOCITY);
+>>>>>>> 385d83328e0ee7f18912a111d12e5e100c8b9a1e
       });
       queueFrame();
     }
