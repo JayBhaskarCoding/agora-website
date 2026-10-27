@@ -1245,24 +1245,25 @@
         x: '-25%', y: '-25%', width: '150%', height: '150%',
         'color-interpolation-filters': 'sRGB'
       });
-      /* fractalNoise around the 0.5 midpoint becomes a smooth displacement
+      /* fractalNoise around the 0.5 midpoint becomes a grainy displacement
          field: red/green deviations pull the backdrop in opposite directions,
-         so the pixels under and around the pointer flow like a slow liquid.
-         The blur rounds off the noise first; the displacement scale is what a
-         visitor reads as the strength of the disturbance. */
+         so pixels under the pointer break apart like sand grains and settle
+         back into place as the cursor moves on. The light blur keeps each
+         grain sharp instead of smearing into liquid; the displacement scale is
+         what a visitor reads as the strength of the disintegration. */
       filter.appendChild(node('feTurbulence', {
         type: 'fractalNoise',
-        baseFrequency: '0.018 0.026',
-        numOctaves: '2',
+        baseFrequency: '0.04 0.04',
+        numOctaves: '4',
         seed: '7',
         result: 'warp'
       }));
       filter.appendChild(node('feGaussianBlur', {
-        'in': 'warp', stdDeviation: '1.0', result: 'soft'
+        'in': 'warp', stdDeviation: '0.5', result: 'soft'
       }));
       filter.appendChild(node('feDisplacementMap', {
         'in': 'SourceGraphic', 'in2': 'soft',
-        scale: '26',
+        scale: '45',
         xChannelSelector: 'R',
         yChannelSelector: 'G'
       }));

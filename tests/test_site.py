@@ -5228,7 +5228,7 @@ class CursorContract(unittest.TestCase):
         self.assertNotIn("agora-reverse-fisheye", self.css + self.js)
         self.assertIn("feTurbulence", self.js)
         self.assertIn("feDisplacementMap", self.js)
-        self.assertIn("scale: '26'", self.js)
+        self.assertIn("scale: '45'", self.js)
         # The middle is a filled orb now, not an empty hole: solid lavender
         # fill with a crisp white ring and a black outer border, like the
         # reference cursor image.
