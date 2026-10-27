@@ -118,6 +118,11 @@
      refraction plus one hairline ring -- so the only channel it needs is the
      edge colour of that ring, kept per theme so it never glows white on white. */
   --cursor-lens-edge-rgb: 255, 255, 255;
+  /* The solid lavender bead needs a crisp white ring and a black outer border,
+     exactly like the reference cursor. Kept per theme so the bead never reads
+     as a hole or a second circle. */
+  --cursor-lens-ring-rgb: 255, 255, 255;
+  --cursor-lens-ring-outer-rgb: 0, 0, 0;
 
   /* ---- 1g. Masks & embedded assets ------------------------------------
      #000 here is an ALPHA carrier for mask-image, not a theme colour: the
@@ -301,6 +306,8 @@
     /* The ring darkens in light mode so it still reads over the off-white
        mesh instead of glowing white on white. */
     --cursor-lens-edge-rgb: 15, 23, 42;
+    --cursor-lens-ring-rgb: 15, 23, 42;
+    --cursor-lens-ring-outer-rgb: 255, 255, 255;
 
     /* Darker chevron: the dark theme's #9aa8bf is only 2.44:1 on white,
        below the 3:1 bar for a non-text control indicator. Matched to
@@ -552,30 +559,22 @@ main,
     transform: translate(-50%, -50%);
   }
 
-  /* The core: a filled orb, lit from its upper left, with a crisp opaque ring
-     around it -- white in the dark theme via --cursor-lens-edge-rgb -- so it
-     reads as a single bright bead rather than an empty circle. The fill fades
-     at its own rim; the ring sits outside it, so it never draws a second
-     complete circle under the pointer. The 1.2px bright centre is the exact
-     pixel the pointer is on. */
+  /* The core: a solid lavender bead with a crisp white ring and a black outer
+     border, exactly like the reference cursor. Nothing fades to transparent --
+     it is one filled circle, not an empty ring. */
   .cursor-lens::before {
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background:
-      radial-gradient(circle at 50% 50%, rgba(var(--lavender-rgb), 0.97) 0 2px, transparent 3px),
-      radial-gradient(circle at 38% 36%, rgba(var(--lavender-rgb), 0.96) 0 26%, rgba(var(--blue-rgb), 0.88) 54%, rgba(var(--blue-rgb), 0.35) 74%, transparent 100%);
+    background: rgb(var(--lavender-rgb));
     box-shadow:
-      0 0 0 3px rgba(var(--cursor-lens-edge-rgb), 0.95),
-      0 0 9px rgba(var(--glow-rgb), 0.45),
-      0 0 18px rgba(var(--glow-blue-rgb), 0.2);
+      0 0 0 3px rgba(var(--cursor-lens-ring-rgb), 1),
+      0 0 0 5px rgba(var(--cursor-lens-ring-outer-rgb), 1);
     transition: width 0.18s var(--ease), height 0.18s var(--ease);
   }
 
-  /* The aim reticle. It is deliberately NOT a complete circle: a conic mask
-     opens a gap at the top right, and the surviving arc is lit at the top left
-     and almost gone at the bottom. A closed hairline would just be a second
-     circle around the orb. */
+  /* The aim reticle stays a broken arc outside the bead so it never reads as a
+     second complete circle around the pointer. */
   .cursor-lens::after {
     width: 28px;
     height: 28px;

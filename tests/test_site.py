@@ -5229,15 +5229,21 @@ class CursorContract(unittest.TestCase):
         self.assertIn("feTurbulence", self.js)
         self.assertIn("feDisplacementMap", self.js)
         self.assertIn("scale: '14'", self.js)
-        # The middle is a filled orb now, not an empty hole.
+        # The middle is a filled orb now, not an empty hole: solid lavender
+        # fill with a crisp white ring and a black outer border, like the
+        # reference cursor image.
         orb = self.rule(".cursor-lens::before {")
         self.assertIn("width: 20px", orb)
-        self.assertIn("radial-gradient(", orb,
-                      "the orb needs a fill; a bare border reads as an empty ring")
+        self.assertIn("background: rgb(var(--lavender-rgb));", orb,
+                      "the orb must be a solid filled colour, not a gradient")
+        self.assertIn("0 0 0 3px rgba(var(--cursor-lens-ring-rgb), 1)", orb,
+                      "the orb needs a crisp white ring")
+        self.assertIn("0 0 0 5px rgba(var(--cursor-lens-ring-outer-rgb), 1)", orb,
+                      "the orb needs a crisp black outer border")
+        self.assertNotIn("radial-gradient(", orb,
+                         "a gradient here would make the centre fade away")
         self.assertNotIn("border:", orb,
                          "a border here would draw a second complete circle")
-        # A crisp opaque ring sits outside the orb fill via box-shadow spread.
-        self.assertIn("0 0 0 3px", orb)
         # A hairline reticle sits outside the orb, and it is masked open: the
         # arc, not a closed ring, is what keeps the pointer from being a circle.
         reticle = self.rule(".cursor-lens::after {", last=True)
