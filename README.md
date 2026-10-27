@@ -6,6 +6,39 @@ moderation of harm.
 
 Pure **vanilla HTML / CSS / JS** — no frameworks, no build step. Serve the repository root locally to resolve root-absolute asset URLs.
 
+## Credits role tags — triangular suspension and stronger sway
+
+Each of the three role signs now hangs from two SVG strings above its upper corners.
+The strings meet at one apex at the existing sector-local hanger pivot. The SVG
+uses `M 0 100 L 50 0 L 100 100`, a symmetric open triangle; the tag forms its base.
+The cord is absolutely positioned above the sign, and its width follows
+`--tag-scale` with the same 0.22s easing as the sign. This keeps both lower endpoints
+attached during active/inactive scaling. Desktop/mobile pivot coordinates, wheel
+hubs, contributor positions, avatars, name plates, and text arms are unchanged.
+
+Role signs use a separate underdamped spring: stiffness 38/s², damping 3.2/s,
+14 deg/s of immediate kick per degree of wheel input (inactive signs receive 72%),
+plus continuous forcing from actual wheel speed and acceleration. This makes hard
+flicks, reversals, snaps, and rapid spins swing visibly left and right, rather than
+only reacting weakly to the initial event. Angle/velocity limits are 65°/900° per
+second; substeps of at most 1/120s keep repeated impulses bounded. Signs settle to
+exact zero and stop requesting frames. Reduced-motion mode suppresses extra sign
+sway while preserving contributor navigation.
+
+The frame clock is sampled before updating `lastTime`. Previously it was reset
+first, so the wheel's elapsed-time calculation always hit the 8ms minimum. The
+wheel's authored critical damping, speed limit, input gains and snap thresholds are
+unchanged; its integrator now receives the intended clamped elapsed time. Sign
+physics use a separately clamped 0–34ms interval and bounded substeps.
+
+Validation: **229 automated tests passing**. Executable spring tests cover strong
+and ordinary flicks, reversals, 1,200 repeated spin impulses, 30/60/120/144Hz steps,
+settling and reduced motion. Additional jsdom validation ran the real rotary
+initializer and wheel handlers: hard flick → 120° snap, repeated forward/reverse
+spins, finite ≤65° tag angles, zero residual animation frames after settling, and
+zero sign sway with reduced motion. These are JS/DOM checks, not a rendered-browser
+layout or GPU/FPS measurement.
+
 ## Terms of Service — effective October 24, 2026
 
 `terms.html` is served at `/terms` through native Pages HTML routing, without a
