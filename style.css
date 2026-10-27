@@ -542,8 +542,8 @@ main,
     -webkit-mask-image: radial-gradient(circle, black 0%, black 30%, transparent 90%);
     mask-image: radial-gradient(circle, black 0%, black 30%, transparent 90%);
     transition: opacity 0.16s var(--ease);
-    -webkit-backdrop-filter: blur(1.6px) saturate(145%);
-    backdrop-filter: blur(1.6px) saturate(145%);
+    -webkit-backdrop-filter: blur(2.6px) saturate(145%);
+    backdrop-filter: blur(2.6px) saturate(145%);
     box-shadow: 0 0 20px rgba(var(--cursor-vignette-rgb), 0.35);
     will-change: transform;
   }
