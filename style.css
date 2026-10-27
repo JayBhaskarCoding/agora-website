@@ -113,19 +113,14 @@
   --device-accent-rgb: 139, 92, 246;
   --device-accent-soft: rgba(var(--device-accent-rgb), 0.08);
 
-  /* ---- 1f. Custom cursor ---------------------------------------------- */
-  --cursor-ring: #F8FAFC;
-  --cursor-ring-hover: #FFFFFF;
-  --cursor-core: #A78BFA;
-  --cursor-core-hover: #C4B5FD;
-  --cursor-halo-rgb: 10, 11, 14;
-  --cursor-shadow: 0 0 0 2px rgba(var(--cursor-halo-rgb), 0.9),
-    0 0 18px rgba(var(--glow-blue-rgb), 0.95);
-  --cursor-shadow-hover: 0 0 0 2px rgba(var(--cursor-halo-rgb), 0.9),
-    0 0 22px rgba(var(--glow-blue-rgb), 0.95);
-  --cursor-shadow-pressed: 0 0 0 3px rgba(var(--cursor-halo-rgb), 0.9),
-    0 0 0 9px rgba(var(--accent-rgb), 0.14),
-    0 0 34px rgba(var(--glow-blue-rgb), 0.85);
+  /* ---- 1f. Cursor lens ------------------------------------------------
+     The lens is a translucent disc, so its own body is painted from these
+     channels rather than from --surface-rgb: it sits over both cards and the
+     near-black mesh, and it must keep its rim in both themes. */
+  --cursor-lens-rgb: 12, 13, 19;
+  --cursor-lens-hi-rgb: 255, 255, 255;
+  --cursor-lens-edge-rgb: 255, 255, 255;
+  --cursor-lens-sheen-rgb: 255, 255, 255;
 
   /* ---- 1g. Masks & embedded assets ------------------------------------
      #000 here is an ALPHA carrier for mask-image, not a theme colour: the
@@ -172,6 +167,20 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   --header-h: 68px;
+
+  /* ---- Glass header ---------------------------------------------------
+     Alpha lives in its own token because the scrolled state deepens it:
+     a solid bar would hide the mesh, and a fully transparent one would let
+     body copy read through the nav links. 0.52 is the point where the
+     animated lattice is still visible behind the bar but text keeps its
+     measured contrast. */
+  --header-glass-rgb: 12, 13, 19;
+  --header-glass-alpha: 0.52;
+  --header-glass-alpha-scrolled: 0.64;
+  --header-glass-edge-rgb: 255, 255, 255;
+  --header-glass-sheen-rgb: 255, 255, 255;
+  --header-glass-shadow-rgb: 5, 3, 9;
+
   --radius: 1.25rem;
   --radius-lg: 1.75rem;
 
@@ -273,6 +282,16 @@
        glass rather than as flat white paint.                           */
     --glass: rgba(var(--surface-rgb), 0.72);
     --glass-deep: rgba(237, 233, 254, 0.9);
+
+    /* Light glass header: white at a slightly higher alpha than dark, because
+       a white veil needs more body to hold its edge over off-white content.
+       The edge and sheen channels deepen so the bar still has a visible lip. */
+    --header-glass-rgb: 255, 255, 255;
+    --header-glass-alpha: 0.56;
+    --header-glass-alpha-scrolled: 0.68;
+    --header-glass-edge-rgb: 15, 23, 42;
+    --header-glass-sheen-rgb: 255, 255, 255;
+    --header-glass-shadow-rgb: 15, 23, 42;
     --refuse: #BE123C;
     --refuse-border: rgba(var(--refuse-rgb), 0.3);
     --build: #047857;
@@ -282,21 +301,13 @@
     --shadow-glow: 0 18px 44px -22px rgba(var(--shadow-rgb), 0.2);
     --shadow-card: 0 18px 40px -24px rgba(var(--shadow-rgb), 0.16);
 
-    /* ---- cursor -------------------------------------------------------
-       The orb is now dark on a light page, so the separation halo flips to
-       white and the 18-34px blue bloom becomes a short drop-shadow.     */
-    --cursor-ring: #FFFFFF;
-    --cursor-ring-hover: #FFFFFF;
-    --cursor-core: #6D28D9;
-    --cursor-core-hover: #7C3AED;
-    --cursor-halo-rgb: 255, 255, 255;
-    --cursor-shadow: 0 0 0 2px rgba(var(--cursor-halo-rgb), 0.9),
-      0 3px 12px rgba(var(--shadow-rgb), 0.3);
-    --cursor-shadow-hover: 0 0 0 2px rgba(var(--cursor-halo-rgb), 0.9),
-      0 4px 16px rgba(var(--shadow-rgb), 0.34);
-    --cursor-shadow-pressed: 0 0 0 3px rgba(var(--cursor-halo-rgb), 0.9),
-      0 0 0 9px rgba(var(--accent-rgb), 0.18),
-      0 6px 20px rgba(var(--shadow-rgb), 0.26);
+    /* The lens body flips to a pale slate so its rim still reads over the
+       off-white mesh; the highlight stays white because it is a specular,
+       not a surface. */
+    --cursor-lens-rgb: 15, 23, 42;
+    --cursor-lens-hi-rgb: 255, 255, 255;
+    --cursor-lens-edge-rgb: 15, 23, 42;
+    --cursor-lens-sheen-rgb: 255, 255, 255;
 
     /* Darker chevron: the dark theme's #9aa8bf is only 2.44:1 on white,
        below the 3:1 bar for a non-text control indicator. Matched to
@@ -447,8 +458,8 @@ main,
   letter-spacing: 0.12em;
   line-height: 1;
   text-transform: uppercase;
-  transition: color 0.25s ease, border-color 0.25s ease,
-    background-color 0.25s ease, box-shadow 0.25s ease;
+  transition: color 0.25s var(--ease), border-color 0.25s var(--ease),
+    background-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
 }
 
 .ambient-toggle svg {
@@ -471,63 +482,170 @@ main,
   color: var(--blue);
 }
 
-/* Hidden until the JS enhancement is active. Pointer and reduced-motion
-   users retain their native cursor and the full default interaction model. */
-.cursor-orb {
+/* Hidden until the JS enhancement opts in. Coarse pointers and
+   reduced-motion visitors keep the native cursor and the full default model. */
+.cursor-lens {
   display: none;
   pointer-events: none;
   will-change: transform;
 }
 
-@media (pointer: fine) and (prefers-reduced-motion: no-preference) {
+/* Zero-sized host for #agora-reverse-fisheye. It must stay in the document
+   for the backdrop-filter reference to resolve, but never paints or hit-tests. */
+.cursor-lens-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
   body.has-custom-cursor,
   body.has-custom-cursor * {
     cursor: none !important;
   }
 
-  body.has-custom-cursor .cursor-orb {
+  /* The lens is a disc of real backdrop glass. The radial gradients supply the
+     concave profile (clear centre, denser rim) and the specular sweep; the
+     SVG pass below adds the actual refraction where the engine supports it. */
+  body.has-custom-cursor .cursor-lens {
     position: fixed;
     top: 0;
     left: 0;
     z-index: 10000 !important;
     display: block;
-    width: 14px;
-    height: 14px;
-    border: 2px solid var(--cursor-ring);
+    /* 36px is a lens, not a porthole: large enough to read as glass, small
+       enough that it does not sit across a line of body copy and tint it. */
+    width: 36px;
+    height: 36px;
+    border: 1px solid rgba(var(--cursor-lens-edge-rgb), 0.34);
     border-radius: 50%;
-    background: var(--cursor-core);
-    box-shadow: var(--cursor-shadow);
+    background:
+      radial-gradient(circle at 32% 26%, rgba(var(--cursor-lens-hi-rgb), 0.5), transparent 46%),
+      radial-gradient(circle at 50% 50%, rgba(var(--cursor-lens-rgb), 0.02) 44%, rgba(var(--cursor-lens-rgb), 0.3) 80%, rgba(var(--cursor-lens-rgb), 0.04) 100%);
+    box-shadow:
+      0 0 0 1px rgba(var(--cursor-lens-edge-rgb), 0.08),
+      inset 0 1px 1px rgba(var(--cursor-lens-sheen-rgb), 0.6),
+      inset 0 -10px 16px -8px rgba(var(--cursor-lens-rgb), 0.55),
+      0 10px 28px -12px rgba(var(--cursor-lens-rgb), 0.8);
     opacity: 0;
-    pointer-events: none;
     transform: translate3d(-100px, -100px, 0) translate(-50%, -50%);
-    transition: width 0.14s var(--ease), height 0.14s var(--ease),
-      opacity 0.12s ease, background-color 0.14s ease,
-      border-color 0.14s ease, box-shadow 0.14s ease;
+    transition: width 0.2s var(--ease), height 0.2s var(--ease),
+      opacity 0.14s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+    -webkit-backdrop-filter: blur(2px) saturate(145%);
+    backdrop-filter: blur(2px) saturate(145%);
     will-change: transform, width, height;
   }
 
-  body.has-custom-cursor .cursor-orb.is-visible {
+  /* Progressive enhancement: only engines that accept an SVG filter in
+     backdrop-filter take the displacement pass. Everything else keeps the
+     blur and radial refraction above, so the lens never disappears. */
+  @supports ((backdrop-filter: url(#agora-reverse-fisheye)) or (-webkit-backdrop-filter: url(#agora-reverse-fisheye))) {
+    body.has-custom-cursor .cursor-lens {
+      -webkit-backdrop-filter: url(#agora-reverse-fisheye) blur(2px) saturate(145%);
+      backdrop-filter: url(#agora-reverse-fisheye) blur(2px) saturate(145%);
+    }
+  }
+
+  .cursor-lens::before,
+  .cursor-lens::after {
+    content: "";
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+
+  /* Specular sweep: a convex lens catches the room light on its upper-left. */
+  .cursor-lens::before {
+    inset: 4px;
+    background:
+      radial-gradient(circle at 34% 24%, rgba(var(--cursor-lens-sheen-rgb), 0.68), transparent 40%),
+      radial-gradient(circle at 64% 78%, rgba(var(--cursor-lens-hi-rgb), 0.16), transparent 55%);
+    opacity: 0.85;
+  }
+
+  /* Reverse fish-eye: shade the inner rim like a concave bowl so the edge
+     reads as refraction rather than as a flat ring. */
+  .cursor-lens::after {
+    inset: 9%;
+    box-shadow:
+      inset 0 1px 2px rgba(var(--cursor-lens-edge-rgb), 0.35),
+      inset 0 -8px 14px rgba(var(--cursor-lens-rgb), 0.4);
+  }
+
+  body.has-custom-cursor .cursor-lens.is-visible {
     opacity: 1;
   }
 
-  /* A small solid violet/blue point is easier to track over both dark cards
-     and the photographic app captures than a translucent blob. */
-  body.has-custom-cursor .cursor-orb.is-hovering {
-    width: 20px;
-    height: 20px;
-    border-color: var(--cursor-ring-hover);
-    background: var(--cursor-core-hover);
-    box-shadow: var(--cursor-shadow-hover);
+  body.has-custom-cursor .cursor-lens.is-target {
+    width: 46px;
+    height: 46px;
+    border-color: rgba(var(--cursor-lens-edge-rgb), 0.5);
+    box-shadow:
+      0 0 0 1px rgba(var(--cursor-lens-edge-rgb), 0.1),
+      inset 0 1px 1px rgba(var(--cursor-lens-sheen-rgb), 0.66),
+      inset 0 -10px 16px -8px rgba(var(--cursor-lens-rgb), 0.54),
+      0 12px 28px -14px rgba(var(--cursor-lens-rgb), 0.78);
   }
 
-  /* Pressing/selecting expands into an unmistakable hollow ring. */
-  body.has-custom-cursor .cursor-orb.is-pressed {
-    width: 62px;
-    height: 62px;
-    border: 2px solid var(--cursor-core-hover);
-    background: transparent;
-    box-shadow: var(--cursor-shadow-pressed);
-    opacity: 1;
+  body.has-custom-cursor .cursor-lens.is-pressed {
+    width: 54px;
+    height: 54px;
+    border-color: rgba(var(--cursor-lens-edge-rgb), 0.58);
+  }
+
+  /* Local warp. JS writes --cursor-x/--cursor-y in px and the normalised
+     --cursor-nx/--cursor-ny (-1..1) on the hovered element only; the pivot
+     follows the focal point, so copy pinches around the lens instead of
+     swinging from its own centre.
+
+     Individual transform properties are used on purpose. `transform` would
+     replace the hover lift on .principle/.step/.btn, while `rotate` and
+     `scale` compose with it -- and both are compositor-friendly. */
+  body.has-custom-cursor .is-cursor-warp {
+    rotate: calc((var(--cursor-nx, 0) - var(--cursor-ny, 0)) * 0.16deg);
+    scale: 1.0015;
+    transform-origin: var(--cursor-origin-x, 50%) var(--cursor-origin-y, 50%);
+    text-shadow:
+      calc(var(--cursor-nx, 0) * 0.32px) calc(var(--cursor-ny, 0) * 0.32px) 0 rgba(var(--violet-soft-rgb), 0.16),
+      calc(var(--cursor-nx, 0) * -0.26px) calc(var(--cursor-ny, 0) * -0.26px) 0 rgba(var(--blue-rgb), 0.1);
+    transition: rotate 0.24s var(--ease), scale 0.24s var(--ease),
+      text-shadow 0.24s var(--ease);
+    will-change: rotate, scale;
+  }
+
+  /* Links, buttons and the controls keep their exact geometry under the lens.
+     Only the chromatic edge moves, so a hovered target cannot appear to shift
+     away from the point the visitor is aiming at. */
+  body.has-custom-cursor .is-cursor-glint {
+    text-shadow:
+      calc(var(--cursor-nx, 0) * 0.3px) calc(var(--cursor-ny, 0) * 0.3px) 0 rgba(var(--violet-soft-rgb), 0.18),
+      calc(var(--cursor-nx, 0) * -0.24px) calc(var(--cursor-ny, 0) * -0.24px) 0 rgba(var(--blue-rgb), 0.12);
+    transition: text-shadow 0.24s var(--ease);
+  }
+
+  /* A hair of tracking around the focal point. Set once on enter, not per
+     frame: animating a layout property on every pointermove is the thrash
+     this guard exists to avoid. */
+  body.has-custom-cursor h1.is-cursor-warp,
+  body.has-custom-cursor h2.is-cursor-warp,
+  body.has-custom-cursor h3.is-cursor-warp,
+  body.has-custom-cursor p.is-cursor-warp {
+    letter-spacing: 0.005em;
+  }
+}
+
+/* Belt and braces for touchscreens and motion-sensitive visitors: the JS
+   never opts in, and this also clears a stale class if the OS flips. */
+@media (hover: none), (pointer: coarse), (prefers-reduced-motion: reduce) {
+  body.has-custom-cursor,
+  body.has-custom-cursor * {
+    cursor: auto !important;
+  }
+
+  .cursor-lens {
+    display: none !important;
   }
 }
 
@@ -815,21 +933,56 @@ h1, h2, h3 {
 }
 
 /* ---------- 5. Header / nav ---------- */
+/* True glass: the animated mesh and the first pixels of body copy stay
+   visible through the bar instead of being painted over by an opaque strip.
+   20px is the point where scrolling text turns into soft colour without
+   smearing the nav labels themselves. */
 .site-header {
   position: fixed;
   inset-inline: 0;
   top: 0;
   z-index: 60;
-  background: rgba(var(--bg-rgb), 0.72);
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
-  border-bottom: 1px solid transparent;
-  transition: border-color 0.3s ease, background-color 0.3s ease;
+  /* The nav inside is also --header-h tall. Without an explicit height on the
+     bar itself, its 1px border sat OUTSIDE that box and the site header
+     measured 69px while the credits header measured 68px -- a one-pixel jump
+     on every PJAX swap. With border-box, both are exactly --header-h. */
+  height: var(--header-h);
+  background: rgba(var(--header-glass-rgb), var(--header-glass-alpha));
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
+  border-bottom: 1px solid rgba(var(--header-glass-edge-rgb), 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(var(--header-glass-sheen-rgb), 0.18),
+    inset 0 -1px 0 rgba(var(--header-glass-edge-rgb), 0.05),
+    0 18px 44px -34px rgba(var(--header-glass-shadow-rgb), 0.65);
+  transition: border-color 0.3s var(--ease), background-color 0.3s var(--ease),
+    box-shadow 0.3s var(--ease);
+}
+
+/* A single specular hairline across the top edge: the highlight that makes a
+   glass pane read as a pane rather than as a tinted rectangle. */
+.site-header::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(var(--header-glass-sheen-rgb), 0.38) 28%,
+    rgba(var(--header-glass-sheen-rgb), 0.2) 72%,
+    transparent
+  );
+  pointer-events: none;
 }
 
 .site-header.is-scrolled {
-  border-bottom-color: var(--border);
-  background: rgba(var(--bg-rgb), 0.88);
+  border-bottom-color: rgba(var(--header-glass-edge-rgb), 0.22);
+  background: rgba(var(--header-glass-rgb), var(--header-glass-alpha-scrolled));
+  box-shadow:
+    inset 0 1px 0 rgba(var(--header-glass-sheen-rgb), 0.24),
+    inset 0 -1px 0 rgba(var(--header-glass-edge-rgb), 0.08),
+    0 22px 50px -32px rgba(var(--header-glass-shadow-rgb), 0.78);
 }
 
 .nav {
@@ -837,7 +990,10 @@ h1, h2, h3 {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  height: var(--header-h);
+  /* Fill the header's content box rather than re-declaring its height. The bar
+     is exactly --header-h including its border; a hard 68px nav inside a 67px
+     content box overflowed by the width of that border. */
+  height: 100%;
 }
 
 .nav__logo {
@@ -866,7 +1022,7 @@ h1, h2, h3 {
   line-height: 1.15;
   color: var(--text);
   white-space: nowrap;
-  transition: color 0.25s ease;
+  transition: color 0.25s var(--ease);
 }
 
 .nav__logo-word {
@@ -904,7 +1060,7 @@ h1, h2, h3 {
   font-size: 1.18em;
   line-height: 0.75;
   filter: drop-shadow(0 0 7px rgba(var(--glow-rgb), 0.38));
-  transition: background-position 0.35s var(--ease), filter 0.25s ease;
+  transition: background-position 0.35s var(--ease), filter 0.25s var(--ease);
 }
 
 .nav__logo:hover .nav__logo-name,
@@ -959,7 +1115,7 @@ h1, h2, h3 {
   color: var(--text-dim);
   padding: 0.4rem 0;
   position: relative;
-  transition: color 0.2s ease;
+  transition: color 0.2s var(--ease);
 }
 
 .nav__link::after {
@@ -1024,7 +1180,7 @@ h1, h2, h3 {
   height: 2px;
   border-radius: 2px;
   background: var(--text);
-  transition: transform 0.3s var(--ease), opacity 0.2s ease;
+  transition: transform 0.3s var(--ease), opacity 0.2s var(--ease);
 }
 
 .nav__toggle.is-open .nav__toggle-bar:first-child {
@@ -1054,7 +1210,7 @@ h1, h2, h3 {
   transform: translateY(-12px);
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 0.25s ease, transform 0.25s var(--ease), visibility 0.25s;
+  transition: opacity 0.25s var(--ease), transform 0.25s var(--ease), visibility 0.25s;
 }
 
 .mobile-menu.is-open {
@@ -1459,7 +1615,7 @@ h1, h2, h3 {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: linear-gradient(160deg, var(--surface), rgba(var(--surface-rgb), 0.4));
-  transition: transform 0.35s var(--ease), border-color 0.35s ease, box-shadow 0.35s ease;
+  transition: transform 0.35s var(--ease), border-color 0.35s var(--ease), box-shadow 0.35s var(--ease);
   overflow: hidden;
 }
 
@@ -1469,7 +1625,7 @@ h1, h2, h3 {
   inset: 0;
   background: radial-gradient(22rem 12rem at 85% -10%, rgba(var(--accent-rgb), 0.09), transparent 60%);
   opacity: 0;
-  transition: opacity 0.4s ease;
+  transition: opacity 0.4s var(--ease);
 }
 
 .principle:hover {
@@ -1819,7 +1975,7 @@ h1, h2, h3 {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
-  transition: transform 0.35s var(--ease), border-color 0.35s ease;
+  transition: transform 0.35s var(--ease), border-color 0.35s var(--ease);
 }
 
 .step:hover {
@@ -2462,7 +2618,7 @@ h1, h2, h3 {
   border: 1px solid var(--border);
   background: var(--field-bg);
   color: var(--text);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
 
 .field textarea {
@@ -2622,7 +2778,7 @@ h1, h2, h3 {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  transition: color 0.3s ease;
+  transition: color 0.3s var(--ease);
 }
 
 .signal__progress-n {
@@ -2633,7 +2789,7 @@ h1, h2, h3 {
   border-radius: 50%;
   border: 1px solid var(--border-strong);
   font-size: 0.6rem;
-  transition: border-color 0.3s ease, background-color 0.3s ease, color 0.3s ease;
+  transition: border-color 0.3s var(--ease), background-color 0.3s var(--ease), color 0.3s var(--ease);
 }
 
 .signal__progress li.is-current {
@@ -2714,7 +2870,7 @@ h1, h2, h3 {
   color: var(--accent);
   cursor: pointer;
   border-bottom: 1px solid rgba(var(--accent-rgb), 0.35);
-  transition: color 0.2s ease, border-color 0.2s ease;
+  transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
 }
 
 .signal__edit:hover,
@@ -2773,7 +2929,7 @@ h1, h2, h3 {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: linear-gradient(160deg, var(--surface), rgba(var(--surface-rgb), 0.4));
-  transition: transform 0.35s var(--ease), border-color 0.35s ease, box-shadow 0.35s ease;
+  transition: transform 0.35s var(--ease), border-color 0.35s var(--ease), box-shadow 0.35s var(--ease);
   overflow: hidden;
 }
 
@@ -2783,7 +2939,7 @@ h1, h2, h3 {
   inset: 0;
   background: radial-gradient(22rem 12rem at 85% -10%, rgba(var(--accent-rgb), 0.09), transparent 60%);
   opacity: 0;
-  transition: opacity 0.4s ease;
+  transition: opacity 0.4s var(--ease);
   pointer-events: none;
 }
 
@@ -2946,6 +3102,15 @@ h1, h2, h3 {
   touch-action: none;
 }
 
+/* Identical glass to .site-header, not a lookalike.
+
+   This header used to paint its own gradient, its own 14px blur and a 0.055
+   overlay border, so navigating between credits and any other page changed the
+   bar's opacity, its edge contrast and the width of the line under it. It now
+   consumes the same --header-glass-* tokens and the same declarations as the
+   site header: same flat glass fill, same 20px saturating blur, same 1px edge,
+   same shadow stack, same specular hairline. Only the internal grid differs,
+   because this page centres a title instead of a nav. */
 .credits-screen-header {
   position: fixed;
   inset: 0 0 auto;
@@ -2956,10 +3121,31 @@ h1, h2, h3 {
   width: 100%;
   height: var(--header-h);
   padding: 0 clamp(1rem, 3vw, 2.5rem);
-  border-bottom: 1px solid rgba(var(--overlay-rgb), 0.055);
-  background: linear-gradient(180deg, rgba(var(--bg-rgb), 0.72), rgba(var(--bg-rgb), 0.16));
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
+  background: rgba(var(--header-glass-rgb), var(--header-glass-alpha));
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
+  border-bottom: 1px solid rgba(var(--header-glass-edge-rgb), 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(var(--header-glass-sheen-rgb), 0.18),
+    inset 0 -1px 0 rgba(var(--header-glass-edge-rgb), 0.05),
+    0 18px 44px -34px rgba(var(--header-glass-shadow-rgb), 0.65);
+  transition: border-color 0.3s var(--ease), background-color 0.3s var(--ease),
+    box-shadow 0.3s var(--ease);
+  pointer-events: none;
+}
+
+.credits-screen-header::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(var(--header-glass-sheen-rgb), 0.38) 28%,
+    rgba(var(--header-glass-sheen-rgb), 0.2) 72%,
+    transparent
+  );
   pointer-events: none;
 }
 
@@ -3009,7 +3195,7 @@ h1, h2, h3 {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   line-height: 1;
-  transition: color 0.2s ease;
+  transition: color 0.2s var(--ease);
 }
 
 .credits-screen-exit:hover,
@@ -3207,7 +3393,7 @@ h1, h2, h3 {
   inset: 0;
   transform: rotate(var(--segment-angle));
   transform-origin: 50% 50%;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.2s var(--ease);
 }
 
 /* Positive top-wheel rotation carries member 1, then member 2, into the
@@ -3272,7 +3458,7 @@ h1, h2, h3 {
   opacity: var(--segment-opacity);
   transform: translate(-50%, -50%) rotate(calc(0deg - var(--segment-angle) - var(--disc-rotation, 0deg))) scale(var(--segment-scale));
   transform-origin: center;
-  transition: opacity 0.18s ease, filter 0.18s ease;
+  transition: opacity 0.18s var(--ease), filter 0.18s var(--ease);
   will-change: transform, opacity;
 }
 
@@ -3392,7 +3578,7 @@ h1, h2, h3 {
   opacity: 0.82;
   transform: translate(-50%, 0) rotate(calc(0deg - var(--segment-angle, 0deg) - var(--disc-rotation, 0deg) + var(--tag-swing-angle, 0deg)));
   transform-origin: 50% 0;
-  transition: opacity 0.22s ease;
+  transition: opacity 0.22s var(--ease);
   will-change: transform;
 }
 
@@ -3439,13 +3625,17 @@ h1, h2, h3 {
 .rotary-sign {
   transform: scale(var(--tag-scale, 0.76));
   transform-origin: 50% 0;
-  transition: transform 0.22s ease;
+  transition: transform 0.22s var(--ease);
 }
 
 .rotary-segment__content--profile {
   display: grid;
   justify-items: center;
   gap: clamp(0.9rem, calc(var(--rotary-disc-size) * 0.015), 1.5rem);
+  /* The name plate is the last child and sits at the card's bottom edge. This
+     reserved strip keeps the bio clear of it without a second absolutely
+     positioned element taking part in the card's height. */
+  padding-bottom: 2.65rem;
   /* Its own arm: see .rotary-segment__content. Width floored at 200px so the
      110px avatar and its caption always fit -- the review's bare min(17.5vw,
      260px) is 68px on a 390px phone, narrower than the avatar it contains. */
@@ -3524,33 +3714,31 @@ h1, h2, h3 {
   line-height: 1.55;
 }
 
-/* Each profile segment owns a static name plate at its local outer rim.
-   The article rotates with the sector; the formula below subtracts that
-   sector's base angle and adds the JS-supplied inverse wheel rotation. */
+/* The creator's name plate belongs to the profile card, not to the rim.
+
+   It used to orbit the bottom wheel as an independent label: at 900x1200 it
+   floated 250px away from the portrait it named, and on a phone its orbit put
+   it straight through the status bar. Because it is now a child of the card it
+   rotates and settles with it, inherits the card's counter-rotation, and always
+   appears in the card's own layout zone -- the plate sits in the strip reserved
+   by padding-bottom on the profile block. Only the emphasis is still driven by
+   JS (the .is-active class); there is no second rotation to keep in sync. */
 .rotary-name-tag {
   position: absolute;
-  top: 50%;
-  left: 96%;
+  left: 50%;
+  bottom: 0;
   z-index: 8;
+  max-width: 100%;
+  padding-inline: 12px;
+  font-size: clamp(0.6rem, calc(var(--rotary-disc-size) * 0.0092), 0.8rem);
   opacity: 0.82;
-  transform: translate(-50%, -50%) rotate(calc(0deg - var(--segment-angle, 0deg) + var(--tag-counter-rotation, 0deg)));
+  transform: translateX(-50%);
   transform-origin: 50% 50%;
-  transition: opacity 0.22s ease;
-  will-change: transform;
+  transition: opacity 0.22s var(--ease);
 }
 
 .rotary-name-tag.is-active {
   opacity: 1;
-}
-
-.rotary-name-tag::after {
-  content: "";
-  position: absolute;
-  right: -2.2rem;
-  top: 50%;
-  width: 2.2rem;
-  height: 1px;
-  background: linear-gradient(90deg, var(--blue), transparent);
 }
 
 .rotary-name-tag__line {
@@ -3573,6 +3761,13 @@ h1, h2, h3 {
   align-items: center;
   gap: 1.1rem;
   min-height: 2.8rem;
+  /* A shrink-to-fit fixed element sizes itself against the space from its
+     left:50% anchor to the right edge, so at 1024px the long colophon squeezed
+     the hint and the counter to 8px wide and wrapped them one letter per line:
+     a 258px-tall bar straight through the profile card. The bar now keeps its
+     natural width up to the viewport gutter, and its three children never
+     break. */
+  max-width: calc(100vw - 2rem);
   padding: 0.7rem 1rem;
   border: 1px solid rgba(var(--overlay-rgb), 0.08);
   border-radius: 9999px;
@@ -3589,12 +3784,14 @@ h1, h2, h3 {
   font-size: clamp(0.68rem, 1vw, 0.78rem);
   letter-spacing: 0.15em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .credits-rotary-status__count {
   color: var(--text-dim);
   font-size: clamp(0.66rem, 0.95vw, 0.76rem);
   letter-spacing: 0.12em;
+  white-space: nowrap;
 }
 
 /* The bottom-bar colophon: same slot the contact link occupied, so it inherits
@@ -3616,7 +3813,7 @@ h1, h2, h3 {
   opacity: 1;
   pointer-events: none;
   transform: translateX(-50%);
-  transition: opacity 0.45s ease, visibility 0.45s ease;
+  transition: opacity 0.45s var(--ease), visibility 0.45s var(--ease);
 }
 
 .credits-scroll-affordance.is-hidden {
@@ -3688,10 +3885,11 @@ h1, h2, h3 {
      137% arm to reach past it. Both breakpoints now share the base -44% inset,
      so the wheel is 3.6x more present on a phone and the arm can be shorter. */
 
+  /* The height comes from --header-h, exactly as it does on every other page.
+     A hardcoded 58px here fought the token at the 768px breakpoint (62px) and
+     made the credits bar 4px shorter than the site header during a PJAX swap. */
   .credits-screen-header {
-
     grid-template-columns: 1fr auto;
-    height: 58px;
   }
 
   .credits-screen-header h1 {
@@ -3718,12 +3916,23 @@ h1, h2, h3 {
     padding: 0.4rem 0.2rem;
   }
 
-  /* Re-solved for the shared -44% hub inset. The arm is much shorter than the
-     old 137% because the hub no longer sits off-screen, but it is still longer
-     than desktop's: a phone's blocks are a larger fraction of its disc. */
+  /* Re-solved against the boxes that actually render, not the 168px model the
+     old suite used. The paragraph is still 230px wide, and the role sign hangs
+     from the upper-left rim, so the description has to sit below the sign and
+     the profile card has to sit below the description on the 16:9 phones. The
+     arm that satisfies every mobile viewport at once is 110/74 for the copy and
+     108/78 for the card; no short viewport loses a block to the status bar. */
   .rotary-segment__content {
-    top: 85.5%;
-    left: 108.5%;
+    top: 74%;
+    left: 110%;
+  }
+
+  /* The 24vh floor made an invisible 200px-tall box around three lines of copy.
+     That box -- not the text -- was what collided with the profile card on a
+     phone. The copy itself is only ~70px tall, so the floor is removed here and
+     the block is measured by what a visitor can see. */
+  .rotary-segment__content--contribution {
+    min-height: 0;
   }
 
   /* No width override here on purpose. The base rule is already viewport-relative
@@ -3736,9 +3945,10 @@ h1, h2, h3 {
   }
 
   .rotary-segment__content--profile {
-    top: 84.5%;
-    left: 103.5%;
+    top: 78%;
+    left: 108%;
     gap: 0.45rem;
+    padding-bottom: 2.25rem;
   }
 
   .rotary-profile__photo-frame {
@@ -3766,30 +3976,29 @@ h1, h2, h3 {
     text-overflow: ellipsis;
   }
 
-  /* Pull rim labels inward on phones so rotated boxes have a safe margin
-     from both viewport edges. */
-  .rotary-name-tag {
-    left: 84%;
-  }
-
-  .rotary-name-tag::after {
-    right: -1rem;
-    width: 1rem;
-  }
-
   /* One rule for all three signs: 41.2% of the disc out from the hub, which is
      the radius the "Developer" sign already hung at here. */
   .rotary-sign-hanger {
     left: 91.2%;
   }
 
+  /* A 40px cord on a phone dropped the sign 14px further down than it needed to
+     go and ate the gap above the description. Scale it with the disc, with a
+     24px floor so the cord still reads as a cord. */
+  .rotary-sign-hanger__cord {
+    height: clamp(1.5rem, calc(var(--rotary-disc-size) * 0.06), 5rem);
+  }
+
   .credits-rotary-status {
     left: 0.75rem;
     bottom: max(4.35rem, calc(env(safe-area-inset-bottom) + 3.65rem));
-    width: min(13rem, calc(100vw - 5.25rem));
+    width: min(17rem, calc(100vw - 3rem));
     min-height: 2.35rem;
     display: grid;
-    grid-template-columns: 1fr auto;
+    /* The counter takes its natural width; the colophon gets the rest and is
+       allowed to wrap. `1fr auto` let the colophon's max-content width size the
+       track and push both columns outside the pill. */
+    grid-template-columns: auto minmax(0, 1fr);
     gap: 0.25rem 0.55rem;
     padding: 0.5rem 0.7rem;
     transform: none;
@@ -3911,7 +4120,7 @@ h1, h2, h3 {
   padding: 0.4rem 0;
   color: var(--text-dim);
   font-size: 0.92rem;
-  transition: color 0.2s ease, transform 0.25s var(--ease);
+  transition: color 0.2s var(--ease), transform 0.25s var(--ease);
 }
 
 .site-footer nav a:hover {
@@ -3928,7 +4137,7 @@ h1, h2, h3 {
 .site-footer__contact a {
   color: var(--text);
   border-bottom: 1px solid var(--border-strong);
-  transition: color 0.2s ease, border-color 0.2s ease;
+  transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
 }
 
 .site-footer__contact a:hover {
@@ -3972,7 +4181,7 @@ h1, h2, h3 {
 [data-reveal] {
   opacity: 0;
   transform: translateY(22px);
-  transition: opacity 0.7s ease, transform 0.7s var(--ease);
+  transition: opacity 0.7s var(--ease), transform 0.7s var(--ease);
 }
 
 [data-reveal].is-visible {
@@ -4420,7 +4629,7 @@ h1, h2, h3 {
 
 /* Keep the new legal exit operable without intercepting wheel interactions. */
 .credits-screen-colophon a { pointer-events: auto; display: inline-block; padding-block: .3rem; }
-@media (max-width: 680px) {
+@media (max-width: 768px) {
   .credits-screen-colophon { white-space: normal; }
   .credits-screen-colophon a { display: block; margin-left: 0; }
 }

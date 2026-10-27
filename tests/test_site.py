@@ -555,8 +555,11 @@ class LaunchContract(unittest.TestCase):
         )
         self.assertIn("data-rotary-name-tag=\"1\"", html)
         self.assertIn("data-rotary-name-tag=\"2\"", html)
-        self.assertIn("--tag-counter-rotation", (ROOT / "app.js").read_text())
-        self.assertIn("nameTags.length !== bottomSegments.length", (ROOT / "app.js").read_text())
+        app = (ROOT / "app.js").read_text()
+        self.assertNotIn("--tag-counter-rotation", app,
+                         "the plate rides with its card, so it needs no second rotation")
+        self.assertIn("tag.classList.toggle('is-active'", app)
+        self.assertIn("nameTags.length !== bottomSegments.length", app)
         self.assertIn("padding: 8px 16px", self.css)
         self.assertIn(".rotary-sign,\n.rotary-name-tag", self.css)
         self.assertIn("@media (max-width: 768px)", self.css)
@@ -2421,8 +2424,12 @@ class CreditsRotaryGeometry(unittest.TestCase):
         self.assertEqual(self.arm("profile"), (76.5, 64.0))
         self.assertNotEqual(self.arm("contribution"), self.arm("profile"),
                             "the arms must differ, or one box is unreachable")
-        self.assertEqual(self.arm("contribution", mobile=True), (108.5, 85.5))
-        self.assertEqual(self.arm("profile", mobile=True), (103.5, 84.5))
+        # Re-solved against the 230x46 copy block and the 200x~142 profile card
+        # that actually render on a phone, plus the 36px name-plate strip the
+        # card now reserves. 110/74 puts the copy below the hanging sign;
+        # 108/78 puts the card below the copy on the 16:9 phones.
+        self.assertEqual(self.arm("contribution", mobile=True), (110.0, 74.0))
+        self.assertEqual(self.arm("profile", mobile=True), (108.0, 78.0))
 
     def test_the_mobile_width_overrides_are_gone(self):
         """The base widths are viewport-relative with a readable floor, so a
@@ -2452,12 +2459,34 @@ class CreditsRotaryGeometry(unittest.TestCase):
     # --- 4. the solved placement, re-derived -----------------------------
     def _metrics(self, w, h, d, mobile):
         """Block sizes modelled from the authored clamp() chains, with the text
-        heights rounded UP so a passing assertion still has margin."""
+        heights rounded UP so a passing assertion still has margin.
+
+        Mobile is no longer the 168px box the old suite assumed. The blocks
+        really render 230px wide (the paragraph) and 200px wide (the profile
+        card), the copy is three or four lines of 10.56px/1.45 text, and the
+        card carries a 2.25rem strip at its bottom edge for the name plate.
+        Measuring what renders is the whole reason the arms moved: a model that
+        was 62px narrower than the real paragraph "proved" a collision-free
+        layout that overlapped on a phone.
+        """
         if mobile:
-            cw = min(168, 0.32 * w)
-            ch = math.ceil(152 / max(1, cw / 5.4)) * 17.6 + 8
-            pw = min(168, 0.32 * w)
-            ph = max(70, min(0.15 * d, 100)) + 12 + math.ceil(96 / max(1, pw / 5.2)) * 16.0
+            # .rotary-segment__content: width min(max(0.23*100vw, 230px), 340px)
+            cw = min(max(0.23 * w, 230), 340)
+            # .rotary-disc__contributions: clamp(0.66rem, 0.014*d, 0.88rem)/1.45
+            cfs = max(0.66 * self.REM, min(0.014 * d, 0.88 * self.REM))
+            clines = math.ceil(152 / max(1, cw / (cfs * 0.505)))
+            ch = clines * cfs * 1.45
+            # .rotary-segment__content--profile: width min(max(0.175*100vw, 200px), 260px)
+            pw = min(max(0.175 * w, 200), 260)
+            # .rotary-profile__photo-frame: clamp(70px, 0.15*d, 100px)
+            frame = min(max(70, 0.15 * d), 100)
+            # .rotary-segment__bio: clamp(0.64rem, 0.01*d, 0.82rem)/1.4
+            bfs = max(0.64 * self.REM, min(0.01 * d, 0.82 * self.REM))
+            blines = math.ceil(96 / max(1, pw / (bfs * 0.505)))
+            ph = (frame
+                  + 0.45 * self.REM                     # mobile grid gap
+                  + blines * bfs * 1.4
+                  + 2.25 * self.REM)                    # reserved name-plate strip
         else:
             cw = min(480, 0.37 * d)
             fs = max(15.2, min(0.018 * d, 21.6))
@@ -2550,7 +2579,8 @@ class CreditsRotaryGeometry(unittest.TestCase):
         has to satisfy the shipped safe-area, rim-label and non-overlap
         contracts, so it is the closest the mechanism can legally get -- not a
         round number chosen to make the test pass. Worst case: 122px desktop,
-        96px on a phone.
+        74px on a phone (the mobile solve against the real 230/200 boxes, not
+        the old 168px model).
         """
         def requested(w, h, mob):
             pad_l = min(max(24, 0.028 * w), 48)
@@ -2561,7 +2591,7 @@ class CreditsRotaryGeometry(unittest.TestCase):
             return ((pad_l + cw / 2, top + 0.12 * h),          # description
                     (w - pad_r - pw / 2, 0.62 * h))            # profile
 
-        tolerance = {False: 130.0, True: 100.0}
+        tolerance = {False: 130.0, True: 80.0}
         for mob, viewports in ((False, self.DESKTOP), (True, self.MOBILE)):
             for w, h in viewports:
                 d = self.disc_diameter(w, h, mob)
@@ -2625,7 +2655,11 @@ class CreditsRotaryGeometry(unittest.TestCase):
         self.fail(f"no {selector} rule declares {prop}")
 
     def orbit_radius(self, kind, mobile):
-        selector = ".rotary-sign-hanger {" if kind == "sign" else ".rotary-name-tag {"
+        """Distance from the hub, as a percentage of the disc, at which the rim
+        label hangs. Only the role sign still orbits: the name plate is a child
+        of the profile card and is covered by a structural test instead."""
+        selector = ".rotary-sign-hanger {"
+        self.assertEqual(kind, "sign")
         if mobile:
             try:
                 body, _ = self.block(selector, self.mobile_offset())
@@ -2651,7 +2685,19 @@ class CreditsRotaryGeometry(unittest.TestCase):
                 self.resolve_size(self.decl(body, "height"), d, vw))
 
     def cord_length(self, mobile, d):
+        """The cord's rendered length. The narrow-screen block shortens it to
+        clamp(1.5rem, 0.06*d, 5rem); reading only the base rule would model a
+        40px cord on a phone that actually hangs 24px, and hide a sign that
+        reaches back into the copy."""
         body, _ = self.block(".rotary-sign-hanger__cord {")
+        if mobile:
+            try:
+                override, _ = self.block(".rotary-sign-hanger__cord {",
+                                         self.mobile_offset())
+                if override:
+                    body = override
+            except ValueError:
+                pass
         return self.resolve_size(self.decl(body, "height"), d, 0)
 
     def ray_point(self, w, h, mobile, which, theta, radius_pct):
@@ -2728,44 +2774,72 @@ class CreditsRotaryGeometry(unittest.TestCase):
                 self.assertGreaterEqual(fraction, floor,
                                         f"only {fraction:.1%} of the wheel is on screen")
 
-    def test_detail_blocks_never_collide_with_their_rim_labels(self):
-        """The hanging role sign and the name plate sit on the same ray as their
-        own detail block -- and the sign hangs straight DOWN in screen space while
-        the ray points wherever its sector does, so on an upward-pointing ray the
-        sign swings back toward the copy.
+    def test_detail_blocks_never_collide_with_their_rim_label(self):
+        """The hanging role sign sits on the same ray as the contribution copy --
+        and the sign hangs straight DOWN in screen space while the ray points
+        wherever its sector does, so on an upward-pointing ray the sign swings
+        back toward the copy.
 
-        All three landing rays per wheel are checked, not just the settled one:
-        A_i -/+ 120m always reduces to {40,160,280} and {220,340,100}, so the set
-        of directions is fixed no matter which contributor is showing. The two
-        non-settled blocks are measured at the 0.6 scale they really render at."""
-        rays = {"top": (40, 160, 280), "bottom": (220, 340, 100)}
+        All three landing rays for the upper wheel are checked, not just the
+        settled one: A_i -/+ 120m always reduces to {40,160,280}, so the set of
+        directions is fixed no matter which contributor is showing. The two
+        non-settled blocks are measured at the 0.6 scale they really render at.
+
+        The profile wheel no longer has an orbiting label to collide with: its
+        name plate is a child of the card (asserted structurally below), so
+        checking it as a free-floating box would be modelling a layout that no
+        longer exists.
+        """
+        rays = (40, 160, 280)
         for mobile, viewports in ((False, self.DESKTOP), (True, self.MOBILE)):
-            # Each block now carries its own arm, so each wheel is measured at
-            # the arm that actually places ITS block.
-            arms = {"top": self.arm("contribution", mobile),
-                    "bottom": self.arm("profile", mobile)}
+            left, top = self.arm("contribution", mobile)
             for w, h in viewports:
                 d = self.disc_diameter(w, h, mobile)
-                (cw, chh), (pw, phh) = self._metrics(w, h, d, mobile)
+                (cw, chh), _ = self._metrics(w, h, d, mobile)
                 bw_l, bh_l = self.label_box(mobile, d, w)
                 cord = self.cord_length(mobile, d)
-                for which in ("top", "bottom"):
-                    left, top = arms[which]
-                    r_orbit = self.orbit_radius("sign" if which == "top" else "name", mobile)
-                    size = (cw, chh) if which == "top" else (pw, phh)
-                    for theta in rays[which]:
-                        # Only the settled block renders at full size.
-                        scale = 1.0 if theta in (40, 220) else 0.6
-                        cx, cy = self.content_centre(w, h, mobile, which, theta, left, top)
-                        cbox = self.box(cx, cy, size[0] * scale, size[1] * scale)
-                        lx, ly = self.ray_point(w, h, mobile, which, theta, r_orbit)
-                        if which == "top":
-                            ly += cord + bh_l / 2      # the sign hangs straight down
-                        lbox = self.box(lx, ly, bw_l, bh_l)
-                        with self.subTest(viewport=f"{w}x{h}", mobile=mobile,
-                                          wheel=which, ray=theta):
-                            self.assertFalse(self.hits(cbox, lbox),
-                                             "the copy collides with its own rim label")
+                r_orbit = self.orbit_radius("sign", mobile)
+                for theta in rays:
+                    # Only the settled block renders at full size.
+                    scale = 1.0 if theta == 40 else 0.6
+                    cx, cy = self.content_centre(w, h, mobile, "top", theta, left, top)
+                    cbox = self.box(cx, cy, cw * scale, chh * scale)
+                    lx, ly = self.ray_point(w, h, mobile, "top", theta, r_orbit)
+                    ly += cord + bh_l / 2      # the sign hangs straight down
+                    lbox = self.box(lx, ly, bw_l, bh_l)
+                    with self.subTest(viewport=f"{w}x{h}", mobile=mobile, ray=theta):
+                        self.assertFalse(self.hits(cbox, lbox),
+                                         "the copy collides with its own rim label")
+
+    def test_each_name_plate_lives_inside_its_profile_card(self):
+        """The plate used to orbit the bottom wheel as an independent label. At
+        900x1200 it floated 250px from the portrait it named, and on a phone its
+        orbit put it through the status bar. It is now the last child of the
+        profile card, so it inherits the card's rotation and sits in the strip
+        the card reserves for it. That is a structural contract, not a
+        coordinate: if the markup moves back out, no arm can save the layout.
+        """
+        for i in range(3):
+            article = re.search(
+                r'<article[^>]*class="[^"]*rotary-segment--profile[^"]*"[^>]*'
+                r'data-rotary-segment="%d"[^>]*>([\s\S]*?)</article>' % i,
+                self.html)
+            self.assertIsNotNone(article, f"profile segment {i} vanished")
+            body = article.group(1)
+            content = re.search(
+                r'<div class="rotary-segment__content rotary-segment__content--profile">'
+                r'([\s\S]*?)\n            </div>', body)
+            self.assertIsNotNone(content, f"profile card {i} has no content wrapper")
+            self.assertIn(f'data-rotary-name-tag="{i}"', content.group(1),
+                          f"the name plate for profile {i} is not inside its card")
+            for other in range(3):
+                if other != i:
+                    self.assertNotIn(f'data-rotary-name-tag="{other}"', content.group(1),
+                                     "a name plate crossed into another profile card")
+        self.assertNotIn("--tag-counter-rotation", self.app,
+                         "the plate is no longer counter-rotated independently")
+        self.assertIn("tag.classList.toggle('is-active'", self.app,
+                      "only the emphasis is still JS-driven")
 
     def test_the_two_detail_blocks_never_overlap_each_other(self):
         for mobile, viewports in ((False, self.DESKTOP), (True, self.MOBILE)):
@@ -4833,7 +4907,32 @@ class CreditsChrome(unittest.TestCase):
         self.assertIn("data-rotary-count", self.status)
         self.assertIn("data-rotary-total", self.status)
 
-    def test_the_removed_contact_link_left_no_dead_css(self):
+    def test_the_status_bar_cannot_be_squeezed_into_a_vertical_column(self):
+        """At 1024x900 the fixed, shrink-to-fit bar sized itself against the
+        space from its left:50% anchor to the right edge. The long colophon won
+        that fight, the hint and the counter were squeezed to 8px wide and
+        wrapped one character per line -- a 258px-tall pill straight through the
+        profile card. The bar now caps at the viewport gutter, its labels never
+        break, and on a phone the counter keeps its natural width while the
+        colophon gets the remaining space instead of sizing the track.
+        """
+        base = re.search(r"\.credits-rotary-status \{([^}]*)\}",
+                         self.css_code).group(1)
+        self.assertIn("max-width: calc(100vw - 2rem);", base)
+        self.assertIn("display: flex;", base)
+        for part in ("hint", "count"):
+            rule = re.search(
+                r"\.credits-rotary-status__" + part + r" \{([^}]*)\}",
+                self.css_code).group(1)
+            with self.subTest(part=part):
+                self.assertIn("white-space: nowrap;", rule,
+                              f"the {part} can still wrap one letter per line")
+        mobile = self.css_code.split("@media (max-width: 768px)", 1)[-1]
+        rule = mobile.split(".credits-rotary-status {", 1)[1].split("}", 1)[0]
+        self.assertIn("grid-template-columns: auto minmax(0, 1fr);", rule)
+        self.assertIn("width: min(17rem, calc(100vw - 3rem));", rule)
+
+
         """Dead CSS is not harmless: `.credits-screen-contact` still had a hover rule
         and a mobile override after the element was gone, and the mobile override was
         retargeted rather than deleted because the colophon took its slot. A rule
@@ -4888,6 +4987,203 @@ class CreditsChrome(unittest.TestCase):
                                 "the only way off the credits screen is unreadable on a phone")
         self.assertNotIn(".credits-screen-exit span", self.css_code,
                          "styling survives for an arrow element that was deleted")
+
+
+class HeaderGlassParity(unittest.TestCase):
+    """The credits bar must be the SAME glass as every other page's header.
+
+    It used to be a lookalike: its own gradient, its own 14px blur, a 0.055
+    overlay border and a hardcoded 58px height on phones. Navigating between
+    credits and any other page therefore changed the bar's opacity, the weight
+    of its bottom edge and, at 768px, its height by 4px. These tests compare the
+    declarations themselves, not the rendered result, so a future "small tweak"
+    to either bar fails here instead of only being visible during a PJAX swap.
+    """
+
+    GLASS = ("background", "-webkit-backdrop-filter", "backdrop-filter",
+             "border-bottom", "box-shadow")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.css = _strip_css_comments((ROOT / "style.css").read_text())
+
+    def rule(self, selector, after=0):
+        start = self.css.index(selector, after)
+        brace = self.css.index("{", start)
+        return self.css[brace + 1:self.css.index("}", brace)]
+
+    @staticmethod
+    def decl(body, prop):
+        match = re.search(r"(?:^|[;\s])" + re.escape(prop) + r":\s*([^;]+);", body)
+        return " ".join(match.group(1).split()) if match else None
+
+    def glass(self, selector):
+        body = self.rule(selector)
+        return {prop: self.decl(body, prop) for prop in self.GLASS}
+
+    def test_the_credits_bar_paints_the_same_glass_as_the_site_header(self):
+        self.assertEqual(self.glass(".credits-screen-header {"),
+                         self.glass(".site-header {"),
+                         "the credits header drifted from the shared glass")
+        # The specific regression: it used to paint its own translucent
+        # gradient instead of consuming the header tokens.
+        self.assertNotIn("gradient",
+                         self.decl(self.rule(".credits-screen-header {"), "background"))
+        for token in ("--header-glass-rgb", "--header-glass-alpha",
+                      "--header-glass-edge-rgb", "--header-glass-sheen-rgb",
+                      "--header-glass-shadow-rgb"):
+            with self.subTest(token=token):
+                self.assertIn(f"var({token})", self.rule(".credits-screen-header {"))
+
+    def test_the_specular_hairline_is_shared_too(self):
+        site = self.rule(".site-header::after {")
+        credits = self.rule(".credits-screen-header::after {")
+        self.assertEqual(self.decl(credits, "background"), self.decl(site, "background"))
+        self.assertEqual(self.decl(credits, "height"), "1px")
+        self.assertEqual(self.decl(credits, "inset"), "0 0 auto 0")
+
+    def test_no_page_hardcodes_a_header_height(self):
+        credits = self.rule(".credits-screen-header {")
+        self.assertEqual(self.decl(credits, "height"), "var(--header-h)",
+                         "the credits bar must follow the same height token")
+        site = self.rule(".site-header {")
+        self.assertEqual(self.decl(site, "height"), "var(--header-h)",
+                         "without an explicit height the 1px border sat outside "
+                         "the nav's --header-h box, so the bars differed by 1px")
+        # The nav fills that content box instead of re-declaring --header-h and
+        # overflowing it by the border width.
+        self.assertEqual(self.decl(self.rule(".nav {"), "height"), "100%")
+        mobile = self.css[self.css.index("@media (max-width: 768px)"):]
+        start = mobile.index(".credits-screen-header {")
+        body = mobile[mobile.index("{", start) + 1:mobile.index("}", start)]
+        self.assertIsNone(self.decl(body, "height"),
+                          "a hardcoded mobile height reintroduces the 4px jump")
+
+    def test_the_glass_tokens_exist_in_both_themes(self):
+        def tokens(light):
+            if light:
+                block = re.search(
+                    r"@media \(prefers-color-scheme: light\)\s*\{\s*:root\s*\{(.*?)\n\s*\}\s*\n\}",
+                    self.css, re.S).group(1)
+            else:
+                block = re.search(r"(?m)^:root\s*\{(.*?)^\}", self.css, re.S).group(1)
+            out = {}
+            for decl in block.split(";"):
+                decl = " ".join(decl.split())
+                if decl.startswith("--") and ":" in decl:
+                    key, value = decl.split(":", 1)
+                    out[key.strip()] = value.strip()
+            return out
+
+        dark, light = tokens(False), tokens(True)
+        for token in ("--header-glass-rgb", "--header-glass-alpha",
+                      "--header-glass-alpha-scrolled", "--header-glass-edge-rgb",
+                      "--header-glass-sheen-rgb", "--header-glass-shadow-rgb"):
+            with self.subTest(token=token):
+                self.assertIn(token, dark, "the dark theme lost a glass token")
+                self.assertIn(token, light,
+                              "the light theme inherits a colour built for black glass")
+        self.assertNotEqual(dark["--header-glass-rgb"], light["--header-glass-rgb"])
+
+
+class MotionTokens(unittest.TestCase):
+    """One easing curve for every state change on the site."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.css = _strip_css_comments((ROOT / "style.css").read_text())
+
+    def test_the_shared_curve_is_the_review_curve(self):
+        self.assertIn("--ease: cubic-bezier(0.22, 1, 0.36, 1);", self.css)
+
+    def test_no_transition_falls_back_to_the_browser_easing(self):
+        """A bare `ease` is the giveaway: the property was added without the
+        shared timing function, so it decelerates differently from everything
+        beside it. 42 of these existed before the cleanup."""
+        for match in re.finditer(r"transition:([^;]+);", self.css):
+            with self.subTest(declaration=match.group(1).strip()[:90]):
+                self.assertIsNone(
+                    re.search(r"(?<![\w-])ease(?![\w-])", match.group(1)),
+                    "a transition still uses the browser's default easing")
+        self.assertGreaterEqual(self.css.count("var(--ease)"), 70)
+
+
+class CursorContract(unittest.TestCase):
+    """The lens must feel attached to the pointer and must not alter targets.
+
+    These are source contracts because the effect is media-gated: a headless
+    check on a fine-pointer desktop can exercise the paint loop, but it cannot
+    prove that a touchscreen never gets a second cursor. Both halves are pinned.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.css = _strip_css_comments((ROOT / "style.css").read_text())
+        cls.app = (ROOT / "app.js").read_text()
+        start = cls.app.index("function initCursor()")
+        end = cls.app.index("function initAmbientExperience()")
+        cls.js = cls.app[start:end]
+
+    def rule(self, selector):
+        start = self.css.index(selector)
+        brace = self.css.index("{", start)
+        return self.css[brace + 1:self.css.index("}", brace)]
+
+    def test_the_lens_tracks_the_pointer_without_interpolation(self):
+        self.assertNotIn("LERP", self.js,
+                         "a lerp is a permanent visible lag behind the pointer")
+        self.assertIn("state.x = state.tx;", self.js)
+        self.assertIn("state.y = state.ty;", self.js)
+        self.assertIn("translate3d(", self.js,
+                      "the paint must be a compositor-only transform")
+        self.assertIn("requestAnimationFrame", self.js,
+                      "pointer moves must still coalesce to one write per frame")
+
+    def test_the_lens_is_disabled_for_touch_and_reduced_motion(self):
+        self.assertIn("matchMedia('(hover: hover) and (pointer: fine)')", self.js)
+        self.assertIn("!finePointer.matches || reduceMotion()", self.js,
+                      "the JS must not opt in on a coarse pointer or reduced motion")
+        self.assertIn("display: none", self.rule(".cursor-lens {"),
+                      "the lens must be invisible before JS opts in")
+        gate = "@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)"
+        self.assertIn(gate, self.css,
+                      "the effect rules must be media-gated, not class-gated alone")
+        kill = "@media (hover: none), (pointer: coarse), (prefers-reduced-motion: reduce)"
+        self.assertIn(kill, self.css)
+        tail = self.css[self.css.index(kill):]
+        self.assertIn(".cursor-lens {", tail)
+        self.assertIn("display: none !important;", tail.split(".cursor-lens {", 1)[1])
+
+    def test_text_may_bend_but_controls_never_move(self):
+        # Two selectors, two effects.
+        self.assertIn("var textSelector", self.js)
+        self.assertIn("var surfaceSelector", self.js)
+        surface = re.search(r"var surfaceSelector = '([^']+)'", self.js).group(1)
+        for name in ("a", "button"):
+            self.assertIn(name, surface)
+        text = re.search(r"var textSelector = '([^']+)'", self.js).group(1)
+        for name in ("h1", "p", "li"):
+            self.assertIn(name, text)
+        self.assertNotRegex(text, r"(^|,\s*)a($|,)",
+                            "links must not take the geometric warp")
+        self.assertIn("is-cursor-glint", self.js)
+        self.assertIn("is-cursor-warp", self.js)
+        glint = self.rule("body.has-custom-cursor .is-cursor-glint {")
+        self.assertIn("text-shadow", glint)
+        self.assertNotIn("rotate", glint,
+                         "a hovered link must not rotate under the lens")
+        self.assertNotIn("scale", glint,
+                         "a hovered link must not scale under the lens")
+
+    def test_the_lens_stays_small_and_never_hit_tests(self):
+        self.assertIn("pointer-events: none;", self.rule(".cursor-lens {"))
+        lens = self.rule("body.has-custom-cursor .cursor-lens {")
+        self.assertIn("width: 36px", lens)
+        self.assertIn("height: 36px", lens)
+        target = self.rule("body.has-custom-cursor .cursor-lens.is-target {")
+        self.assertIn("width: 46px", target)
+        pressed = self.rule("body.has-custom-cursor .cursor-lens.is-pressed {")
+        self.assertIn("width: 54px", pressed)
 
 
 class StylesheetIntegrity(unittest.TestCase):
